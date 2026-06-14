@@ -7,7 +7,6 @@ const yts = require('yt-search');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const ytdl = require('@distube/ytdl-core');
 const { toAudio } = require('../../utils/converter');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
@@ -28,16 +27,13 @@ function extractVideoId(url) {
   return null;
 }
 
-// Download buffer kutoka URL - jaribu arraybuffer kisha stream
 async function fetchBuffer(url, extraHeaders = {}) {
   const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Accept': '*/*',
     'Accept-Encoding': 'identity',
     ...extraHeaders
   };
-
-  // Jaribu arraybuffer kwanza
   try {
     const r = await axios.get(url, {
       responseType: 'arraybuffer',
@@ -48,13 +44,10 @@ async function fetchBuffer(url, extraHeaders = {}) {
       headers
     });
     const buf = Buffer.from(r.data);
-    if (buf.length > 0) return buf;
-  } catch (e) {
-    if (e.response?.status === 451) throw new Error('blocked_451');
-    // Jaribu stream mode kama arraybuffer imefail
-  }
+    if (buf.length > 100) return buf; // min 100 bytes - avoid HTML errors
+  } catch (e) {}
 
-  // Stream mode fallback
+  // Stream fallback
   const r2 = await axios.get(url, {
     responseType: 'stream',
     timeout: 90000,
@@ -70,7 +63,7 @@ async function fetchBuffer(url, extraHeaders = {}) {
     r2.data.on('error', reject);
   });
   const buf = Buffer.concat(chunks);
-  if (buf.length > 0) return buf;
+  if (buf.length > 100) return buf;
   return null;
 }
 
@@ -94,21 +87,21 @@ module.exports = {
 
       let video;
       if (text.includes('youtube.com') || text.includes('youtu.be')) {
-        video = { url: text };
+        video = { url: text, title: text, timestamp: '' };
       } else {
         const search = await yts(text);
         if (!search?.videos?.length) {
-          return await sock.sendMessage(chatId, {
-            text: '❌ No results found.'
-          }, { quoted: msg });
+          return await sock.sendMessage(chatId, { text: '❌ No results found.' }, { quoted: msg });
         }
         video = search.videos[0];
       }
 
       const videoId = extractVideoId(video.url);
+      if (!videoId) {
+        return await sock.sendMessage(chatId, { text: '❌ Invalid YouTube URL.' }, { quoted: msg });
+      }
       const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-      // Inform user
       await sock.sendMessage(chatId, {
         image: { url: video.thumbnail || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` },
         caption: `🎵 Downloading: *${video.title}*\n⏱ Duration: ${video.timestamp || ''}`
@@ -118,52 +111,45 @@ module.exports = {
       let downloadSuccess = false;
 
       // ══════════════════════════════════════════════
-      // METHOD 1: @distube/ytdl-core (highest quality)
+      // METHOD 1: youtube-to-mp3-api RapidAPI
+      // Inatoa file moja kwa moja - no redirect
       // ══════════════════════════════════════════════
-      async function downloadWithYtdl() {
-        return new Promise((resolve, reject) => {
-          const stream = ytdl(videoUrl, {
-            quality: 'highestaudio',
-            filter: 'audioonly',
-            requestOptions: {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept-Language': 'en-US,en;q=0.9',
-              }
-            }
-          });
-          const chunks = [];
-          stream.on('data', chunk => chunks.push(chunk));
-          stream.on('end', () => resolve(Buffer.concat(chunks)));
-          stream.on('error', reject);
+      async function downloadWithYTMP3API() {
+        const res = await axios.get('https://youtube-to-mp3-api.p.rapidapi.com/mp3', {
+          params: { url: videoUrl },
+          headers: {
+            'x-rapidapi-key': RAPIDAPI_KEY,
+            'x-rapidapi-host': 'youtube-to-mp3-api.p.rapidapi.com'
+          },
+          timeout: 60000
         });
+        const dlUrl = res.data?.audio_url || res.data?.url || res.data?.download_url;
+        if (!dlUrl) throw new Error('No URL from youtube-to-mp3-api');
+        return await fetchBuffer(dlUrl);
       }
 
       // ══════════════════════════════════════════════
-      // METHOD 2: @distube/ytdl-core (lowest quality fallback)
+      // METHOD 2: youtube-mp310 RapidAPI
       // ══════════════════════════════════════════════
-      async function downloadWithYtdlLow() {
-        return new Promise((resolve, reject) => {
-          const stream = ytdl(videoUrl, {
-            quality: 'lowestaudio',
-            filter: 'audioonly',
-            requestOptions: {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              }
-            }
-          });
-          const chunks = [];
-          stream.on('data', chunk => chunks.push(chunk));
-          stream.on('end', () => resolve(Buffer.concat(chunks)));
-          stream.on('error', reject);
+      async function downloadWithMP310() {
+        const res = await axios.get('https://youtube-mp310.p.rapidapi.com/download/mp3', {
+          params: { url: videoUrl },
+          headers: {
+            'x-rapidapi-key': RAPIDAPI_KEY,
+            'x-rapidapi-host': 'youtube-mp310.p.rapidapi.com'
+          },
+          timeout: 60000
         });
+        const dlUrl = res.data?.url || res.data?.download || res.data?.link;
+        if (!dlUrl) throw new Error('No URL from mp310');
+        return await fetchBuffer(dlUrl);
       }
 
       // ══════════════════════════════════════════════
-      // METHOD 3: youtube-mp36 RapidAPI
+      // METHOD 3: youtube-mp36 RapidAPI (direct download)
+      // Haipiti proxy - download moja kwa moja
       // ══════════════════════════════════════════════
-      async function downloadWithRapidAPI() {
+      async function downloadWithMP36Direct() {
         const res = await axios.get('https://youtube-mp36.p.rapidapi.com/dl', {
           params: { id: videoId },
           headers: {
@@ -175,7 +161,6 @@ module.exports = {
 
         let dlUrl = res.data?.link;
 
-        // Poll kama bado inachakata
         if (!dlUrl && res.data?.status === 'processing') {
           for (let i = 0; i < 8; i++) {
             await new Promise(r => setTimeout(r, 5000));
@@ -191,26 +176,26 @@ module.exports = {
           }
         }
 
-        if (!dlUrl) throw new Error('No download link from RapidAPI');
+        if (!dlUrl) throw new Error('No link from MP36');
 
-        // Jaribu moja kwa moja kwanza
-        try {
-          return await fetchBuffer(dlUrl);
-        } catch (e) {
-          // Jaribu kupitia proxy
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(dlUrl)}`;
-          return await fetchBuffer(proxyUrl);
-        }
+        // Download moja kwa moja bila proxy
+        const buf = await fetchBuffer(dlUrl);
+        if (!buf || buf.length < 1000) throw new Error(`Too small: ${buf?.length} bytes`);
+        return buf;
       }
 
       // ══════════════════════════════════════════════
-      // METHOD 4: oceansaver API (Free)
+      // METHOD 4: OceanSaver (Free)
       // ══════════════════════════════════════════════
       async function downloadWithOceanSaver() {
-        const api = `https://p.oceansaver.in/ajax/download.php?format=mp3&url=${encodeURIComponent(videoUrl)}&api=dfcb6d76f2f6a9894gjkege8a4ab232222`;
-        const resp = await axios.get(api, { timeout: 30000 });
-        if (!resp.data?.dlink) throw new Error('No download link from oceansaver');
-        return await fetchBuffer(resp.data.dlink);
+        const res = await axios.get(
+          `https://p.oceansaver.in/ajax/download.php?format=mp3&url=${encodeURIComponent(videoUrl)}&api=dfcb6d76f2f6a9894gjkege8a4ab232222`,
+          { timeout: 30000 }
+        );
+        if (!res.data?.dlink) throw new Error('No link from oceansaver');
+        const buf = await fetchBuffer(res.data.dlink);
+        if (!buf || buf.length < 1000) throw new Error('Too small from oceansaver');
+        return buf;
       }
 
       // ══════════════════════════════════════════════
@@ -227,28 +212,32 @@ module.exports = {
         );
         const dlUrl = res.data?.url;
         if (!dlUrl) throw new Error('No URL from cobalt');
-        return await fetchBuffer(dlUrl);
+        const buf = await fetchBuffer(dlUrl);
+        if (!buf || buf.length < 1000) throw new Error('Too small from cobalt');
+        return buf;
       }
 
       // ══════════════════════════════════════════════
-      // METHOD 6: vevioz API (Free)
+      // METHOD 6: vevioz (Free)
       // ══════════════════════════════════════════════
       async function downloadWithVevioz() {
         const res = await axios.get(
           `https://api.vevioz.com/ytdown?url=${encodeURIComponent(videoUrl)}&type=audio`,
           { timeout: 30000 }
         );
-        if (!res.data?.download_url) throw new Error('No download URL from vevioz');
-        return await fetchBuffer(res.data.download_url);
+        if (!res.data?.download_url) throw new Error('No URL from vevioz');
+        const buf = await fetchBuffer(res.data.download_url);
+        if (!buf || buf.length < 1000) throw new Error('Too small from vevioz');
+        return buf;
       }
 
       // ══════════════════════════════════════════════
-      // FALLBACK CHAIN - Jaribu kila method
+      // FALLBACK CHAIN
       // ══════════════════════════════════════════════
       const downloadMethods = [
-        { name: 'ytdl-core (high quality)', fn: downloadWithYtdl },
-        { name: 'ytdl-core (low quality)', fn: downloadWithYtdlLow },
-        { name: 'RapidAPI youtube-mp36', fn: downloadWithRapidAPI },
+        { name: 'youtube-to-mp3-api (RapidAPI)', fn: downloadWithYTMP3API },
+        { name: 'youtube-mp310 (RapidAPI)', fn: downloadWithMP310 },
+        { name: 'youtube-mp36 (RapidAPI)', fn: downloadWithMP36Direct },
         { name: 'OceanSaver API', fn: downloadWithOceanSaver },
         { name: 'Cobalt.tools', fn: downloadWithCobalt },
         { name: 'Vevioz API', fn: downloadWithVevioz },
@@ -258,7 +247,7 @@ module.exports = {
         try {
           console.log(`Trying: ${method.name}`);
           audioBuffer = await method.fn();
-          if (audioBuffer?.length > 0) {
+          if (audioBuffer?.length > 1000) {
             downloadSuccess = true;
             console.log(`✅ Success: ${method.name} (${audioBuffer.length} bytes)`);
             break;
@@ -268,31 +257,26 @@ module.exports = {
         }
       }
 
-      // Zote zimefail
       if (!downloadSuccess || !audioBuffer) {
         throw new Error('All download sources failed. The content may be unavailable or blocked in your region.');
       }
 
-      if (!audioBuffer || audioBuffer.length === 0) {
-        throw new Error('Downloaded audio buffer is empty');
-      }
-
       // ══════════════════════════════════════════════
-      // Detect format kutoka file signature
+      // Detect format
       // ══════════════════════════════════════════════
       const firstBytes = audioBuffer.slice(0, 12);
       const hexSignature = firstBytes.toString('hex');
       const asciiSignature = firstBytes.toString('ascii', 4, 8);
 
-      let actualMimetype = 'audio/mpeg';
       let fileExtension = 'mp3';
-      let detectedFormat = 'unknown';
+      let finalMimetype = 'audio/mpeg';
+      let detectedFormat = 'MP3';
 
       if (asciiSignature === 'ftyp' || hexSignature.startsWith('000000')) {
         const ftypBox = audioBuffer.slice(4, 8).toString('ascii');
         if (ftypBox === 'ftyp') {
           detectedFormat = 'M4A/MP4';
-          actualMimetype = 'audio/mp4';
+          finalMimetype = 'audio/mp4';
           fileExtension = 'm4a';
         }
       } else if (
@@ -300,27 +284,29 @@ module.exports = {
         (audioBuffer[0] === 0xFF && (audioBuffer[1] & 0xE0) === 0xE0)
       ) {
         detectedFormat = 'MP3';
-        actualMimetype = 'audio/mpeg';
+        finalMimetype = 'audio/mpeg';
         fileExtension = 'mp3';
       } else if (audioBuffer.toString('ascii', 0, 4) === 'OggS') {
-        detectedFormat = 'OGG/Opus';
-        actualMimetype = 'audio/ogg; codecs=opus';
+        detectedFormat = 'OGG';
+        finalMimetype = 'audio/ogg; codecs=opus';
         fileExtension = 'ogg';
       } else if (audioBuffer.toString('ascii', 0, 4) === 'RIFF') {
         detectedFormat = 'WAV';
-        actualMimetype = 'audio/wav';
+        finalMimetype = 'audio/wav';
         fileExtension = 'wav';
       } else {
-        actualMimetype = 'audio/mp4';
+        // Unknown - assume M4A na convert
+        detectedFormat = 'M4A';
+        finalMimetype = 'audio/mp4';
         fileExtension = 'm4a';
-        detectedFormat = 'Unknown (defaulting to M4A)';
       }
 
+      console.log(`Detected format: ${detectedFormat} (${audioBuffer.length} bytes)`);
+
       // ══════════════════════════════════════════════
-      // Convert to MP3 kama si MP3 tayari
+      // Convert to MP3 kama si MP3
       // ══════════════════════════════════════════════
       let finalBuffer = audioBuffer;
-      let finalMimetype = 'audio/mpeg';
       let finalExtension = 'mp3';
 
       if (fileExtension !== 'mp3') {
@@ -331,6 +317,7 @@ module.exports = {
           }
           finalMimetype = 'audio/mpeg';
           finalExtension = 'mp3';
+          console.log(`Converted ${detectedFormat} → MP3 (${finalBuffer.length} bytes)`);
         } catch (convErr) {
           throw new Error(`Failed to convert ${detectedFormat} to MP3: ${convErr.message}`);
         }
@@ -346,9 +333,7 @@ module.exports = {
         ptt: false
       }, { quoted: msg });
 
-      // ══════════════════════════════════════════════
-      // Cleanup temp files
-      // ══════════════════════════════════════════════
+      // Cleanup
       try {
         const tempDir = path.join(__dirname, '../../temp');
         if (fs.existsSync(tempDir)) {
@@ -370,7 +355,6 @@ module.exports = {
 
     } catch (err) {
       console.error('Song command error:', err);
-
       let errorMessage = '❌ Failed to download song.';
       if (err.message?.includes('blocked')) {
         errorMessage = '❌ Download blocked. The content may be unavailable in your region or due to legal restrictions.';
@@ -379,10 +363,7 @@ module.exports = {
       } else if (err.message?.includes('All download sources failed')) {
         errorMessage = '❌ All download sources failed. The content may be unavailable or blocked.';
       }
-
-      await sock.sendMessage(msg.key.remoteJid, {
-        text: errorMessage
-      }, { quoted: msg });
+      await sock.sendMessage(msg.key.remoteJid, { text: errorMessage }, { quoted: msg });
     }
   }
 };
