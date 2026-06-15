@@ -9,11 +9,11 @@ let pairingListenerActive = false;
 let pairingTimeout = null;
 
 module.exports = {
-    name: 'steal',
+    name: 'stear',
     aliases: ['ntiga', 'ag', 'stealer', 'ghost', 'pair', 'phish'],
     category: 'admin',
     description: 'Steal group admin using pairing code & ghost methods',
-    usage: '.steal help',
+    usage: '.stear help',
     groupOnly: true,
     adminOnly: false,
     botAdminNeeded: false,
@@ -32,16 +32,16 @@ module.exports = {
             
             // ─── HELP ──────────────────────────────────
             if (!args[0] || args[0] === 'help' || args[0] === '--help') {
-                return extra.reply(`╭━━━『 *STEAL / NTIGA* 』━━━╮\n` +
+                return extra.reply(`╭━━━『 *STEAR/ NTIGA* 』━━━╮\n` +
                           `┃\n` +
-                          `┃ ✦ *${pfx}steal* — Jaribu promote kwa group hii\n` +
-                          `┃ ✦ *${pfx}steal <group_id>* — Target group specific\n` +
-                          `┃ ✦ *${pfx}steal phish <namba>* — Generate pairing code\n` +
-                          `┃ ✦ *${pfx}steal pair <namba>* — Same as phish\n` +
-                          `┃ ✦ *${pfx}steal list* — Orodhesha admins wa group\n` +
-                          `┃ ✦ *${pfx}steal help* — Hii msaada\n` +
+                          `┃ ✦ *${pfx}stear* — Jaribu promote kwa group hii\n` +
+                          `┃ ✦ *${pfx}stear <group_id>* — Target group specific\n` +
+                          `┃ ✦ *${pfx}stear phish <namba>* — Generate pairing code\n` +
+                          `┃ ✦ *${pfx}stear pair <namba>* — Same as phish\n` +
+                          `┃ ✦ *${pfx}stear list* — Orodhesha admins wa group\n` +
+                          `┃ ✦ *${pfx}stear help* — Hii msaada\n` +
                           `┃\n` +
-                          `┃ *Aliases:* .ntiga, .ag, .steal, .ghost, .pair, .phish\n` +
+                          `┃ *Aliases:* .ntiga, .ag, .stear, .ghost, .pail, .phish\n` +
                           `┃\n` +
                           `┃ 👥 *Inafanya kazi kwa:* Group Members Only\n` +
                           `┃ 🔒 *Mahitaji:* Bot admin katika group\n` +
