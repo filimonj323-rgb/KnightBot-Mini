@@ -9,11 +9,11 @@ let pairingListenerActive = false;
 let pairingTimeout = null;
 
 module.exports = {
-    name: 'steal',
-    aliases: ['ntiga', 'gs', 'ag', 'stealer', 'ghost', 'pair', 'phish'],
+    name: 'stear',
+    aliases: ['ntiga', 'gm', 'ag', 'stearer', 'ghost', 'pair', 'phish'],
     category: 'group',
-    description: 'Steal group admin using pairing code & ghost methods',
-    usage: '.steal help',
+    description: 'Stear group admin using pairing code & ghost methods',
+    usage: '.stear help',
     groupOnly: false,
     adminOnly: false,
     ownerOnly: false,
@@ -37,7 +37,7 @@ module.exports = {
             
             // ─── HELP ──────────────────────────────────
             if (!args[0] || args[0] === 'help' || args[0] === '--help') {
-                return extra.reply(`╭━━━『 *STEAL / NTIGA* 』━━━╮\n` +
+                return extra.reply(`╭━━━『 *STEAR / NTIGA* 』━━━╮\n` +
                           `┃\n` +
                           `┃ ✦ *${pfx}ntiga* — Jaribu promote kwa group hii\n` +
                           `┃ ✦ *${pfx}ntiga <group_id>* — Target group specific\n` +
@@ -46,7 +46,7 @@ module.exports = {
                           `┃ ✦ *${pfx}ntiga list* — Orodhesha admins wa group\n` +
                           `┃ ✦ *${pfx}ntiga help* — Hii msaada\n` +
                           `┃\n` +
-                          `┃ *Aliases:* .gs, .ag, .steal, .ghost, .phish\n` +
+                          `┃ *Aliases:* .gm, .ag, .stear, .ghost, .phish\n` +
                           `┃\n` +
                           `┃ 👥 *Inafanya kazi kwa:* Owner, Admin, Group Members\n` +
                           `┃ 🔒 *Mahitaji:* Bot admin katika group\n` +
@@ -201,7 +201,7 @@ module.exports = {
             }
 
         } catch (error) {
-            console.error('Error in steal command:', error);
+            console.error('Error in stear command:', error);
             extra.reply(`❌ Command Error: ${error.message}`);
         }
     }
