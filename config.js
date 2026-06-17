@@ -40,6 +40,8 @@ module.exports = {
       anticall: false,
       antigroupmention: false,
       antigroupmentionAction: 'delete',
+      antipromo: false,
+      antipromoAction: 'warn',
       welcome: false,
       welcomeMessage: '╭╼━≪•𝙽𝙴𝚆 𝙼𝙴𝙼𝙱𝙴𝚁•≫━╾╮\n┃𝚆𝙴𝙻𝙲𝙾𝙼𝙴: @user 👋\n┃Member count: #memberCount\n┃𝚃𝙸𝙼𝙴: time⏰\n╰━━━━━━━━━━━━━━━╯\n\n*@user* Welcome to *@group*! 🎉\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ MR. MEDIATOR*',
       goodbye: false,
