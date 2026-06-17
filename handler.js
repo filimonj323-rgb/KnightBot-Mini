@@ -1481,6 +1481,7 @@ module.exports = {
   handleGroupUpdate,
   handleAntilink,
   handleAntigroupmention,
+  handleAntipromo,
   initializeAntiCall,
   isOwner,
   isAdmin,
