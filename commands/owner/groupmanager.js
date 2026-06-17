@@ -31,6 +31,7 @@ module.exports = {
           `• .gm members <groupId> — Members wa group\n\n` +
           `*Security*\n` +
           `• .gm antilink <groupId> on/off\n` +
+          `• .gm antipromo <groupId> on/off\n` +
           `• .gm antispam <groupId> on/off\n` +
           `• .gm mute <groupId> on/off\n\n` +
           `*Members*\n` +
@@ -150,6 +151,26 @@ module.exports = {
       }
 
       // ══════════════════════════════════════
+      // ANTIPROMO - Washa/Zima antipromo
+      // ══════════════════════════════════════
+      if (opt === 'antipromo') {
+        const groupId = args[1];
+        const val = args[2]?.toLowerCase();
+        if (!groupId || !val) {
+          return extra.reply('❌ Tumia: .gm antipromo <groupId> on/off');
+        }
+
+        const database = require('../../database');
+        database.updateGroupSettings(groupId, { antipromo: val === 'on' });
+
+        const meta = await sock.groupMetadata(groupId);
+        return extra.reply(
+          `📢 *Antipromo - ${meta.subject}*\n\n` +
+          `Status: *${val === 'on' ? 'ON ✅ (Picha/video/ujumbe mrefu utafutwa)' : 'OFF ❌'}*`
+        );
+      }
+
+      // ══════════════════════════════════════
       // MUTE - Funga/Fungua group
       // ══════════════════════════════════════
       if (opt === 'mute') {
@@ -205,7 +226,7 @@ module.exports = {
       if (opt === 'demote') {
         const groupId = args[1];
         const number = args[2]?.replace(/[^0-9]/g, '');
-        if (!groupId || !val) {
+        if (!groupId || !number) {
           return extra.reply('❌ Tumia: .gm demote <groupId> <namba>');
         }
 
