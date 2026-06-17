@@ -418,6 +418,7 @@ async function startBot() {
             const groupMetadata = await handler.getGroupMetadata(sock, msg.key.remoteJid);
             if (groupMetadata) {
               await handler.handleAntilink(sock, msg, groupMetadata);
+            await handler.handleAntipromo(sock, msg, groupMetadata);
             }
           } catch (error) {
             // Silently handle
