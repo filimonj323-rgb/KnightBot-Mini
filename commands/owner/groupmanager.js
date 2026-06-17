@@ -139,9 +139,8 @@ module.exports = {
           return extra.reply('❌ Tumia: .gm antilink <groupId> on/off');
         }
 
-        if (!config.groupSettings) config.groupSettings = {};
-        if (!config.groupSettings[groupId]) config.groupSettings[groupId] = {};
-        config.groupSettings[groupId].antilink = val === 'on';
+        const database = require('../../database');
+        database.updateGroupSettings(groupId, { antilink: val === 'on' });
 
         const meta = await sock.groupMetadata(groupId);
         return extra.reply(
