@@ -1361,6 +1361,89 @@ const handleAntigroupmention = async (sock, msg, groupMetadata) => {
   }
 };
 
+// Anti-promo handler - inazuia matangazo (picha/video + ujumbe mrefu)
+const handleAntipromo = async (sock, msg, groupMetadata) => {
+  try {
+    const from = msg.key.remoteJid;
+    const sender = msg.key.participant || msg.key.remoteJid;
+
+    const groupSettings = database.getGroupSettings(from);
+    if (!groupSettings.antipromo) return;
+
+    // Usimguse admin au owner
+    const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
+    const senderIsOwner = isOwner(sender);
+    if (senderIsAdmin || senderIsOwner) return;
+
+    // Pata content (unwrap kama kwenye handleMessage)
+    const content = getMessageContent(msg) || msg.message;
+    if (!content) return;
+
+    const hasMedia = !!(content.imageMessage || content.videoMessage);
+
+    const body =
+      content.conversation ||
+      content.extendedTextMessage?.text ||
+      content.imageMessage?.caption ||
+      content.videoMessage?.caption ||
+      '';
+
+    // "Ujumbe mrefu" - threshold ya maneno/herufi inayoonyesha tangazo
+    const PROMO_LENGTH_THRESHOLD = 200; // herufi
+    const isLongText = body.trim().length >= PROMO_LENGTH_THRESHOLD;
+
+    // Ni promo tu kama: (picha/video) AU (ujumbe mrefu)
+    if (!hasMedia && !isLongText) return;
+
+    const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
+    if (!botIsAdmin) return; // bot lazima awe admin kufuta/kick
+
+    const action = (groupSettings.antipromoAction || 'warn').toLowerCase();
+
+    // Futa ujumbe daima
+    try {
+      await sock.sendMessage(from, { delete: msg.key });
+    } catch (e) {
+      console.error('Failed to delete message for antipromo:', e);
+    }
+
+    if (action === 'delete') {
+      // Futa tu, bila onyo
+      return;
+    }
+
+    // action === 'warn' -> futa + onyo + kick baada ya maxWarnings
+    const maxWarnings = groupSettings.antipromoMaxWarnings || config.maxWarnings || 3;
+    const warningData = database.addWarning(from, sender, 'Antipromo: matangazo (picha/ujumbe mrefu)');
+    const count = warningData.count;
+
+    if (count >= maxWarnings) {
+      try {
+        await sock.groupParticipantsUpdate(from, [sender], 'remove');
+        database.clearWarnings(from, sender);
+        await sock.sendMessage(from, {
+          text: `🚫 *Antipromo*\n\n@${sender.split('@')[0]} ametolewa kwenye group kwa kutuma matangazo mara ${maxWarnings}.`,
+          mentions: [sender]
+        });
+      } catch (e) {
+        console.error('Failed to kick for antipromo:', e);
+      }
+    } else {
+      try {
+        await sock.sendMessage(from, {
+          text: `⚠️ *Antipromo Detected!*\n\n@${sender.split('@')[0]}, tangazo limefutwa.\nOnyo: *${count}/${maxWarnings}*\n\nUkivuka kiwango, utatolewa kwenye group.`,
+          mentions: [sender]
+        });
+      } catch (e) {
+        console.error('Failed to send antipromo warning:', e);
+      }
+    }
+  } catch (error) {
+    console.error('Error in antipromo handler:', error);
+  }
+};
+
+
 
 // Anti-call feature initializer
 const initializeAntiCall = (sock) => {
