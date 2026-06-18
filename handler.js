@@ -1361,7 +1361,7 @@ const handleAntigroupmention = async (sock, msg, groupMetadata) => {
   }
 };
 
-// Anti-promo handler - inazuia matangazo (picha/video + ujumbe mrefu)
+// Anti-promo handler - inazuia matangazo (picha/video/sticker/view-once + ujumbe mrefu)
 const handleAntipromo = async (sock, msg, groupMetadata) => {
   try {
     const from = msg.key.remoteJid;
@@ -1375,11 +1375,31 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
     const senderIsOwner = isOwner(sender);
     if (senderIsAdmin || senderIsOwner) return;
 
+    // Pata content RAW kwanza (kabla ya unwrap) kuangalia view-once wrapper
+    const rawContent = msg.message;
+    if (!rawContent) return;
+
+    // Tambua view-once wrapper (viewOnceMessage / viewOnceMessageV2 / viewOnceMessageV2Extension)
+    const isViewOnceWrapper = !!(
+      rawContent.viewOnceMessage ||
+      rawContent.viewOnceMessageV2 ||
+      rawContent.viewOnceMessageV2Extension
+    );
+
     // Pata content (unwrap kama kwenye handleMessage)
-    const content = getMessageContent(msg) || msg.message;
+    const content = getMessageContent(msg) || rawContent;
     if (!content) return;
 
-    const hasMedia = !!(content.imageMessage || content.videoMessage);
+    const hasImageOrVideo = !!(content.imageMessage || content.videoMessage);
+    const hasSticker = !!content.stickerMessage;
+
+    // viewOnce flag pia inaweza kuwa moja kwa moja kwenye imageMessage/videoMessage
+    const hasInlineViewOnce = !!(
+      content.imageMessage?.viewOnce ||
+      content.videoMessage?.viewOnce
+    );
+
+    const isViewOnce = isViewOnceWrapper || hasInlineViewOnce;
 
     const body =
       content.conversation ||
@@ -1388,12 +1408,19 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
       content.videoMessage?.caption ||
       '';
 
-    // "Ujumbe mrefu" - threshold ya maneno/herufi inayoonyesha tangazo
+    // "Ujumbe mrefu" - threshold ya herufi inayoonyesha tangazo
     const PROMO_LENGTH_THRESHOLD = 200; // herufi
     const isLongText = body.trim().length >= PROMO_LENGTH_THRESHOLD;
 
-    // Ni promo tu kama: (picha/video) AU (ujumbe mrefu)
-    if (!hasMedia && !isLongText) return;
+    // Ni promo kama: picha/video, sticker, view-once, AU ujumbe mrefu
+    const isPromo = hasImageOrVideo || hasSticker || isViewOnce || isLongText;
+    if (!isPromo) return;
+
+    // Tambua sababu kwa ajili ya ujumbe wa onyo
+    let reason = 'Ujumbe mrefu';
+    if (isViewOnce) reason = 'View-once';
+    else if (hasSticker) reason = 'Sticker';
+    else if (hasImageOrVideo) reason = 'Picha/Video';
 
     const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
     if (!botIsAdmin) return; // bot lazima awe admin kufuta/kick
@@ -1414,7 +1441,7 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
 
     // action === 'warn' -> futa + onyo + kick baada ya maxWarnings
     const maxWarnings = groupSettings.antipromoMaxWarnings || config.maxWarnings || 3;
-    const warningData = database.addWarning(from, sender, 'Antipromo: matangazo (picha/ujumbe mrefu)');
+    const warningData = database.addWarning(from, sender, `Antipromo: ${reason}`);
     const count = warningData.count;
 
     if (count >= maxWarnings) {
@@ -1422,7 +1449,7 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
         await sock.groupParticipantsUpdate(from, [sender], 'remove');
         database.clearWarnings(from, sender);
         await sock.sendMessage(from, {
-          text: `🚫 *Antipromo*\n\n@${sender.split('@')[0]} ametolewa kwenye group kwa kutuma matangazo mara ${maxWarnings}.`,
+          text: `🚫 *Antipromo*\n\n@${sender.split('@')[0]} ametolewa kwenye group kwa kutuma matangazo (${reason}) mara ${maxWarnings}.`,
           mentions: [sender]
         });
       } catch (e) {
@@ -1431,7 +1458,7 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
     } else {
       try {
         await sock.sendMessage(from, {
-          text: `⚠️ *Antipromo Detected!*\n\n@${sender.split('@')[0]}, tangazo limefutwa.\nOnyo: *${count}/${maxWarnings}*\n\nUkivuka kiwango, utatolewa kwenye group.`,
+          text: `⚠️ *Antipromo Detected!* (${reason})\n\n@${sender.split('@')[0]}, ujumbe umefutwa.\nOnyo: *${count}/${maxWarnings}*\n\nUkivuka kiwango, utatolewa kwenye group.`,
           mentions: [sender]
         });
       } catch (e) {
