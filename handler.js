@@ -1375,19 +1375,24 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
     const senderIsOwner = isOwner(sender);
     if (senderIsAdmin || senderIsOwner) return;
 
-    // Pata content RAW kwanza (kabla ya unwrap) kuangalia view-once wrapper
+    // Pata content RAW kwanza (kabla ya unwrap kamili)
     const rawContent = msg.message;
     if (!rawContent) return;
 
+    // Vua ephemeral wrapper kwanza (view-once mara nyingi huwa NDANI ya ephemeralMessage,
+    // hivyo kuangalia rawContent moja kwa moja kunakosa view-once hizo)
+    let m = rawContent;
+    if (m.ephemeralMessage) m = m.ephemeralMessage.message;
+
     // Tambua view-once wrapper (viewOnceMessage / viewOnceMessageV2 / viewOnceMessageV2Extension)
     const isViewOnceWrapper = !!(
-      rawContent.viewOnceMessage ||
-      rawContent.viewOnceMessageV2 ||
-      rawContent.viewOnceMessageV2Extension
+      m.viewOnceMessage ||
+      m.viewOnceMessageV2 ||
+      m.viewOnceMessageV2Extension
     );
 
-    // Pata content (unwrap kama kwenye handleMessage)
-    const content = getMessageContent(msg) || rawContent;
+    // Pata content (unwrap kamili kama kwenye handleMessage)
+    const content = getMessageContent(msg) || m;
     if (!content) return;
 
     const hasImageOrVideo = !!(content.imageMessage || content.videoMessage);
