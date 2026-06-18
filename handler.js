@@ -659,6 +659,15 @@ const handleMessage = async (sock, msg) => {
       }
     }
     
+    // Anti-promo protection (view-once, picha/video, sticker, ujumbe mrefu)
+    if (isGroup) {
+      try {
+        await handleAntipromo(sock, msg, groupMetadata);
+      } catch (error) {
+        console.error('Error in antipromo handler:', error);
+      }
+    }
+    
     // AutoSticker feature - convert images/videos to stickers automatically
     if (isGroup) { // Process all messages in groups (including bot's own messages)
       const groupSettings = database.getGroupSettings(from);
@@ -1379,32 +1388,49 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
     const rawContent = msg.message;
     if (!rawContent) return;
 
-    // Vua ephemeral wrapper kwanza (view-once mara nyingi huwa NDANI ya ephemeralMessage,
-    // hivyo kuangalia rawContent moja kwa moja kunakosa view-once hizo)
+    // Vua ephemeral wrapper kwanza (view-once mara nyingi huwa NDANI ya ephemeralMessage)
     let m = rawContent;
     if (m.ephemeralMessage) m = m.ephemeralMessage.message;
 
-    // Tambua view-once wrapper (viewOnceMessage / viewOnceMessageV2 / viewOnceMessageV2Extension)
-    const isViewOnceWrapper = !!(
+    // ── Utambuzi wa view-once: njia ZOTE za WhatsApp multi-device ──
+
+    // Njia 1: Wrapper juu ya ephemeral (rawContent mzima)
+    const isViewOnceRaw = !!(
+      rawContent.viewOnceMessage ||
+      rawContent.viewOnceMessageV2 ||
+      rawContent.viewOnceMessageV2Extension
+    );
+
+    // Njia 2: Wrapper baada ya kuvua ephemeral (ndio kawaida kwa groups zenye disappearing)
+    const isViewOnceEphemeral = !!(
       m.viewOnceMessage ||
       m.viewOnceMessageV2 ||
       m.viewOnceMessageV2Extension
     );
 
-    // Pata content (unwrap kamili kama kwenye handleMessage)
+    // Pata content iliyovuliwa kabisa (getMessageContent hufungua wrappers zote)
     const content = getMessageContent(msg) || m;
     if (!content) return;
 
-    const hasImageOrVideo = !!(content.imageMessage || content.videoMessage);
-    const hasSticker = !!content.stickerMessage;
-
-    // viewOnce flag pia inaweza kuwa moja kwa moja kwenye imageMessage/videoMessage
+    // Njia 3: Flag ya viewOnce moja kwa moja ndani ya imageMessage / videoMessage
     const hasInlineViewOnce = !!(
       content.imageMessage?.viewOnce ||
       content.videoMessage?.viewOnce
     );
 
-    const isViewOnce = isViewOnceWrapper || hasInlineViewOnce;
+    // Njia 4: Angalia ndani ya viewOnceMessageV2Extension kwa kina
+    const deepViewOnceCheck = !!(
+      rawContent.viewOnceMessageV2Extension?.message?.imageMessage ||
+      rawContent.viewOnceMessageV2Extension?.message?.videoMessage ||
+      m.viewOnceMessageV2Extension?.message?.imageMessage ||
+      m.viewOnceMessageV2Extension?.message?.videoMessage
+    );
+
+    // Hitimisho: view-once kama njia YOYOTE imefanikiwa
+    const isViewOnce = isViewOnceRaw || isViewOnceEphemeral || hasInlineViewOnce || deepViewOnceCheck;
+
+    const hasImageOrVideo = !!(content.imageMessage || content.videoMessage);
+    const hasSticker = !!content.stickerMessage;
 
     const body =
       content.conversation ||
