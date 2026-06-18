@@ -1388,6 +1388,10 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
     const rawContent = msg.message;
     if (!rawContent) return;
 
+    // ── DEBUG: Onesha muundo wa msg.message (ondoa baada ya kutatua tatizo) ──
+    console.log('[ANTIPROMO DEBUG] msg.message keys:', JSON.stringify(Object.keys(rawContent)));
+    console.log('[ANTIPROMO DEBUG] full structure:', JSON.stringify(rawContent, null, 2));
+
     // Vua ephemeral wrapper kwanza (view-once mara nyingi huwa NDANI ya ephemeralMessage)
     let m = rawContent;
     if (m.ephemeralMessage) m = m.ephemeralMessage.message;
