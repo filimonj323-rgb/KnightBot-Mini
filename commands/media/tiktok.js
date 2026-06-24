@@ -11,17 +11,10 @@ const processedMessages = new Set();
 
 // Extract TikTok URL from text
 function extractTikTokUrl(text) {
-  const patterns = [
-    /https?:\/\/(?:www\.)?tiktok\.com\/[^\s]+/,
-    /https?:\/\/(?:vm\.)?tiktok\.com\/[^\s]+/,
-    /https?:\/\/(?:vt\.)?tiktok\.com\/[^\s]+/,
-    /https?:\/\/(?:www\.)?tiktok\.com\/@[^\s]+/,
-    /https?:\/\/(?:www\.)?tiktok\.com\/t\/[^\s]+/,
-  ];
-  for (const p of patterns) {
-    const m = text.match(p);
-    if (m) return m[0];
-  }
+  // Pattern inayogundua TikTok URLs zote (vm, vt, www, n.k)
+  const pattern = /https?:\/\/(?:[a-z0-9]+\.)?tiktok\.com\/[^\s]*/i;
+  const m = text.match(pattern);
+  if (m) return m[0].replace(/[.,!?]+$/, ''); // Ondoa punctuation mwishoni
   return null;
 }
 
@@ -79,12 +72,16 @@ module.exports = {
       processedMessages.add(msg.key.id);
       setTimeout(() => processedMessages.delete(msg.key.id), 5 * 60 * 1000);
 
-      // Pata URL
-      const text = args.join(' ') ||
+      // Pata URL - soma message yote (command + link)
+      const fullText = 
         msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text || '';
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        args.join(' ') || '';
 
-      const url = extractTikTokUrl(text);
+      console.log('TikTok full text:', fullText);
+      const url = extractTikTokUrl(fullText);
+      console.log('TikTok extracted URL:', url);
 
       if (!url) {
         return await sock.sendMessage(chatId, {
@@ -108,11 +105,20 @@ module.exports = {
       if (!success) {
         try {
           console.log('TikTok API 1: tikwm...');
+          const params = new URLSearchParams();
+          params.append('url', url);
+          params.append('count', '12');
+          params.append('cursor', '0');
+          params.append('web', '1');
+          params.append('hd', '1');
           const res = await axios.post(
             'https://www.tikwm.com/api/',
-            { url, count: 12, cursor: 0, web: 1, hd: 1 },
+            params.toString(),
             {
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              headers: { 
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              },
               timeout: 30000
             }
           );
@@ -139,11 +145,53 @@ module.exports = {
       }
 
       // ══════════════════════════════════════
-      // API 2: musicaldown.com (Free - no watermark)
+      // API 2: tiktokio.com (No watermark)
       // ══════════════════════════════════════
       if (!success) {
         try {
-          console.log('TikTok API 2: musicaldown...');
+          console.log('TikTok API 2: tiktokio...');
+          const res = await axios.post(
+            'https://tiktokio.com/api/v1/tk-htmx',
+            new URLSearchParams({ prefix: 'https://www.tiktok.com/', url }).toString(),
+            {
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://tiktokio.com',
+                'Referer': 'https://tiktokio.com/',
+                'HX-Request': 'true',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              },
+              timeout: 20000
+            }
+          );
+          // Parse HTML response kupata download links
+          const html = res.data || '';
+          const dlMatch = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/);
+          const dlUrl = dlMatch?.[1];
+          if (dlUrl) {
+            const buf = await fetchBuffer(dlUrl);
+            if (buf && buf.length > 1000) {
+              await sock.sendMessage(chatId, {
+                video: buf,
+                mimetype: 'video/mp4',
+                caption: `*DOWNLOADED BY ${botName}*`
+              }, { quoted: msg });
+              success = true;
+              console.log('✅ API 2 (tiktokio) success!');
+            }
+          }
+        } catch (e) {
+          console.log('❌ API 2 (tiktokio) failed:', e.message);
+        }
+      }
+
+
+      // ══════════════════════════════════════
+      // API 3: musicaldown.com (Free - no watermark)
+      // ══════════════════════════════════════
+      if (!success) {
+        try {
+          console.log('TikTok API 3: musicaldown...');
           const res1 = await axios.post(
             'https://musicaldown.com/api/request',
             { link: url },
@@ -166,20 +214,20 @@ module.exports = {
                 caption: `*DOWNLOADED BY ${botName}*`
               }, { quoted: msg });
               success = true;
-              console.log('✅ API 2 success!');
+              console.log('✅ API 7 success!');
             }
           }
         } catch (e) {
-          console.log('❌ API 2 failed:', e.message);
+          console.log('❌ API 7 failed:', e.message);
         }
       }
 
       // ══════════════════════════════════════
-      // API 3: gifted-dls (kutoka package)
+      // API 4: gifted-dls (kutoka package)
       // ══════════════════════════════════════
       if (!success) {
         try {
-          console.log('TikTok API 3: gifted-dls...');
+          console.log('TikTok API 4: gifted-dls...');
           const { tiktok } = require('gifted-dls');
           const result = await tiktok(url);
           const dlUrl = result?.video || result?.url || result?.nowm;
@@ -192,20 +240,20 @@ module.exports = {
                 caption: `*DOWNLOADED BY ${botName}*${result?.title ? `\n\n📝 ${result.title}` : ''}`
               }, { quoted: msg });
               success = true;
-              console.log('✅ API 3 success!');
+              console.log('✅ API 7 success!');
             }
           }
         } catch (e) {
-          console.log('❌ API 3 failed:', e.message);
+          console.log('❌ API 7 failed:', e.message);
         }
       }
 
       // ══════════════════════════════════════
-      // API 4: api-dylux
+      // API 5: api-dylux
       // ══════════════════════════════════════
       if (!success) {
         try {
-          console.log('TikTok API 4: api-dylux...');
+          console.log('TikTok API 5: api-dylux...');
           const apiDylux = require('api-dylux');
           const result = await apiDylux.tiktok?.(url) || await apiDylux.ttdl?.(url);
           const dlUrl = result?.video || result?.url || result?.nowm || result?.download;
@@ -218,20 +266,20 @@ module.exports = {
                 caption: `*DOWNLOADED BY ${botName}*`
               }, { quoted: msg });
               success = true;
-              console.log('✅ API 4 success!');
+              console.log('✅ API 7 success!');
             }
           }
         } catch (e) {
-          console.log('❌ API 4 failed:', e.message);
+          console.log('❌ API 7 failed:', e.message);
         }
       }
 
       // ══════════════════════════════════════
-      // API 5: snaptik.app (Free)
+      // API 6: snaptik.app (Free)
       // ══════════════════════════════════════
       if (!success) {
         try {
-          console.log('TikTok API 5: snaptik...');
+          console.log('TikTok API 6: snaptik...');
           const res = await axios.post(
             'https://snaptik.app/abc2.php',
             `url=${encodeURIComponent(url)}`,
@@ -254,20 +302,20 @@ module.exports = {
                 caption: `*DOWNLOADED BY ${botName}*`
               }, { quoted: msg });
               success = true;
-              console.log('✅ API 5 success!');
+              console.log('✅ API 7 success!');
             }
           }
         } catch (e) {
-          console.log('❌ API 5 failed:', e.message);
+          console.log('❌ API 7 failed:', e.message);
         }
       }
 
       // ══════════════════════════════════════
-      // API 6: cobalt.tools (Free)
+      // API 7: cobalt.tools (Free)
       // ══════════════════════════════════════
       if (!success) {
         try {
-          console.log('TikTok API 6: cobalt.tools...');
+          console.log('TikTok API 7: cobalt.tools...');
           const https = require('https');
           const agent = new https.Agent({ rejectUnauthorized: false });
           const res = await axios.post(
@@ -289,11 +337,11 @@ module.exports = {
                 caption: `*DOWNLOADED BY ${botName}*`
               }, { quoted: msg });
               success = true;
-              console.log('✅ API 6 success!');
+              console.log('✅ API 7 success!');
             }
           }
         } catch (e) {
-          console.log('❌ API 6 failed:', e.message);
+          console.log('❌ API 7 failed:', e.message);
         }
       }
 
