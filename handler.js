@@ -1180,7 +1180,6 @@ const forwardDeletedToOwner = async (sock, msg, { groupMetadata, reason }) => {
       `👥 Group: ${groupName}\n` +
       `🕐 Time: ${new Date().toLocaleString('en-US', { timeZone: config.timezone || 'Africa/Dar_es_Salaam' })}`;
 
-    // Owner namba zote (array)
     const ownerNumbers = Array.isArray(config.ownerNumber) ? config.ownerNumber : [config.ownerNumber];
 
     for (const ownerNum of ownerNumbers) {
