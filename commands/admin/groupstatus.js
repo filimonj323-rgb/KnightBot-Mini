@@ -187,14 +187,27 @@ async function downloadMedia(msg, type) {
   return Buffer.concat(chunks);
 }
 
-async function groupStatus(sock, jid, content) {
+async function groupStatus(sock, jid, contentIn) {
+  const content = { ...contentIn };
   const { backgroundColor } = content;
   delete content.backgroundColor;
+
+  console.log('[groupStatus] content keys:', Object.keys(content));
+  if (content.image) console.log('[groupStatus] image buffer size:', content.image.length);
+  if (content.video) console.log('[groupStatus] video buffer size:', content.video.length);
+  if (content.audio) console.log('[groupStatus] audio buffer size:', content.audio.length);
 
   const inside = await generateWAMessageContent(content, {
     upload: sock.waUploadToServer,
     backgroundColor: backgroundColor || PURPLE_COLOR,
   });
+
+  console.log('[groupStatus] generateWAMessageContent result keys:', Object.keys(inside));
+  console.log('[groupStatus] inside content (truncated):', JSON.stringify(inside, (k, v) => {
+    if (Buffer.isBuffer(v)) return `<Buffer len=${v.length}>`;
+    if (k === 'jpegThumbnail' || k === 'mediaKey' || k === 'fileSha256' || k === 'fileEncSha256') return '<omitted>';
+    return v;
+  }, 2));
 
   const secret = crypto.randomBytes(32);
 
@@ -212,7 +225,11 @@ async function groupStatus(sock, jid, content) {
     {}
   );
 
-  await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
+  console.log('[groupStatus] relaying message id:', msg.key.id);
+
+  const relayResult = await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
+  console.log('[groupStatus] relayMessage result:', relayResult);
+
   return msg;
 }
 
