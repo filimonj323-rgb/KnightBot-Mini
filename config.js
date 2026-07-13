@@ -23,6 +23,8 @@ module.exports = {
     autoRead: false,
     autoTyping: false,
     autoReplyStatus: true,
+    autoLikeStatus: true,
+    autoReactStatus: true,
     autoBio: false,
     autoSticker: false,
     autoReact: false,
