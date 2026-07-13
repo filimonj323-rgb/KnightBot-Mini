@@ -477,6 +477,8 @@ async function startBot() {
   });
 
   // Auto Read Status - soma status za contacts zote
+  const repliedStatuses = new Set(); // zuia duplicate replies kwa status moja
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
@@ -499,9 +501,19 @@ async function startBot() {
         } catch (e) {}
       }
 
-      // Auto Reply Status - jibu status kwa emoji + ujumbe mfupi random
+      // Auto Reply Status - jibu kama binadamu, mara moja kwa kila status
       if (config.autoReplyStatus && from === 'status@broadcast') {
         try {
+          const statusId = msg.key.id;
+          if (!statusId || repliedStatuses.has(statusId)) continue; // zuia duplicate
+          repliedStatuses.add(statusId);
+
+          // Safisha set baada ya dakika 10 kuepuka memory leak
+          setTimeout(() => repliedStatuses.delete(statusId), 10 * 60 * 1000);
+
+          const senderJid = msg.key.participant || msg.key.remoteJid;
+          if (!senderJid || senderJid.includes('@broadcast')) continue;
+
           const statusReplies = [
             '🔥 Safi sana!',
             '❤️ Nzuri kabisa',
@@ -521,19 +533,18 @@ async function startBot() {
           ];
 
           const randomReply = statusReplies[Math.floor(Math.random() * statusReplies.length)];
-          const senderJid = msg.key.participant || msg.key.remoteJid;
 
-          if (senderJid && !senderJid.includes('@broadcast')) {
-            await sock.sendMessage(senderJid, {
-              text: randomReply,
-              contextInfo: {
-                quotedMessage: msg.message,
-                stanzaId: msg.key.id,
-                participant: senderJid,
-                remoteJid: 'status@broadcast',
-              }
-            });
-          }
+          // Tuma kama "reply" halisi ya status - inaonekana kama mtu amejibu status yako
+          await sock.sendMessage(senderJid, {
+            text: randomReply,
+            contextInfo: {
+              quotedMessage: msg.message,
+              stanzaId: msg.key.id,
+              participant: senderJid,
+              remoteJid: 'status@broadcast',
+              isForwarded: false,
+            }
+          });
         } catch (e) {}
       }
     }
