@@ -4,43 +4,6 @@
  */
 
 const config = require('../../config');
-const crypto = require('crypto');
-const {
-  generateWAMessageContent,
-  generateWAMessageFromContent,
-} = require('@whiskeysockets/baileys');
-
-const PURPLE_COLOR = '#9C27B0';
-
-// Helper: tuma group status (text/image) kwa group fulani - inafuata muundo wa groupstatus.js
-async function postGroupStatus(sock, jid, content) {
-  const { backgroundColor } = content;
-  delete content.backgroundColor;
-
-  const inside = await generateWAMessageContent(content, {
-    upload: sock.waUploadToServer,
-    backgroundColor: backgroundColor || PURPLE_COLOR,
-  });
-
-  const secret = crypto.randomBytes(32);
-
-  const statusMsg = generateWAMessageFromContent(
-    jid,
-    {
-      messageContextInfo: { messageSecret: secret },
-      groupStatusMessageV2: {
-        message: {
-          ...inside,
-          messageContextInfo: { messageSecret: secret },
-        },
-      },
-    },
-    {}
-  );
-
-  await sock.relayMessage(jid, statusMsg.message, { messageId: statusMsg.key.id });
-  return statusMsg;
-}
 
 module.exports = {
   name: 'gm',
@@ -67,10 +30,7 @@ module.exports = {
           `• .gm admins <groupId> — Admins wa group\n` +
           `• .gm members <groupId> — Members wa group\n\n` +
           `*Security*\n` +
-          `• .gm antilink <groupId|all> on/off\n` +
-          `• .gm antipromo <groupId|all> on/off\n` +
-          `• .gm antigroupmention <groupId|all> on/off\n` +
-          `• .gm antigroupmention <groupId> set delete|kick\n` +
+          `• .gm antilink <groupId> on/off\n` +
           `• .gm antispam <groupId> on/off\n` +
           `• .gm mute <groupId> on/off\n\n` +
           `*Members*\n` +
@@ -81,8 +41,8 @@ module.exports = {
           `• .gm link <groupId> — Pata invite link\n` +
           `• .gm resetlink <groupId> — Reset invite link\n` +
           `• .gm send <groupId> <message> — Tuma message\n` +
-          `• .gm broadcast <message> — Tuma kwa GROUPS ZOTE\n` +
-          `• .gm groupstatus <groupId|all> <text> — Tuma group status\n` +
+          `• .gm autoreact <groupId|all> on/off [bot|all] — Auto react\n` +
+          `• .gm restore <groupId|all> [namba] — Rudisha walioondoka\n` +
           `• .gm leave <groupId> — Bot itoke group\n\n` +
           `💡 GroupId mfano: *120363xxxxxxxx@g.us*\n` +
           `Pata IDs zote kwa: *.gm list*`
@@ -177,123 +137,17 @@ module.exports = {
         const groupId = args[1];
         const val = args[2]?.toLowerCase();
         if (!groupId || !val) {
-          return extra.reply('❌ Tumia: .gm antilink <groupId|all> on/off');
+          return extra.reply('❌ Tumia: .gm antilink <groupId> on/off');
         }
 
-        const database = require('../../database');
-
-        if (groupId.toLowerCase() === 'all') {
-          const allGroups = await sock.groupFetchAllParticipating();
-          const groupIds = Object.keys(allGroups);
-          for (const gid of groupIds) {
-            database.updateGroupSettings(gid, { antilink: val === 'on' });
-          }
-          return extra.reply(
-            `🔗 *Antilink - GROUPS ZOTE*\n\n` +
-            `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
-            `📊 Groups zilizobadilishwa: ${groupIds.length}`
-          );
-        }
-
-        database.updateGroupSettings(groupId, { antilink: val === 'on' });
+        if (!config.groupSettings) config.groupSettings = {};
+        if (!config.groupSettings[groupId]) config.groupSettings[groupId] = {};
+        config.groupSettings[groupId].antilink = val === 'on';
 
         const meta = await sock.groupMetadata(groupId);
         return extra.reply(
           `🔗 *Antilink - ${meta.subject}*\n\n` +
           `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*`
-        );
-      }
-
-      // ══════════════════════════════════════
-      // ANTIPROMO - Washa/Zima antipromo
-      // ══════════════════════════════════════
-      if (opt === 'antipromo') {
-        const groupId = args[1];
-        const val = args[2]?.toLowerCase();
-        if (!groupId || !val) {
-          return extra.reply('❌ Tumia: .gm antipromo <groupId|all> on/off');
-        }
-
-        const database = require('../../database');
-
-        if (groupId.toLowerCase() === 'all') {
-          const allGroups = await sock.groupFetchAllParticipating();
-          const groupIds = Object.keys(allGroups);
-          for (const gid of groupIds) {
-            database.updateGroupSettings(gid, { antipromo: val === 'on' });
-          }
-          return extra.reply(
-            `📢 *Antipromo - GROUPS ZOTE*\n\n` +
-            `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
-            `📊 Groups zilizobadilishwa: ${groupIds.length}`
-          );
-        }
-
-        database.updateGroupSettings(groupId, { antipromo: val === 'on' });
-
-        const meta = await sock.groupMetadata(groupId);
-        return extra.reply(
-          `📢 *Antipromo - ${meta.subject}*\n\n` +
-          `Status: *${val === 'on' ? 'ON ✅ (Picha/video/ujumbe mrefu utafutwa)' : 'OFF ❌'}*`
-        );
-      }
-
-      // ══════════════════════════════════════
-      // ANTIGROUPMENTION - Washa/Zima antigroupmention
-      // ══════════════════════════════════════
-      if (opt === 'antigroupmention' || opt === 'agm') {
-        const groupId = args[1];
-        const val = args[2]?.toLowerCase();
-
-        if (!groupId) {
-          return extra.reply(
-            '❌ Tumia:\n' +
-            '.gm antigroupmention <groupId|all> on/off\n' +
-            '.gm antigroupmention <groupId> set delete|kick'
-          );
-        }
-
-        const database = require('../../database');
-
-        // .gm antigroupmention <groupId> set delete|kick
-        if (val === 'set') {
-          const setAction = args[3]?.toLowerCase();
-          if (!['delete', 'kick'].includes(setAction)) {
-            return extra.reply('❌ Tumia: .gm antigroupmention <groupId> set delete|kick');
-          }
-          database.updateGroupSettings(groupId, {
-            antigroupmentionAction: setAction,
-            antigroupmention: true
-          });
-          const meta = await sock.groupMetadata(groupId);
-          return extra.reply(`✅ *${meta.subject}*\nAntigroupmention action: *${setAction}*`);
-        }
-
-        if (val !== 'on' && val !== 'off') {
-          return extra.reply('❌ Tumia: .gm antigroupmention <groupId|all> on/off');
-        }
-
-        if (groupId.toLowerCase() === 'all') {
-          const allGroups = await sock.groupFetchAllParticipating();
-          const groupIds = Object.keys(allGroups);
-          for (const gid of groupIds) {
-            database.updateGroupSettings(gid, { antigroupmention: val === 'on' });
-          }
-          return extra.reply(
-            `📌 *Antigroupmention - GROUPS ZOTE*\n\n` +
-            `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
-            `📊 Groups zilizobadilishwa: ${groupIds.length}`
-          );
-        }
-
-        database.updateGroupSettings(groupId, { antigroupmention: val === 'on' });
-
-        const meta = await sock.groupMetadata(groupId);
-        const settings = database.getGroupSettings(groupId);
-        return extra.reply(
-          `📌 *Antigroupmention - ${meta.subject}*\n\n` +
-          `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
-          `Action: *${settings.antigroupmentionAction || 'delete'}*`
         );
       }
 
@@ -353,7 +207,7 @@ module.exports = {
       if (opt === 'demote') {
         const groupId = args[1];
         const number = args[2]?.replace(/[^0-9]/g, '');
-        if (!groupId || !number) {
+        if (!groupId || !val) {
           return extra.reply('❌ Tumia: .gm demote <groupId> <namba>');
         }
 
@@ -410,101 +264,54 @@ module.exports = {
       }
 
       // ══════════════════════════════════════
-      // BROADCAST - Tuma message kwa GROUPS ZOTE
+      // AUTOREACT - Washa/Zima autoreact per-group
       // ══════════════════════════════════════
-      if (opt === 'broadcast' || opt === 'bc') {
-        const message = args.slice(1).join(' ');
-        if (!message) {
-          return extra.reply('❌ Tumia: .gm broadcast <ujumbe>');
-        }
-
-        const allGroups = await sock.groupFetchAllParticipating();
-        const groupIds = Object.keys(allGroups);
-
-        if (groupIds.length === 0) {
-          return extra.reply('❌ Bot haipo kwenye group lolote.');
-        }
-
-        await extra.reply(`📤 Inatuma kwa groups *${groupIds.length}*... Subiri.`);
-
-        let success = 0;
-        let failed = 0;
-
-        for (const gid of groupIds) {
-          try {
-            await sock.sendMessage(gid, { text: message });
-            success++;
-            // Delay ndogo kuepuka rate-limit
-            await new Promise(r => setTimeout(r, 1500));
-          } catch (e) {
-            failed++;
-          }
-        }
-
-        return extra.reply(
-          `✅ *Broadcast Imekamilika!*\n\n` +
-          `📨 Imefanikiwa: ${success}\n` +
-          `❌ Imeshindwa: ${failed}\n` +
-          `📊 Jumla: ${groupIds.length}`
-        );
-      }
-
-      // ══════════════════════════════════════
-      // GROUPSTATUS - Tuma group status (text) kwa group|groups zote
-      // (Kwa image/video, tumia .groupstatus ndani ya group kwa "reply")
-      // ══════════════════════════════════════
-      if (opt === 'groupstatus' || opt === 'gstatus') {
+      if (opt === 'autoreact') {
         const groupId = args[1];
-        const text = args.slice(2).join(' ');
+        const val = args[2]?.toLowerCase();
+        const modeArg = args[3]?.toLowerCase(); // 'bot' au 'all' (hiari)
 
-        if (!groupId || !text) {
+        if (!groupId || !val) {
           return extra.reply(
-            '❌ Tumia: .gm groupstatus <groupId|all> <text>\n\n' +
-            '💡 Hii inatuma TEXT status pekee.\n' +
-            'Kwa image/video status, tumia *.groupstatus* ukiwa ndani ya group (reply kwa media).'
+            '❌ Tumia:\n' +
+            '.gm autoreact <groupId|all> on/off [bot|all]\n\n' +
+            '• *bot* — react ⏳ kwa commands tu (default)\n' +
+            '• *all* — react emoji random kwa kila ujumbe'
           );
         }
+
+        const database = require('../../database');
+        const isOn = val === 'on';
+        const mode = ['bot', 'all'].includes(modeArg) ? modeArg : 'bot';
 
         if (groupId.toLowerCase() === 'all') {
           const allGroups = await sock.groupFetchAllParticipating();
           const groupIds = Object.keys(allGroups);
-
-          await extra.reply(`📤 Inatuma group status kwa groups *${groupIds.length}*... Subiri.`);
-
-          let success = 0;
-          let failed = 0;
-
           for (const gid of groupIds) {
-            try {
-              await postGroupStatus(sock, gid, {
-                text,
-                backgroundColor: PURPLE_COLOR,
-              });
-              success++;
-              await new Promise(r => setTimeout(r, 1500));
-            } catch (e) {
-              failed++;
-            }
+            database.updateGroupSettings(gid, {
+              autoreact: isOn,
+              autoreactMode: mode
+            });
           }
-
           return extra.reply(
-            `✅ *Group Status Imekamilika!*\n\n` +
-            `📨 Imefanikiwa: ${success}\n` +
-            `❌ Imeshindwa: ${failed}\n` +
-            `📊 Jumla: ${groupIds.length}`
+            `⚡ *AutoReact - GROUPS ZOTE*\n\n` +
+            `Status: *${isOn ? 'ON ✅' : 'OFF ❌'}*\n` +
+            (isOn ? `Mode: *${mode}*\n` : '') +
+            `📊 Groups: ${groupIds.length}`
           );
         }
 
-        try {
-          await postGroupStatus(sock, groupId, {
-            text,
-            backgroundColor: PURPLE_COLOR,
-          });
-          const meta = await sock.groupMetadata(groupId);
-          return extra.reply(`✅ Group status imetumwa kwenye *${meta.subject}*!`);
-        } catch (e) {
-          return extra.reply(`❌ Imeshindwa kutuma group status: ${e.message}`);
-        }
+        database.updateGroupSettings(groupId, {
+          autoreact: isOn,
+          autoreactMode: mode
+        });
+
+        const meta = await sock.groupMetadata(groupId);
+        return extra.reply(
+          `⚡ *AutoReact - ${meta.subject}*\n\n` +
+          `Status: *${isOn ? 'ON ✅' : 'OFF ❌'}*\n` +
+          (isOn ? `Mode: *${mode}*` : '')
+        );
       }
 
       // ══════════════════════════════════════
