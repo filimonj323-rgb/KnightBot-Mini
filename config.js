@@ -22,7 +22,7 @@ module.exports = {
     selfMode: false,
     autoRead: false,
     autoTyping: false,
-    autoReplyStatus: false,
+    autoReplyStatus: true,
     autoBio: false,
     autoSticker: false,
     autoReact: false,
