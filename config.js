@@ -25,6 +25,7 @@ module.exports = {
     autoReplyStatus: true,
     autoLikeStatus: true,
     autoReactStatus: true,
+    autoReadStatus:true,
     autoBio: false,
     autoSticker: false,
     autoReact: false,
