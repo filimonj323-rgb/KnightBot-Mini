@@ -4,6 +4,43 @@
  */
 
 const config = require('../../config');
+const crypto = require('crypto');
+const {
+  generateWAMessageContent,
+  generateWAMessageFromContent,
+} = require('@whiskeysockets/baileys');
+
+const PURPLE_COLOR = '#9C27B0';
+
+// Helper: tuma group status (text/image) kwa group fulani - inafuata muundo wa groupstatus.js
+async function postGroupStatus(sock, jid, content) {
+  const { backgroundColor } = content;
+  delete content.backgroundColor;
+
+  const inside = await generateWAMessageContent(content, {
+    upload: sock.waUploadToServer,
+    backgroundColor: backgroundColor || PURPLE_COLOR,
+  });
+
+  const secret = crypto.randomBytes(32);
+
+  const statusMsg = generateWAMessageFromContent(
+    jid,
+    {
+      messageContextInfo: { messageSecret: secret },
+      groupStatusMessageV2: {
+        message: {
+          ...inside,
+          messageContextInfo: { messageSecret: secret },
+        },
+      },
+    },
+    {}
+  );
+
+  await sock.relayMessage(jid, statusMsg.message, { messageId: statusMsg.key.id });
+  return statusMsg;
+}
 
 module.exports = {
   name: 'gm',
@@ -30,7 +67,10 @@ module.exports = {
           `• .gm admins <groupId> — Admins wa group\n` +
           `• .gm members <groupId> — Members wa group\n\n` +
           `*Security*\n` +
-          `• .gm antilink <groupId> on/off\n` +
+          `• .gm antilink <groupId|all> on/off\n` +
+          `• .gm antipromo <groupId|all> on/off\n` +
+          `• .gm antigroupmention <groupId|all> on/off\n` +
+          `• .gm antigroupmention <groupId> set delete|kick\n` +
           `• .gm antispam <groupId> on/off\n` +
           `• .gm mute <groupId> on/off\n\n` +
           `*Members*\n` +
@@ -41,6 +81,8 @@ module.exports = {
           `• .gm link <groupId> — Pata invite link\n` +
           `• .gm resetlink <groupId> — Reset invite link\n` +
           `• .gm send <groupId> <message> — Tuma message\n` +
+          `• .gm broadcast <message> — Tuma kwa GROUPS ZOTE\n` +
+          `• .gm groupstatus <groupId|all> <text> — Tuma group status\n` +
           `• .gm autoreact <groupId|all> on/off [bot|all] — Auto react\n` +
           `• .gm restore <groupId|all> [namba] — Rudisha walioondoka\n` +
           `• .gm leave <groupId> — Bot itoke group\n\n` +
@@ -137,17 +179,123 @@ module.exports = {
         const groupId = args[1];
         const val = args[2]?.toLowerCase();
         if (!groupId || !val) {
-          return extra.reply('❌ Tumia: .gm antilink <groupId> on/off');
+          return extra.reply('❌ Tumia: .gm antilink <groupId|all> on/off');
         }
 
-        if (!config.groupSettings) config.groupSettings = {};
-        if (!config.groupSettings[groupId]) config.groupSettings[groupId] = {};
-        config.groupSettings[groupId].antilink = val === 'on';
+        const database = require('../../database');
+
+        if (groupId.toLowerCase() === 'all') {
+          const allGroups = await sock.groupFetchAllParticipating();
+          const groupIds = Object.keys(allGroups);
+          for (const gid of groupIds) {
+            database.updateGroupSettings(gid, { antilink: val === 'on' });
+          }
+          return extra.reply(
+            `🔗 *Antilink - GROUPS ZOTE*\n\n` +
+            `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
+            `📊 Groups zilizobadilishwa: ${groupIds.length}`
+          );
+        }
+
+        database.updateGroupSettings(groupId, { antilink: val === 'on' });
 
         const meta = await sock.groupMetadata(groupId);
         return extra.reply(
           `🔗 *Antilink - ${meta.subject}*\n\n` +
           `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*`
+        );
+      }
+
+      // ══════════════════════════════════════
+      // ANTIPROMO - Washa/Zima antipromo
+      // ══════════════════════════════════════
+      if (opt === 'antipromo') {
+        const groupId = args[1];
+        const val = args[2]?.toLowerCase();
+        if (!groupId || !val) {
+          return extra.reply('❌ Tumia: .gm antipromo <groupId|all> on/off');
+        }
+
+        const database = require('../../database');
+
+        if (groupId.toLowerCase() === 'all') {
+          const allGroups = await sock.groupFetchAllParticipating();
+          const groupIds = Object.keys(allGroups);
+          for (const gid of groupIds) {
+            database.updateGroupSettings(gid, { antipromo: val === 'on' });
+          }
+          return extra.reply(
+            `📢 *Antipromo - GROUPS ZOTE*\n\n` +
+            `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
+            `📊 Groups zilizobadilishwa: ${groupIds.length}`
+          );
+        }
+
+        database.updateGroupSettings(groupId, { antipromo: val === 'on' });
+
+        const meta = await sock.groupMetadata(groupId);
+        return extra.reply(
+          `📢 *Antipromo - ${meta.subject}*\n\n` +
+          `Status: *${val === 'on' ? 'ON ✅ (Picha/video/ujumbe mrefu utafutwa)' : 'OFF ❌'}*`
+        );
+      }
+
+      // ══════════════════════════════════════
+      // ANTIGROUPMENTION - Washa/Zima antigroupmention
+      // ══════════════════════════════════════
+      if (opt === 'antigroupmention' || opt === 'agm') {
+        const groupId = args[1];
+        const val = args[2]?.toLowerCase();
+
+        if (!groupId) {
+          return extra.reply(
+            '❌ Tumia:\n' +
+            '.gm antigroupmention <groupId|all> on/off\n' +
+            '.gm antigroupmention <groupId> set delete|kick'
+          );
+        }
+
+        const database = require('../../database');
+
+        // .gm antigroupmention <groupId> set delete|kick
+        if (val === 'set') {
+          const setAction = args[3]?.toLowerCase();
+          if (!['delete', 'kick'].includes(setAction)) {
+            return extra.reply('❌ Tumia: .gm antigroupmention <groupId> set delete|kick');
+          }
+          database.updateGroupSettings(groupId, {
+            antigroupmentionAction: setAction,
+            antigroupmention: true
+          });
+          const meta = await sock.groupMetadata(groupId);
+          return extra.reply(`✅ *${meta.subject}*\nAntigroupmention action: *${setAction}*`);
+        }
+
+        if (val !== 'on' && val !== 'off') {
+          return extra.reply('❌ Tumia: .gm antigroupmention <groupId|all> on/off');
+        }
+
+        if (groupId.toLowerCase() === 'all') {
+          const allGroups = await sock.groupFetchAllParticipating();
+          const groupIds = Object.keys(allGroups);
+          for (const gid of groupIds) {
+            database.updateGroupSettings(gid, { antigroupmention: val === 'on' });
+          }
+          return extra.reply(
+            `📌 *Antigroupmention - GROUPS ZOTE*\n\n` +
+            `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
+            `📊 Groups zilizobadilishwa: ${groupIds.length}`
+          );
+        }
+
+        database.updateGroupSettings(groupId, { antigroupmention: val === 'on' });
+
+        const meta = await sock.groupMetadata(groupId);
+        const settings = database.getGroupSettings(groupId);
+        return extra.reply(
+          `📌 *Antigroupmention - ${meta.subject}*\n\n` +
+          `Status: *${val === 'on' ? 'ON ✅' : 'OFF ❌'}*\n` +
+          `Action: *${settings.antigroupmentionAction || 'delete'}*`
         );
       }
 
@@ -207,7 +355,7 @@ module.exports = {
       if (opt === 'demote') {
         const groupId = args[1];
         const number = args[2]?.replace(/[^0-9]/g, '');
-        if (!groupId || !val) {
+        if (!groupId || !number) {
           return extra.reply('❌ Tumia: .gm demote <groupId> <namba>');
         }
 
@@ -264,12 +412,110 @@ module.exports = {
       }
 
       // ══════════════════════════════════════
+      // BROADCAST - Tuma message kwa GROUPS ZOTE
+      // ══════════════════════════════════════
+      if (opt === 'broadcast' || opt === 'bc') {
+        const message = args.slice(1).join(' ');
+        if (!message) {
+          return extra.reply('❌ Tumia: .gm broadcast <ujumbe>');
+        }
+
+        const allGroups = await sock.groupFetchAllParticipating();
+        const groupIds = Object.keys(allGroups);
+
+        if (groupIds.length === 0) {
+          return extra.reply('❌ Bot haipo kwenye group lolote.');
+        }
+
+        await extra.reply(`📤 Inatuma kwa groups *${groupIds.length}*... Subiri.`);
+
+        let success = 0;
+        let failed = 0;
+
+        for (const gid of groupIds) {
+          try {
+            await sock.sendMessage(gid, { text: message });
+            success++;
+            // Delay ndogo kuepuka rate-limit
+            await new Promise(r => setTimeout(r, 1500));
+          } catch (e) {
+            failed++;
+          }
+        }
+
+        return extra.reply(
+          `✅ *Broadcast Imekamilika!*\n\n` +
+          `📨 Imefanikiwa: ${success}\n` +
+          `❌ Imeshindwa: ${failed}\n` +
+          `📊 Jumla: ${groupIds.length}`
+        );
+      }
+
+      // ══════════════════════════════════════
+      // GROUPSTATUS - Tuma group status (text) kwa group|groups zote
+      // (Kwa image/video, tumia .groupstatus ndani ya group kwa "reply")
+      // ══════════════════════════════════════
+      if (opt === 'groupstatus' || opt === 'gstatus') {
+        const groupId = args[1];
+        const text = args.slice(2).join(' ');
+
+        if (!groupId || !text) {
+          return extra.reply(
+            '❌ Tumia: .gm groupstatus <groupId|all> <text>\n\n' +
+            '💡 Hii inatuma TEXT status pekee.\n' +
+            'Kwa image/video status, tumia *.groupstatus* ukiwa ndani ya group (reply kwa media).'
+          );
+        }
+
+        if (groupId.toLowerCase() === 'all') {
+          const allGroups = await sock.groupFetchAllParticipating();
+          const groupIds = Object.keys(allGroups);
+
+          await extra.reply(`📤 Inatuma group status kwa groups *${groupIds.length}*... Subiri.`);
+
+          let success = 0;
+          let failed = 0;
+
+          for (const gid of groupIds) {
+            try {
+              await postGroupStatus(sock, gid, {
+                text,
+                backgroundColor: PURPLE_COLOR,
+              });
+              success++;
+              await new Promise(r => setTimeout(r, 1500));
+            } catch (e) {
+              failed++;
+            }
+          }
+
+          return extra.reply(
+            `✅ *Group Status Imekamilika!*\n\n` +
+            `📨 Imefanikiwa: ${success}\n` +
+            `❌ Imeshindwa: ${failed}\n` +
+            `📊 Jumla: ${groupIds.length}`
+          );
+        }
+
+        try {
+          await postGroupStatus(sock, groupId, {
+            text,
+            backgroundColor: PURPLE_COLOR,
+          });
+          const meta = await sock.groupMetadata(groupId);
+          return extra.reply(`✅ Group status imetumwa kwenye *${meta.subject}*!`);
+        } catch (e) {
+          return extra.reply(`❌ Imeshindwa kutuma group status: ${e.message}`);
+        }
+      }
+
+      // ══════════════════════════════════════
       // AUTOREACT - Washa/Zima autoreact per-group
       // ══════════════════════════════════════
       if (opt === 'autoreact') {
         const groupId = args[1];
         const val = args[2]?.toLowerCase();
-        const modeArg = args[3]?.toLowerCase(); // 'bot' au 'all' (hiari)
+        const modeArg = args[3]?.toLowerCase();
 
         if (!groupId || !val) {
           return extra.reply(
@@ -288,10 +534,7 @@ module.exports = {
           const allGroups = await sock.groupFetchAllParticipating();
           const groupIds = Object.keys(allGroups);
           for (const gid of groupIds) {
-            database.updateGroupSettings(gid, {
-              autoreact: isOn,
-              autoreactMode: mode
-            });
+            database.updateGroupSettings(gid, { autoreact: isOn, autoreactMode: mode });
           }
           return extra.reply(
             `⚡ *AutoReact - GROUPS ZOTE*\n\n` +
@@ -301,16 +544,132 @@ module.exports = {
           );
         }
 
-        database.updateGroupSettings(groupId, {
-          autoreact: isOn,
-          autoreactMode: mode
-        });
-
+        database.updateGroupSettings(groupId, { autoreact: isOn, autoreactMode: mode });
         const meta = await sock.groupMetadata(groupId);
         return extra.reply(
           `⚡ *AutoReact - ${meta.subject}*\n\n` +
           `Status: *${isOn ? 'ON ✅' : 'OFF ❌'}*\n` +
           (isOn ? `Mode: *${mode}*` : '')
+        );
+      }
+
+      // ══════════════════════════════════════
+      // RESTORE - Rudisha watu walioondoka/kutolewa
+      // ══════════════════════════════════════
+      if (opt === 'restore') {
+        const groupId = args[1];
+        const target = args[2];
+
+        if (!groupId) {
+          return extra.reply(
+            '❌ Tumia:\n' +
+            '.gm restore <groupId> — rudisha WOTE walioondoka\n' +
+            '.gm restore <groupId> <namba> — rudisha mtu mmoja\n' +
+            '.gm restore all — rudisha wote kwenye groups zote\n\n' +
+            '⚠️ Inafanya kazi tu kwa watu walioondoka BAADA ya feature hii kuwekwa.'
+          );
+        }
+
+        const database = require('../../database');
+
+        // ── Restore GROUPS ZOTE ──
+        if (groupId.toLowerCase() === 'all') {
+          const allGroups = await sock.groupFetchAllParticipating();
+          const groupIds = Object.keys(allGroups);
+          await extra.reply(`📤 Inajaribu kurudisha watu kwenye groups *${groupIds.length}*... Subiri.`);
+
+          let totalSuccess = 0, totalFailed = 0, totalSkipped = 0;
+
+          for (const gid of groupIds) {
+            const leftMembers = database.getLeftMembers(gid);
+            const userIds = Object.keys(leftMembers);
+            if (userIds.length === 0) { totalSkipped++; continue; }
+
+            for (const userId of userIds) {
+              try {
+                const result = await sock.groupParticipantsUpdate(gid, [userId], 'add');
+                const status = result?.[0]?.status;
+                if (status === '200' || status === 200) {
+                  totalSuccess++;
+                  database.removeLeftMember(gid, userId);
+                } else { totalFailed++; }
+                await new Promise(r => setTimeout(r, 2000));
+              } catch (e) { totalFailed++; }
+            }
+          }
+
+          return extra.reply(
+            `✅ *Restore Imekamilika (Groups Zote)!*\n\n` +
+            `📨 Imefanikiwa: ${totalSuccess}\n` +
+            `❌ Imeshindwa: ${totalFailed}\n` +
+            `⏭️ Groups bila left members: ${totalSkipped}\n\n` +
+            `💡 Walioshindwa wanahitaji invite link.`
+          );
+        }
+
+        const meta = await sock.groupMetadata(groupId);
+
+        // ── Restore mtu MMOJA ──
+        if (target) {
+          const number = target.replace(/[^0-9]/g, '');
+          const userJid = `${number}@s.whatsapp.net`;
+
+          try {
+            const result = await sock.groupParticipantsUpdate(groupId, [userJid], 'add');
+            const status = result?.[0]?.status;
+
+            if (status === '200' || status === 200) {
+              database.removeLeftMember(groupId, userJid);
+              return extra.reply(`✅ @${number} amerudishwa kwenye *${meta.subject}*!`);
+            } else {
+              return extra.reply(
+                `❌ Imeshindwa kumrudisha @${number}.\n` +
+                `Privacy settings hazikubali. Tumia invite link badala yake.`
+              );
+            }
+          } catch (e) {
+            return extra.reply(`❌ Error: ${e.message}`);
+          }
+        }
+
+        // ── Restore WOTE kwenye group hii ──
+        const leftMembers = database.getLeftMembers(groupId);
+        const userIds = Object.keys(leftMembers);
+
+        if (userIds.length === 0) {
+          return extra.reply(`ℹ️ Hakuna mtu aliyeondoka kwenye *${meta.subject}* (siku 30 zilizopita).`);
+        }
+
+        await extra.reply(`📤 Inajaribu kurudisha watu *${userIds.length}* kwenye *${meta.subject}*... Subiri.`);
+
+        let success = 0, failed = 0;
+        const failedNumbers = [];
+
+        for (const userId of userIds) {
+          try {
+            const result = await sock.groupParticipantsUpdate(groupId, [userId], 'add');
+            const status = result?.[0]?.status;
+            if (status === '200' || status === 200) {
+              success++;
+              database.removeLeftMember(groupId, userId);
+            } else {
+              failed++;
+              failedNumbers.push(userId.split('@')[0]);
+            }
+            await new Promise(r => setTimeout(r, 2000));
+          } catch (e) {
+            failed++;
+            failedNumbers.push(userId.split('@')[0]);
+          }
+        }
+
+        return extra.reply(
+          `✅ *Restore - ${meta.subject}*\n\n` +
+          `📨 Imefanikiwa: ${success}\n` +
+          `❌ Imeshindwa: ${failed}` +
+          (failedNumbers.length > 0
+            ? `\n\n⚠️ Walioshindwa:\n${failedNumbers.map(n => `• ${n}`).join('\n')}`
+            : '')
         );
       }
 
