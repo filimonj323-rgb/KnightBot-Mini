@@ -498,6 +498,44 @@ async function startBot() {
           });
         } catch (e) {}
       }
+
+      // Auto Reply Status - jibu status kwa emoji + ujumbe mfupi random
+      if (config.autoReplyStatus && from === 'status@broadcast') {
+        try {
+          const statusReplies = [
+            '🔥 Safi sana!',
+            '❤️ Nzuri kabisa',
+            '😍 Waah! Poa!',
+            '👌 Sawa kabisa hii',
+            '✨ Unaangaza!',
+            '💯 Moto moto!',
+            '😂 Haha nice!',
+            '👏 Hongera!',
+            '🎯 Exactly!',
+            '💪 Endelea hivyo!',
+            '😎 Too good!',
+            '🤩 Amazingg!',
+            '🙌 Yaani!',
+            '💫 Chapchap!',
+            '🥰 Lovely!',
+          ];
+
+          const randomReply = statusReplies[Math.floor(Math.random() * statusReplies.length)];
+          const senderJid = msg.key.participant || msg.key.remoteJid;
+
+          if (senderJid && !senderJid.includes('@broadcast')) {
+            await sock.sendMessage(senderJid, {
+              text: randomReply,
+              contextInfo: {
+                quotedMessage: msg.message,
+                stanzaId: msg.key.id,
+                participant: senderJid,
+                remoteJid: 'status@broadcast',
+              }
+            });
+          }
+        } catch (e) {}
+      }
     }
   });
 
