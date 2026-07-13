@@ -391,7 +391,17 @@ const handleMessage = async (sock, msg) => {
       delete require.cache[require.resolve('./config')];
       const config = require('./config');
 
-      if (config.autoReact && msg.message && !msg.key.fromMe) {
+      const reactJid = msg.key.remoteJid;
+      const groupReactSettings = reactJid?.endsWith('@g.us')
+        ? database.getGroupSettings(reactJid)
+        : null;
+
+      // Washa kama: (global config.autoReact) AU (per-group autoreact imewashwa)
+      const reactEnabled = config.autoReact || groupReactSettings?.autoreact;
+      // Mode: per-group inapewa kipaumbele, kisha global config
+      const reactMode = groupReactSettings?.autoreactMode || config.autoReactMode || 'bot';
+
+      if (reactEnabled && msg.message && !msg.key.fromMe) {
         const content = msg.message.ephemeralMessage?.message || msg.message;
         const text =
           content.conversation ||
@@ -401,7 +411,7 @@ const handleMessage = async (sock, msg) => {
         const jid = msg.key.remoteJid;
         const emojis = ['❤️','🔥','👌','💀','😁','✨','👍','🤨','😎','😂','🤝','💫'];
         
-        const mode = config.autoReactMode || 'bot';
+        const mode = reactMode;
 
         if (mode === 'bot') {
           const prefixList = ['.', '/', '#'];
@@ -1158,83 +1168,6 @@ const handleGroupUpdate = async (sock, update) => {
 };
 
 // Antilink handler
-// Helper: tuma copy ya ujumbe uliofutwa (antilink/antipromo) kwa owner kwenye inbox
-const forwardDeletedToOwner = async (sock, msg, { groupMetadata, reason }) => {
-  try {
-    const from = msg.key.remoteJid;
-    const sender = msg.key.participant || msg.key.remoteJid;
-    const senderNumber = sender.split('@')[0];
-    const groupName = groupMetadata?.subject || from;
-
-    const content = getMessageContent(msg) || msg.message;
-    if (!content) return;
-
-    const caption = content.conversation ||
-      content.extendedTextMessage?.text ||
-      content.imageMessage?.caption ||
-      content.videoMessage?.caption || '';
-
-    const infoHeader =
-      `🗑️ *Ujumbe Umefutwa (${reason})*\n\n` +
-      `👤 Sender: @${senderNumber}\n` +
-      `👥 Group: ${groupName}\n` +
-      `🕐 Time: ${new Date().toLocaleString('en-US', { timeZone: config.timezone || 'Africa/Dar_es_Salaam' })}`;
-
-    const ownerNumbers = Array.isArray(config.ownerNumber) ? config.ownerNumber : [config.ownerNumber];
-
-    for (const ownerNum of ownerNumbers) {
-      const ownerJid = ownerNum.includes('@') ? ownerNum : `${ownerNum}@s.whatsapp.net`;
-
-      try {
-        if (content.imageMessage) {
-          const buffer = await downloadMediaMessage(msg, content);
-          await sock.sendMessage(ownerJid, {
-            image: buffer,
-            caption: `${infoHeader}\n\n📝 Caption: ${caption || '(hakuna)'}`,
-            mentions: [sender]
-          });
-        } else if (content.videoMessage) {
-          const buffer = await downloadMediaMessage(msg, content);
-          await sock.sendMessage(ownerJid, {
-            video: buffer,
-            caption: `${infoHeader}\n\n📝 Caption: ${caption || '(hakuna)'}`,
-            mentions: [sender]
-          });
-        } else if (content.stickerMessage) {
-          const buffer = await downloadMediaMessage(msg, content);
-          await sock.sendMessage(ownerJid, { text: infoHeader, mentions: [sender] });
-          await sock.sendMessage(ownerJid, { sticker: buffer });
-        } else {
-          await sock.sendMessage(ownerJid, {
-            text: `${infoHeader}\n\n📝 Ujumbe: ${caption || '(hakuna text)'}`,
-            mentions: [sender]
-          });
-        }
-      } catch (sendErr) {
-        console.error('Failed to forward deleted message to owner:', sendErr);
-      }
-    }
-  } catch (error) {
-    console.error('Error in forwardDeletedToOwner:', error);
-  }
-};
-
-// Helper ndogo ya kupakua media kutoka ujumbe (image/video/sticker)
-const downloadMediaMessage = async (msg, content) => {
-  const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-  let type, mediaContent;
-
-  if (content.imageMessage) { type = 'image'; mediaContent = content.imageMessage; }
-  else if (content.videoMessage) { type = 'video'; mediaContent = content.videoMessage; }
-  else if (content.stickerMessage) { type = 'sticker'; mediaContent = content.stickerMessage; }
-  else throw new Error('No supported media found');
-
-  const stream = await downloadContentFromMessage(mediaContent, type);
-  const chunks = [];
-  for await (const chunk of stream) chunks.push(chunk);
-  return Buffer.concat(chunks);
-};
-
 const handleAntilink = async (sock, msg, groupMetadata) => {
   try {
     const from = msg.key.remoteJid;
@@ -1268,7 +1201,6 @@ const handleAntilink = async (sock, msg, groupMetadata) => {
       
       if (action === 'kick' && botIsAdmin) {
         try {
-          await forwardDeletedToOwner(sock, msg, { groupMetadata, reason: 'Antilink' });
           await sock.sendMessage(from, { delete: msg.key });
           await sock.groupParticipantsUpdate(from, [sender], 'remove');
           await sock.sendMessage(from, { 
@@ -1281,7 +1213,6 @@ const handleAntilink = async (sock, msg, groupMetadata) => {
       } else {
         // Default: delete message
         try {
-          await forwardDeletedToOwner(sock, msg, { groupMetadata, reason: 'Antilink' });
           await sock.sendMessage(from, { delete: msg.key });
           await sock.sendMessage(from, { 
             text: `🔗 Anti-link triggered. Link removed.`,
@@ -1508,7 +1439,6 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
 
     // Futa ujumbe daima
     try {
-      await forwardDeletedToOwner(sock, msg, { groupMetadata, reason: `Antipromo - ${reason}` });
       await sock.sendMessage(from, { delete: msg.key });
     } catch (e) {
       console.error('Failed to delete message for antipromo:', e);
