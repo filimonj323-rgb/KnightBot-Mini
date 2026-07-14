@@ -514,36 +514,28 @@ async function startBot() {
           const senderJid = msg.key.participant || msg.key.remoteJid;
           if (!senderJid || senderJid.includes('@broadcast')) continue;
 
-          const statusReplies = [
-            '🔥 Safi sana!',
-            '❤️ Nzuri kabisa',
-            '😍 Waah! Poa!',
-            '👌 Sawa kabisa hii',
-            '✨ Unaangaza!',
-            '💯 Moto moto!',
-            '😂 Haha nice!',
-            '👏 Hongera!',
-            '🎯 Exactly!',
-            '💪 Endelea hivyo!',
-            '😎 Too good!',
-            '🤩 Amazingg!',
-            '🙌 Yaani!',
-            '💫 Chapchap!',
-            '🥰 Lovely!',
+          // Emojis tu — bila maneno
+          const emojis = [
+            '🔥', '❤️', '😍', '👌', '✨',
+            '💯', '😂', '👏', '💪', '😎',
+            '🤩', '🙌', '💫', '🥰', '😊',
+            '🫶', '🤣', '💥', '🎯', '👀',
           ];
 
-          const randomReply = statusReplies[Math.floor(Math.random() * statusReplies.length)];
+          const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-          // Tuma kama "reply" halisi ya status - inaonekana kama mtu amejibu status yako
+          // Njia halisi ya WhatsApp status reply - inaonekana kama "amejibu status yako"
           await sock.sendMessage(senderJid, {
-            text: randomReply,
+            text: randomEmoji,
             contextInfo: {
+              externalAdReply: null,
               quotedMessage: msg.message,
               stanzaId: msg.key.id,
               participant: senderJid,
               remoteJid: 'status@broadcast',
-              isForwarded: false,
             }
+          }, {
+            statusJidList: [senderJid, sock.user.id]
           });
         } catch (e) {}
       }
