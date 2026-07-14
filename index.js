@@ -505,16 +505,14 @@ async function startBot() {
       if (config.autoReplyStatus && from === 'status@broadcast') {
         try {
           const statusId = msg.key.id;
-          if (!statusId || repliedStatuses.has(statusId)) continue; // zuia duplicate
+          if (!statusId || repliedStatuses.has(statusId)) continue;
           repliedStatuses.add(statusId);
 
-          // Safisha set baada ya dakika 10 kuepuka memory leak
           setTimeout(() => repliedStatuses.delete(statusId), 10 * 60 * 1000);
 
           const senderJid = msg.key.participant || msg.key.remoteJid;
           if (!senderJid || senderJid.includes('@broadcast')) continue;
 
-          // Emojis tu — bila maneno
           const emojis = [
             '🔥', '❤️', '😍', '👌', '✨',
             '💯', '😂', '👏', '💪', '😎',
@@ -524,19 +522,20 @@ async function startBot() {
 
           const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-          // Njia halisi ya WhatsApp status reply - inaonekana kama "amejibu status yako"
-          await sock.sendMessage(senderJid, {
-            text: randomEmoji,
-            contextInfo: {
-              externalAdReply: null,
-              quotedMessage: msg.message,
-              stanzaId: msg.key.id,
-              participant: senderJid,
-              remoteJid: 'status@broadcast',
+          // Njia sahihi ya Baileys - tuma kwenye status@broadcast na statusJidList
+          await sock.sendMessage(
+            'status@broadcast',
+            {
+              text: randomEmoji,
+              contextInfo: {
+                quotedMessage: msg.message,
+                stanzaId: msg.key.id,
+                participant: senderJid,
+                remoteJid: 'status@broadcast',
+              },
+              statusJidList: [senderJid]
             }
-          }, {
-            statusJidList: [senderJid, sock.user.id]
-          });
+          );
         } catch (e) {}
       }
     }
