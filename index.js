@@ -479,30 +479,56 @@ async function startBot() {
   // Auto Read Status - soma status za contacts zote
   const repliedStatuses = new Set(); // zuia duplicate replies kwa status moja
 
+  // Helper ya kusoma autostatus settings kwa wakati halisi (real-time)
+  const getAutoStatusCfg = () => {
+    try {
+      const dbPath = require('path').join(__dirname, 'database/autostatus.json');
+      if (require('fs').existsSync(dbPath)) {
+        const data = JSON.parse(require('fs').readFileSync(dbPath, 'utf-8'));
+        return {
+          view: data.view ?? config.autoReadStatus ?? false,
+          react: data.react ?? config.autoLikeStatus ?? false,
+          reaction: data.reaction || '❤️',
+          autoReply: data.autoReply ?? config.autoReplyStatus ?? false,
+        };
+      }
+    } catch (e) {}
+    // Fallback kwa config.js kama autostatus.json haipo
+    return {
+      view: config.autoReadStatus || false,
+      react: config.autoLikeStatus || false,
+      reaction: '❤️',
+      autoReply: config.autoReplyStatus || false,
+    };
+  };
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
     for (const msg of messages) {
       const from = msg.key?.remoteJid;
       if (!from) continue;
 
+      // Soma settings mpya kwa kila ujumbe (real-time - changes zinafanya kazi mara moja)
+      const asCfg = getAutoStatusCfg();
+
       // Auto Read Status
-      if (config.autoReadStatus && from === 'status@broadcast') {
+      if (asCfg.view && from === 'status@broadcast') {
         try {
           await sock.readMessages([msg.key]);
         } catch (e) {}
       }
 
       // Auto Like Status
-      if (config.autoLikeStatus && from === 'status@broadcast') {
+      if (asCfg.react && from === 'status@broadcast') {
         try {
           await sock.sendMessage('status@broadcast', {
-            react: { text: '❤️', key: msg.key }
+            react: { text: asCfg.reaction, key: msg.key }
           });
         } catch (e) {}
       }
 
       // Auto Reply Status - jibu kama binadamu, mara moja kwa kila status
-      if (config.autoReplyStatus && from === 'status@broadcast') {
+      if (asCfg.autoReply && from === 'status@broadcast') {
         try {
           const statusId = msg.key.id;
           if (!statusId || repliedStatuses.has(statusId)) continue;
