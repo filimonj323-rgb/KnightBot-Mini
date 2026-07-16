@@ -477,9 +477,8 @@ async function startBot() {
   });
 
   // Auto Read Status - soma status za contacts zote
-  const repliedStatuses = new Set(); // zuia duplicate replies kwa status moja
+  const repliedStatuses = new Set();
 
-  // Helper ya kusoma autostatus settings kwa wakati halisi (real-time)
   const getAutoStatusCfg = () => {
     try {
       const dbPath = require('path').join(__dirname, 'database/autostatus.json');
@@ -493,7 +492,6 @@ async function startBot() {
         };
       }
     } catch (e) {}
-    // Fallback kwa config.js kama autostatus.json haipo
     return {
       view: config.autoReadStatus || false,
       react: config.autoLikeStatus || false,
@@ -508,7 +506,6 @@ async function startBot() {
       const from = msg.key?.remoteJid;
       if (!from) continue;
 
-      // Soma settings mpya kwa kila ujumbe (real-time - changes zinafanya kazi mara moja)
       const asCfg = getAutoStatusCfg();
 
       // Auto Read Status
@@ -548,7 +545,6 @@ async function startBot() {
 
           const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-          // Njia sahihi ya Baileys - tuma kwenye status@broadcast na statusJidList
           await sock.sendMessage(
             'status@broadcast',
             {
