@@ -518,9 +518,16 @@ async function startBot() {
       // Auto Like Status
       if (asCfg.react && from === 'status@broadcast') {
         try {
-          await sock.sendMessage('status@broadcast', {
-            react: { text: asCfg.reaction, key: msg.key }
-          });
+          const statusKey = {
+            remoteJid: 'status@broadcast',
+            id: msg.key.id,
+            participant: msg.key.participant || msg.key.remoteJid,
+            fromMe: false,
+          };
+          await sock.sendMessage(
+            msg.key.participant || msg.key.remoteJid,
+            { react: { text: asCfg.reaction, key: statusKey } }
+          );
         } catch (e) {}
       }
 
