@@ -1136,6 +1136,15 @@ const handleGroupUpdate = async (sock, update) => {
             caption: goodbyeMsg,
             mentions: [participantJid] 
           });
+          // Tuma DM kwa mtu aliyeondoka
+          try {
+            const dmJid = phoneJid || participantJid;
+            if (dmJid && dmJid.includes('@s.whatsapp.net')) {
+              await sock.sendMessage(dmJid, {
+                text: `📋 *Umetoka kwenye ${groupName}*\n\nGroup hii ni chanzo cha taarifa muhimu za:\n• 🎓 Maombi ya mkopo HESLB\n• 🏫 Huduma za vyuo\n• 🖨️ Stationery na huduma nyingine\n\nTaarifa zinazotumwa hapa zinaweza kukusaidia wakati wowote — usijute baadaye kukosa taarifa muhimu.\n\nUkitaka kurudi, jiunge tena hapa 👇\nhttps://chat.whatsapp.com/LHMMYiaxQhdDLfIfOhF4CV\n\n📖 *"Maana yangu yote yatoka kwake; yeye ndiye mwamba wangu na wokovu wangu."*\n_— Zaburi 62:6_\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${config.botName}*`
+              });
+            }
+          } catch (dmErr) {}
         } catch (goodbyeError) {
           // Fallback to simple goodbye message
           console.error('Goodbye error:', goodbyeError);
