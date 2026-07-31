@@ -10,6 +10,7 @@ const { jidDecode, jidEncode } = require('@whiskeysockets/baileys');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const NodeCache = require('node-cache');
 
 // Group metadata cache to prevent rate limiting
 const groupMetadataCache = new Map();
@@ -1522,6 +1523,89 @@ const initializeAntiCall = (sock) => {
   });
 };
 
+// 📊 AUTO STATUS VIEWER + REACT — INSTANT VIEW (FIXED, LID-aware)
+// ════════════════════════════════════════════════════════════════
+// Inatumia database/autostatus.json (settings sawa na .autostatus command)
+const viewedStatusCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, maxKeys: 10000 });
+const statusProcessingQueue = new Set();
+
+const AUTOSTATUS_DB = path.join(__dirname, 'database', 'autostatus.json');
+const AUTOSTATUS_DEFAULTS = { view: false, react: false, reaction: '❤️', autoReply: false };
+
+const getAutoStatusCfg = () => {
+  try {
+    if (fs.existsSync(AUTOSTATUS_DB)) {
+      const data = JSON.parse(fs.readFileSync(AUTOSTATUS_DB, 'utf8'));
+      return { ...AUTOSTATUS_DEFAULTS, ...data };
+    }
+  } catch (error) {
+    // Fall through to defaults
+  }
+  return { ...AUTOSTATUS_DEFAULTS };
+};
+
+function setupAutoStatusViewer(sock) {
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
+
+    for (const msg of messages) {
+      if (!msg.message) continue;
+      if (msg.key.remoteJid !== 'status@broadcast') continue;
+      if (msg.key.fromMe) continue;
+
+      const cfg = getAutoStatusCfg();
+      if (!cfg.view && !cfg.react) continue;
+
+      const statusId = msg.key.id;
+      const posterJid = msg.key.participant || msg.key.remoteJid;
+      const posterNum = posterJid.split('@')[0] || 'Unknown';
+
+      if (viewedStatusCache.has(statusId) || statusProcessingQueue.has(statusId)) {
+        continue;
+      }
+
+      statusProcessingQueue.add(statusId);
+
+      try {
+        // ✅ Set cache BEFORE view to avoid double-processing on fast bursts
+        viewedStatusCache.set(statusId, true);
+
+        // ✅ INSTANT VIEW
+        if (cfg.view) {
+          await sock.readMessages([msg.key]);
+        }
+
+        if (cfg.react) {
+          // ⚠️ Baileys rc: participant inaweza kuja kama @lid.
+          // WhatsApp inahitaji phone-number JID (@s.whatsapp.net) kwenye statusJidList,
+          // hivyo tunatumia normalizeJidWithLid iliyopo tayari kwenye faili hili.
+          const deliverJid = normalizeJidWithLid(posterJid) || posterJid;
+
+          await sock.sendMessage('status@broadcast', {
+            react: {
+              text: cfg.reaction,
+              key: msg.key
+            }
+          }, {
+            statusJidList: [deliverJid, sock.user.id]
+          });
+          console.log(`✅ Status +${posterNum} → ${cfg.view ? 'viewed ✅' : ''} reacted ${cfg.reaction} (deliverJid: ${deliverJid})`);
+        } else if (cfg.view) {
+          console.log(`✅ Status +${posterNum} → viewed only (react disabled)`);
+        }
+
+      } catch (err) {
+        viewedStatusCache.del(statusId);
+        console.error(`❌ Status error (+${posterNum}):`, err.message);
+      } finally {
+        statusProcessingQueue.delete(statusId);
+      }
+    }
+  });
+
+  console.log('📊 Auto Status Viewer: ✅ Imewashwa | Anti-Duplicate ✅ | LID-aware ✅');
+}
+
 module.exports = {
   handleMessage,
   handleGroupUpdate,
@@ -1529,6 +1613,7 @@ module.exports = {
   handleAntigroupmention,
   handleAntipromo,
   initializeAntiCall,
+  setupAutoStatusViewer,
   isOwner,
   isAdmin,
   isBotAdmin,
