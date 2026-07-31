@@ -1693,7 +1693,7 @@ const viewedStatusCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, maxK
 const statusProcessingQueue = new Set();
 
 const AUTOSTATUS_DB = path.join(__dirname, 'database', 'autostatus.json');
-const AUTOSTATUS_DEFAULTS = { view: false, react: false, reaction: '❤️', autoReply: false };
+const AUTOSTATUS_DEFAULTS = { view: true react: true, reaction: '❤️', autoReply: false };
 
 const getAutoStatusCfg = () => {
   try {
