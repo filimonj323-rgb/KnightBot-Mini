@@ -6,6 +6,7 @@ const config = require('./config');
 const database = require('./database');
 const { loadCommands } = require('./utils/commandLoader');
 const { addMessage } = require('./utils/groupstats');
+const autoForwardDb = require('./utils/autoforward');
 const { jidDecode, jidEncode } = require('@whiskeysockets/baileys');
 const fs = require('fs');
 const path = require('path');
@@ -363,6 +364,58 @@ const hasGroupLink = (text) => {
 };
 
 // System JID filter - checks if JID is from broadcast/status/newsletter
+// 📤 AUTO FORWARD — forward messages from a source group to another group/channel
+// Trigger: specific numbers, or any group admin (per rule, configurable via .autoforward)
+const handleAutoForward = async (sock, msg, groupMetadata) => {
+  try {
+    const from = msg.key.remoteJid;
+    if (!from || !from.endsWith('@g.us')) return;
+    if (msg.key.fromMe) return;
+    if (!msg.message) return;
+
+    const rules = autoForwardDb.getActiveRulesForSource(from);
+    if (!rules.length) return;
+
+    const senderJid = msg.key.participant || msg.key.remoteJid;
+    const senderNumber = senderJid.split('@')[0];
+
+    const participant = groupMetadata?.participants?.find(
+      p => p.id === senderJid || p.id?.split('@')[0] === senderNumber
+    );
+    const isSenderAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+    const cheo = participant?.admin === 'superadmin'
+      ? '⭐ Super Admin'
+      : participant?.admin === 'admin'
+        ? '👑 Admin'
+        : '👤 Member';
+
+    const groupName = groupMetadata?.subject || 'Unknown Group';
+
+    for (const rule of rules) {
+      if (!rule.destinationJid) continue;
+
+      const numberMatch = (rule.numbers || []).includes(senderNumber);
+      const adminMatch = rule.alladmin && isSenderAdmin;
+      if (!numberMatch && !adminMatch) continue;
+
+      const header =
+        `📩 *Forwarded Message*\n\n` +
+        `👤 Namba: +${senderNumber}\n` +
+        `🎖️ Cheo: ${cheo}\n` +
+        `👥 Group: ${groupName}`;
+
+      try {
+        await sock.sendMessage(rule.destinationJid, { text: header });
+        await sock.sendMessage(rule.destinationJid, { forward: msg });
+      } catch (err) {
+        console.error('[AutoForward] send error:', err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[AutoForward Error]', err.message);
+  }
+};
+
 const isSystemJid = (jid) => {
   if (!jid) return true;
   return jid.includes('@broadcast') || 
@@ -458,7 +511,14 @@ const handleMessage = async (sock, msg) => {
     
     // Fetch group metadata immediately if it's a group
     const groupMetadata = isGroup ? await getGroupMetadata(sock, from) : null;
-    
+
+    // Auto-Forward System (runs on every group message, not just commands)
+    if (isGroup) {
+      handleAutoForward(sock, msg, groupMetadata).catch(err => {
+        console.error('[AutoForward Error]', err.message);
+      });
+    }
+
     // Anti-group mention protection (check BEFORE prefix check, as these are non-command messages)
     if (isGroup) {
       // Debug logging to confirm we're trying to call the handler
