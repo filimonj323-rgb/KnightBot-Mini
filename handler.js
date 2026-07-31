@@ -7,7 +7,7 @@ const database = require('./database');
 const { loadCommands } = require('./utils/commandLoader');
 const { addMessage } = require('./utils/groupstats');
 const autoForwardDb = require('./utils/autoforward');
-const { jidDecode, jidEncode } = require('@whiskeysockets/baileys');
+const { jidDecode, jidEncode, generateForwardMessageContent, generateWAMessageFromContent } = require('@whiskeysockets/baileys');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -366,6 +366,8 @@ const hasGroupLink = (text) => {
 // System JID filter - checks if JID is from broadcast/status/newsletter
 // 📤 AUTO FORWARD — forward messages from a source group to another group/channel
 // Trigger: specific numbers, or any group admin (per rule, configurable via .autoforward)
+// Inatuma UJUMBE MMOJA (copy ya content + taarifa ya sender) badala ya mbili,
+// na inaonyesha namba HALISI (imegeuzwa kutoka @lid ikiwa inahitajika) kama mention.
 const handleAutoForward = async (sock, msg, groupMetadata) => {
   try {
     const from = msg.key.remoteJid;
@@ -377,11 +379,16 @@ const handleAutoForward = async (sock, msg, groupMetadata) => {
     if (!rules.length) return;
 
     const senderJid = msg.key.participant || msg.key.remoteJid;
-    const senderNumber = senderJid.split('@')[0];
+    const senderNumberRaw = senderJid.split('@')[0];
 
-    const participant = groupMetadata?.participants?.find(
-      p => p.id === senderJid || p.id?.split('@')[0] === senderNumber
-    );
+    // Geuza @lid kuwa namba halisi ya simu (tunatumia mfumo uliopo wa lid-mapping)
+    const realSenderJid = normalizeJidWithLid(senderJid) || senderJid;
+    const realNumber = realSenderJid.split('@')[0];
+
+    const participant = groupMetadata?.participants?.find(p => {
+      const ids = [p.id, p.lid].filter(Boolean).map(id => id.split('@')[0]);
+      return ids.includes(senderNumberRaw) || ids.includes(realNumber);
+    });
     const isSenderAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
     const cheo = participant?.admin === 'superadmin'
       ? '⭐ Super Admin'
@@ -390,23 +397,42 @@ const handleAutoForward = async (sock, msg, groupMetadata) => {
         : '👤 Member';
 
     const groupName = groupMetadata?.subject || 'Unknown Group';
+    const senderName = msg.pushName || realNumber;
 
-    for (const rule of rules) {
-      if (!rule.destinationJid) continue;
-
-      const numberMatch = (rule.numbers || []).includes(senderNumber);
+    const activeRules = rules.filter(rule => {
+      if (!rule.destinationJid) return false;
+      const numberMatch = (rule.numbers || []).includes(senderNumberRaw) || (rule.numbers || []).includes(realNumber);
       const adminMatch = rule.alladmin && isSenderAdmin;
-      if (!numberMatch && !adminMatch) continue;
+      return numberMatch || adminMatch;
+    });
+    if (!activeRules.length) return;
 
-      const header =
-        `📩 *Forwarded Message*\n\n` +
-        `👤 Namba: +${senderNumber}\n` +
-        `🎖️ Cheo: ${cheo}\n` +
-        `👥 Group: ${groupName}`;
+    // Muda halisi wa message ilipotumwa (si wakati wa sasa)
+    const sentDate = msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000)
+      : new Date();
+    const timeString = sentDate.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Africa/Dar_es_Salaam'
+    });
+    const dateString = sentDate.toLocaleDateString('en-GB', {
+      timeZone: 'Africa/Dar_es_Salaam'
+    }); // dd/mm/yyyy
 
+    const header =
+      `📩 *Forwarded Message*\n` +
+      `👤 Namba: @${realNumber}\n` +
+      `📛 Jina: ${senderName}\n` +
+      `🎖️ Cheo: ${cheo}\n` +
+      `👥 Group: ${groupName}\n` +
+      `⏰ Muda: ${timeString} | ${dateString}\n` +
+      `━━━━━━━━━━━━━━`;
+
+    for (const rule of activeRules) {
       try {
-        await sock.sendMessage(rule.destinationJid, { text: header });
-        await sock.sendMessage(rule.destinationJid, { forward: msg });
+        await sendAutoForwardCopy(sock, rule.destinationJid, msg, header, realSenderJid);
       } catch (err) {
         console.error('[AutoForward] send error:', err.message);
       }
@@ -414,6 +440,83 @@ const handleAutoForward = async (sock, msg, groupMetadata) => {
   } catch (err) {
     console.error('[AutoForward Error]', err.message);
   }
+};
+
+// Inajaribu kutuma taarifa (header) ikiwa na PICHA YA PROFILE ya mtumaji kama
+// caption-image (ujumbe mmoja). Ikishindikana (mtu hana profile photo/imefichwa),
+// inarudi kwenye ujumbe wa maandishi wa kawaida.
+const sendHeaderWithProfilePhoto = async (sock, destJid, header, mentionJid, profileJid) => {
+  let picUrl = null;
+  try {
+    picUrl = await sock.profilePictureUrl(profileJid, 'image');
+  } catch (e) {
+    picUrl = null; // hana profile photo au imefichwa
+  }
+
+  if (picUrl) {
+    try {
+      return await sock.sendMessage(destJid, {
+        image: { url: picUrl },
+        caption: header,
+        mentions: [mentionJid]
+      });
+    } catch (e) {
+      // shindwa ku-download/tuma picha - rudi kwenye text
+    }
+  }
+
+  return sock.sendMessage(destJid, { text: header, mentions: [mentionJid] });
+};
+
+// Inachukua ("copy") content halisi ya msg na kuiweka taarifa ya sender ndani ya
+// ujumbe HUOHUO (caption/text) pale inapowezekana, ili itume kama SMS MOJA tu.
+// Kwa maandishi (text) - tunatuma PICHA YA PROFILE + maandishi yote kama caption.
+// Kwa aina zisizoruhusu caption kwenye WhatsApp (audio/sticker/contact/location),
+// inatuma taarifa (yenye profile photo) kama ujumbe mfupi kisha content yenyewe.
+const sendAutoForwardCopy = async (sock, destJid, msg, header, mentionJid) => {
+  let content;
+  try {
+    content = generateForwardMessageContent(msg, false);
+  } catch (e) {
+    content = null;
+  }
+
+  // Fallback ikiwa generateForwardMessageContent haipo/imeshindwa
+  if (!content) {
+    await sendHeaderWithProfilePhoto(sock, destJid, header, mentionJid, mentionJid);
+    return sock.sendMessage(destJid, { forward: msg });
+  }
+
+  const type = Object.keys(content)[0];
+  const sub = content[type];
+
+  // Ondoa alama ya "Forwarded" ili ionekane kama ujumbe wa kawaida (copy), si forward rasmi
+  if (sub?.contextInfo) {
+    delete sub.contextInfo.isForwarded;
+    delete sub.contextInfo.forwardingScore;
+  }
+
+  const captionTypes = ['imageMessage', 'videoMessage', 'documentMessage'];
+  const textTypes = ['conversation', 'extendedTextMessage'];
+
+  if (textTypes.includes(type)) {
+    // Maandishi tu - hakuna picha ya content ya awali, hivyo nafasi ya picha
+    // (slot moja tu inaruhusiwa na WhatsApp) inatumika kwa PROFILE PHOTO ya mtumaji.
+    const originalText = type === 'conversation' ? sub : (sub.text || '');
+    return sendHeaderWithProfilePhoto(sock, destJid, `${header}\n\n${originalText}`, mentionJid, mentionJid);
+  } else if (captionTypes.includes(type)) {
+    // Picha/video/document halisi tayari inachukua nafasi ya picha,
+    // hivyo profile photo haiwezi kuongezwa bila kuwa ujumbe wa pili.
+    sub.caption = sub.caption ? `${header}\n\n${sub.caption}` : header;
+    sub.contextInfo = { ...(sub.contextInfo || {}), mentionedJid: [mentionJid] };
+  } else {
+    // Audio, sticker, contact, location n.k — WhatsApp haziruhusu caption.
+    // Tunatuma taarifa (yenye profile photo ikiwezekana) kisha tunaambatanisha content yenyewe.
+    await sendHeaderWithProfilePhoto(sock, destJid, header, mentionJid, mentionJid);
+  }
+
+  const waMsg = generateWAMessageFromContent(destJid, content, {});
+  return sock.relayMessage(destJid, waMsg.message, { messageId: waMsg.key.id });
 };
 
 const isSystemJid = (jid) => {
