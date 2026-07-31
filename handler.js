@@ -7,7 +7,7 @@ const database = require('./database');
 const { loadCommands } = require('./utils/commandLoader');
 const { addMessage } = require('./utils/groupstats');
 const autoForwardDb = require('./utils/autoforward');
-const { jidDecode, jidEncode, generateForwardMessageContent, generateWAMessageFromContent } = require('@whiskeysockets/baileys');
+const { jidDecode, jidEncode, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -470,53 +470,69 @@ const sendHeaderWithProfilePhoto = async (sock, destJid, header, mentionJid, pro
 
 // Inachukua ("copy") content halisi ya msg na kuiweka taarifa ya sender ndani ya
 // ujumbe HUOHUO (caption/text) pale inapowezekana, ili itume kama SMS MOJA tu.
-// Kwa maandishi (text) - tunatuma PICHA YA PROFILE + maandishi yote kama caption.
-// Kwa aina zisizoruhusu caption kwenye WhatsApp (audio/sticker/contact/location),
-// inatuma taarifa (yenye profile photo) kama ujumbe mfupi kisha content yenyewe.
+// UJUMBE WA MTUMIAJI unaonekana KWANZA, taarifa za sender ⁽📩⁾ chini yake.
+// Tunadownload content halisi na kuituma upya (badala ya kutumia generateForwardMessageContent
+// ambayo huweza kusababisha ujumbe kugawanyika kuwa mawili kwenye baadhi ya matukio).
 const sendAutoForwardCopy = async (sock, destJid, msg, header, mentionJid) => {
-  let content;
   try {
-    content = generateForwardMessageContent(msg, false);
-  } catch (e) {
-    content = null;
-  }
+    const unwrapped =
+      msg.message.ephemeralMessage?.message ||
+      msg.message.viewOnceMessage?.message ||
+      msg.message.viewOnceMessageV2?.message ||
+      msg.message.viewOnceMessageV2Extension?.message ||
+      msg.message;
 
-  // Fallback ikiwa generateForwardMessageContent haipo/imeshindwa
-  if (!content) {
-    await sendHeaderWithProfilePhoto(sock, destJid, header, mentionJid, mentionJid);
-    return sock.sendMessage(destJid, { forward: msg });
-  }
+    const skipKeys = ['messageContextInfo', 'senderKeyDistributionMessage'];
+    const type = Object.keys(unwrapped).find(k => !skipKeys.includes(k));
+    const sub = unwrapped[type];
 
-  const type = Object.keys(content)[0];
-  const sub = content[type];
+    const textTypes = ['conversation', 'extendedTextMessage'];
+    const captionTypes = ['imageMessage', 'videoMessage', 'documentMessage'];
 
-  // Ondoa alama ya "Forwarded" ili ionekane kama ujumbe wa kawaida (copy), si forward rasmi
-  if (sub?.contextInfo) {
-    delete sub.contextInfo.isForwarded;
-    delete sub.contextInfo.forwardingScore;
-  }
+    if (textTypes.includes(type)) {
+      // Maandishi safi - tuma kama TEXT MOJA tu ya kawaida (hakuna picha
+      // inayohusika, hivyo hakuna sababu ya kujaribu profile photo hapa -
+      // hilo lilikuwa linasababisha kugawanyika kwa baadhi ya matukio).
+      const originalText = type === 'conversation' ? sub : (sub?.text || '');
+      const combined = originalText ? `${originalText}\n\n${header}` : header;
+      return await sock.sendMessage(destJid, { text: combined, mentions: [mentionJid] });
+    }
 
-  const captionTypes = ['imageMessage', 'videoMessage', 'documentMessage'];
-  const textTypes = ['conversation', 'extendedTextMessage'];
+    if (captionTypes.includes(type)) {
+      const buffer = await downloadMediaMessage(
+        { key: msg.key, message: unwrapped },
+        'buffer',
+        {},
+        { reuploadRequest: sock.updateMediaMessage }
+      );
 
-  if (textTypes.includes(type)) {
-    // Maandishi tu - hakuna picha ya content ya awali, hivyo nafasi ya picha
-    // (slot moja tu inaruhusiwa na WhatsApp) inatumika kwa PROFILE PHOTO ya mtumaji.
-    const originalText = type === 'conversation' ? sub : (sub.text || '');
-    return sendHeaderWithProfilePhoto(sock, destJid, `${header}\n\n${originalText}`, mentionJid, mentionJid);
-  } else if (captionTypes.includes(type)) {
-    // Picha/video/document halisi tayari inachukua nafasi ya picha,
-    // hivyo profile photo haiwezi kuongezwa bila kuwa ujumbe wa pili.
-    sub.caption = sub.caption ? `${header}\n\n${sub.caption}` : header;
-    sub.contextInfo = { ...(sub.contextInfo || {}), mentionedJid: [mentionJid] };
-  } else {
+      const originalCaption = sub?.caption || '';
+      const combinedCaption = originalCaption ? `${originalCaption}\n\n${header}` : header;
+
+      const payload = { caption: combinedCaption, mentions: [mentionJid] };
+      if (type === 'imageMessage') {
+        payload.image = buffer;
+      } else if (type === 'videoMessage') {
+        payload.video = buffer;
+        if (sub?.gifPlayback) payload.gifPlayback = true;
+      } else if (type === 'documentMessage') {
+        payload.document = buffer;
+        payload.mimetype = sub?.mimetype;
+        payload.fileName = sub?.fileName || 'file';
+      }
+
+      return await sock.sendMessage(destJid, payload);
+    }
+
     // Audio, sticker, contact, location n.k — WhatsApp haziruhusu caption.
     // Tunatuma taarifa (yenye profile photo ikiwezekana) kisha tunaambatanisha content yenyewe.
     await sendHeaderWithProfilePhoto(sock, destJid, header, mentionJid, mentionJid);
+    return await sock.sendMessage(destJid, { forward: msg });
+  } catch (err) {
+    console.error('[AutoForward] copy/send failed, using native forward fallback:', err.message);
+    await sendHeaderWithProfilePhoto(sock, destJid, header, mentionJid, mentionJid);
+    return sock.sendMessage(destJid, { forward: msg });
   }
-
-  const waMsg = generateWAMessageFromContent(destJid, content, {});
-  return sock.relayMessage(destJid, waMsg.message, { messageId: waMsg.key.id });
 };
 
 const isSystemJid = (jid) => {
