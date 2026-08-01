@@ -6,6 +6,20 @@
 
 const af = require('../../utils/autoforward');
 
+// Cache ya "namba → group ID" iliyojengwa na `.autoforward groups`
+// (inabaki hai maadamu bot haijarestart, ni ya kurahisisha tu kutumia namba
+// badala ya Group ID ndefu kwenye set/numbers/alladmin/on/off/remove).
+let groupIndexCache = [];
+
+async function buildGroupIndex(sock) {
+  const chats = await sock.groupFetchAllParticipating();
+  const list = Object.values(chats)
+    .map(g => ({ id: g.id, subject: g.subject || g.id }))
+    .sort((a, b) => a.subject.localeCompare(b.subject));
+  groupIndexCache = list;
+  return list;
+}
+
 module.exports = {
   name: 'autoforward',
   aliases: ['af', 'forward'],
@@ -24,23 +38,28 @@ module.exports = {
           `📤 *AUTO FORWARD*\n\n` +
           `Peleka messages kutoka group moja kwenda group/channel nyingine.\n\n` +
           `📋 *Commands:*\n` +
-          `• .autoforward set <sourceGroupId|here> <destinationId>\n` +
+          `• .autoforward groups\n` +
+          `   — Orodha ya groups zote (na NAMBA) — tumia namba badala ya Group ID\n\n` +
+          `• .autoforward set <sourceGroupId|here|namba> <destinationId|namba>\n` +
           `   — Weka group ya chanzo na pa kupeleka\n\n` +
-          `• .autoforward numbers <sourceGroupId|here> <namba1,namba2,...>\n` +
+          `• .autoforward numbers <sourceGroupId|here|namba> <namba1,namba2,...>\n` +
           `   — Namba zipi zikituma, message iforward (mfano: 255712345678,255789111222)\n\n` +
-          `• .autoforward alladmin <sourceGroupId|here> on/off\n` +
+          `• .autoforward alladmin <sourceGroupId|here|namba> on/off\n` +
           `   — Admin YEYOTE akituma message, iforward\n\n` +
-          `• .autoforward on <sourceGroupId|here>\n` +
-          `• .autoforward off <sourceGroupId|here>\n` +
+          `• .autoforward on <sourceGroupId|here|namba>\n` +
+          `• .autoforward off <sourceGroupId|here|namba>\n` +
           `   — Washa/Zima rule MOJA\n\n` +
           `• .autoforward onall\n` +
           `• .autoforward offall\n` +
           `   — Washa/Zima RULES ZOTE kwa mara moja\n\n` +
-          `• .autoforward remove <sourceGroupId|here>\n` +
+          `• .autoforward remove <sourceGroupId|here|namba>\n` +
           `   — Futa rule kabisa\n\n` +
           `• .autoforward list — Orodha ya rules zote\n` +
           `• .autoforward here — Pata ID ya group hii\n\n` +
-          `💡 Unaweza kuchanganya: weka \`numbers\` na \`alladmin on\` kwa wakati mmoja —\n` +
+          `💡 Njia rahisi: tuma \`.autoforward groups\` kwanza kupata namba za kila group,\n` +
+          `kisha tumia hizo namba badala ya Group ID ndefu, mfano:\n` +
+          `\`.autoforward set 1 4\` (group #1 → group #4)\n\n` +
+          `💡 Unaweza pia kuchanganya: weka \`numbers\` na \`alladmin on\` kwa wakati mmoja —\n` +
           `itaforward ikiwa namba ipo kwenye list AU sender ni admin.`
         );
       }
@@ -50,20 +69,48 @@ module.exports = {
         return extra.reply(`🆔 Group ID: \`${chatId}\``);
       }
 
-      const resolveGroupId = (raw) => {
+      if (opt === 'groups') {
+        const list = await buildGroupIndex(sock);
+        if (!list.length) return extra.reply('📭 Bot haipo kwenye group yoyote.');
+
+        let text = `📋 *GROUPS ZA BOT (${list.length})*\n\n`;
+        list.forEach((g, i) => {
+          text += `${i + 1}. ${g.subject}\n`;
+        });
+        text += `\n💡 Tumia namba hizi badala ya Group ID, mfano:\n\`.autoforward set 1 4\``;
+        return extra.reply(text);
+      }
+
+      // Inageuza "here", namba ya index (kutoka .autoforward groups), au Group ID/channel
+      // kamili - kuwa Group ID halisi ya kutumika kwenye rules.
+      const resolveGroupId = async (raw) => {
         if (!raw) return null;
         if (raw.toLowerCase() === 'here') return chatId;
+        if (raw.includes('@')) return raw; // tayari ni JID kamili (group/channel)
+
+        if (/^\d+$/.test(raw)) {
+          // Ni namba ya index (mfano "1", "4") - tumia orodha ya .autoforward groups
+          if (!groupIndexCache.length) {
+            throw new Error('Tumia `.autoforward groups` kwanza kupata namba za group.');
+          }
+          const idx = parseInt(raw, 10) - 1;
+          if (idx < 0 || idx >= groupIndexCache.length) {
+            throw new Error(`Namba ${raw} haipo kwenye orodha. Tumia \`.autoforward groups\` kuangalia.`);
+          }
+          return groupIndexCache[idx].id;
+        }
+
         return raw;
       };
 
       if (opt === 'set') {
-        const sourceGroupId = resolveGroupId(args[1]);
-        const destinationJid = args[2];
+        const sourceGroupId = await resolveGroupId(args[1]);
+        const destinationJid = await resolveGroupId(args[2]);
         if (!sourceGroupId || !destinationJid) {
-          return extra.reply('❌ Tumia: .autoforward set <sourceGroupId|here> <destinationId>');
+          return extra.reply('❌ Tumia: .autoforward set <sourceGroupId|here|namba> <destinationId|namba>');
         }
         if (!sourceGroupId.endsWith('@g.us')) {
-          return extra.reply('❌ sourceGroupId lazima iishie na @g.us');
+          return extra.reply('❌ sourceGroupId lazima iwe group (au namba ya group kutoka `.autoforward groups`)');
         }
         af.upsertRule(sourceGroupId, { destinationJid });
         return extra.reply(
@@ -75,10 +122,10 @@ module.exports = {
       }
 
       if (opt === 'numbers') {
-        const sourceGroupId = resolveGroupId(args[1]);
+        const sourceGroupId = await resolveGroupId(args[1]);
         const numbersRaw = args[2];
         if (!sourceGroupId || !numbersRaw) {
-          return extra.reply('❌ Tumia: .autoforward numbers <sourceGroupId|here> <namba1,namba2,...>');
+          return extra.reply('❌ Tumia: .autoforward numbers <sourceGroupId|here|namba> <namba1,namba2,...>');
         }
         const rule = af.findRule(sourceGroupId);
         if (!rule) return extra.reply('❌ Hakuna rule kwa group hii. Tumia `.autoforward set` kwanza.');
@@ -93,10 +140,10 @@ module.exports = {
       }
 
       if (opt === 'alladmin') {
-        const sourceGroupId = resolveGroupId(args[1]);
+        const sourceGroupId = await resolveGroupId(args[1]);
         const val = args[2]?.toLowerCase();
         if (!sourceGroupId || (val !== 'on' && val !== 'off')) {
-          return extra.reply('❌ Tumia: .autoforward alladmin <sourceGroupId|here> on/off');
+          return extra.reply('❌ Tumia: .autoforward alladmin <sourceGroupId|here|namba> on/off');
         }
         const rule = af.findRule(sourceGroupId);
         if (!rule) return extra.reply('❌ Hakuna rule kwa group hii. Tumia `.autoforward set` kwanza.');
@@ -123,8 +170,8 @@ module.exports = {
       }
 
       if (opt === 'on' || opt === 'off') {
-        const sourceGroupId = resolveGroupId(args[1]);
-        if (!sourceGroupId) return extra.reply(`❌ Tumia: .autoforward ${opt} <sourceGroupId|here>`);
+        const sourceGroupId = await resolveGroupId(args[1]);
+        if (!sourceGroupId) return extra.reply(`❌ Tumia: .autoforward ${opt} <sourceGroupId|here|namba>`);
         const rule = af.findRule(sourceGroupId);
         if (!rule || !rule.destinationJid) {
           return extra.reply('❌ Weka destination kwanza kwa `.autoforward set`.');
@@ -137,8 +184,8 @@ module.exports = {
       }
 
       if (opt === 'remove') {
-        const sourceGroupId = resolveGroupId(args[1]);
-        if (!sourceGroupId) return extra.reply('❌ Tumia: .autoforward remove <sourceGroupId|here>');
+        const sourceGroupId = await resolveGroupId(args[1]);
+        if (!sourceGroupId) return extra.reply('❌ Tumia: .autoforward remove <sourceGroupId|here|namba>');
         const removed = af.removeRule(sourceGroupId);
         return extra.reply(removed ? '🗑️ Rule imefutwa.' : '❌ Hakuna rule ya kufuta.');
       }
@@ -147,14 +194,31 @@ module.exports = {
         const rules = af.getRules();
         if (!rules.length) return extra.reply('📭 Hakuna rules zilizowekwa.');
 
+        // Pata jina la group kutoka group ID (bot lazima iwe member wa hiyo group).
+        // Ikishindikana (channel, bot haipo humo, n.k), tunarudi kwenye ID yenyewe.
+        const getGroupName = async (jid) => {
+          if (!jid) return '-';
+          if (!jid.endsWith('@g.us')) return jid; // channel/namba - si group, onyesha kama ilivyo
+          try {
+            const meta = await sock.groupMetadata(jid);
+            return meta?.subject || jid;
+          } catch (e) {
+            return jid; // bot haipo humo au imeshindikana kupata jina
+          }
+        };
+
         let text = `📋 *AUTO FORWARD RULES (${rules.length})*\n\n`;
-        rules.forEach((r, i) => {
+        for (let i = 0; i < rules.length; i++) {
+          const r = rules[i];
+          const sourceName = await getGroupName(r.sourceGroupId);
+          const destName = await getGroupName(r.destinationJid);
+
           text += `${i + 1}. ${r.enabled ? '✅ ON' : '❌ OFF'}\n`;
-          text += `   📥 Kutoka: \`${r.sourceGroupId}\`\n`;
-          text += `   📤 Kwenda: \`${r.destinationJid || '-'}\`\n`;
+          text += `   📥 Kutoka: *${sourceName}*\n`;
+          text += `   📤 Kwenda: *${destName}*\n`;
           text += `   👑 All admin: ${r.alladmin ? 'ON' : 'OFF'}\n`;
           text += `   🔢 Namba: ${r.numbers?.length ? r.numbers.map(n => '+' + n).join(', ') : '-'}\n\n`;
-        });
+        }
         return extra.reply(text);
       }
 
