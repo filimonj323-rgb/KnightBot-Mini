@@ -2,6 +2,13 @@
  * Auto-Forward Database Helper
  * Rules: forward messages from a source group to a destination group/channel,
  * either from specific numbers, or from any group admin.
+ *
+ * ⚡ PERFORMANCE: rules zinahifadhiwa kwenye MEMORY (cache) baada ya kusomwa
+ * mara moja. Kabla, kila ujumbe kwenye group YOYOTE ulisababisha kusoma faili
+ * kutoka diski (synchronous/blocking) - hii ilikuwa inazuia (block) event loop
+ * nzima ya bot kwa muda mfupi kila ujumbe unapoingia, ikisababisha commands
+ * kuchelewa na "waiting for message". Sasa disk inasomwa MARA MOJA tu, na
+ * kuandikwa upya (save) kwa njia ya async isiyoblock chochote.
  */
 
 const fs = require('fs');
@@ -10,33 +17,45 @@ const path = require('path');
 const DB_PATH = path.join(__dirname, '..', 'database');
 const AUTOFORWARD_DB = path.join(DB_PATH, 'autoforward.json');
 
-function ensureDb() {
+let cache = null; // { rules: [...] } - inabaki kwenye memory maadamu process haijarestart
+
+function ensureDbSync() {
   if (!fs.existsSync(DB_PATH)) fs.mkdirSync(DB_PATH, { recursive: true });
   if (!fs.existsSync(AUTOFORWARD_DB)) {
     fs.writeFileSync(AUTOFORWARD_DB, JSON.stringify({ rules: [] }, null, 2));
   }
 }
 
-function load() {
+// Inasoma kutoka diski MARA MOJA tu (wakati wa kwanza kabisa kuitwa),
+// baada ya hapo inarudisha cache ya memory - haraka sana, hakuna blocking I/O.
+function ensureLoaded() {
+  if (cache !== null) return cache;
   try {
-    ensureDb();
+    ensureDbSync();
     const data = JSON.parse(fs.readFileSync(AUTOFORWARD_DB, 'utf-8'));
     if (!Array.isArray(data.rules)) data.rules = [];
-    return data;
+    cache = data;
   } catch (e) {
-    return { rules: [] };
+    cache = { rules: [] };
   }
+  return cache;
+}
+
+// Inaandika kwenye diski kwa njia ya ASYNC (haiblock event loop hata kidogo).
+function persist() {
+  fs.writeFile(AUTOFORWARD_DB, JSON.stringify(cache, null, 2), (err) => {
+    if (err) console.error('[autoforward] save error:', err.message);
+  });
+}
+
+function load() {
+  return ensureLoaded();
 }
 
 function save(data) {
-  try {
-    ensureDb();
-    fs.writeFileSync(AUTOFORWARD_DB, JSON.stringify(data, null, 2));
-    return true;
-  } catch (e) {
-    console.error('[autoforward] save error:', e.message);
-    return false;
-  }
+  cache = data;
+  persist();
+  return true;
 }
 
 function getRules() {
