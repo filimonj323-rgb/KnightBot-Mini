@@ -1705,11 +1705,16 @@ const initializeAntiCall = (sock) => {
 // 📊 AUTO STATUS VIEWER + REACT — INSTANT VIEW (FIXED, LID-aware)
 // ════════════════════════════════════════════════════════════════
 // Inatumia database/autostatus.json (settings sawa na .autostatus command)
+const STATUS_REACTIONS = ['🔥', '👍', '😍', '🥰', '💯', '😊', '✨'];
 const viewedStatusCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, maxKeys: 10000 });
 const statusProcessingQueue = new Set();
 
+function randomReaction() {
+  return STATUS_REACTIONS[Math.floor(Math.random() * STATUS_REACTIONS.length)];
+}
+
 const AUTOSTATUS_DB = path.join(__dirname, 'database', 'autostatus.json');
-const AUTOSTATUS_DEFAULTS = { view: true, react: true, reaction: '❤️', autoReply: false };
+const AUTOSTATUS_DEFAULTS = { view: true, react: true, reaction: '❤️', randomReact: false, autoReply: false };
 
 const getAutoStatusCfg = () => {
   try {
@@ -1746,7 +1751,7 @@ function setupAutoStatusViewer(sock) {
       statusProcessingQueue.add(statusId);
 
       try {
-        // ✅ Set cache BEFORE view to avoid double-processing on fast bursts
+        // ✅ Set cache BEFORE view
         viewedStatusCache.set(statusId, true);
 
         // ✅ INSTANT VIEW
@@ -1755,20 +1760,34 @@ function setupAutoStatusViewer(sock) {
         }
 
         if (cfg.react) {
-          // ⚠️ Baileys rc: participant inaweza kuja kama @lid.
-          // WhatsApp inahitaji phone-number JID (@s.whatsapp.net) kwenye statusJidList,
-          // hivyo tunatumia normalizeJidWithLid iliyopo tayari kwenye faili hili.
-          const deliverJid = normalizeJidWithLid(posterJid) || posterJid;
+          // ⏳ Delay ya random sekunde 30-60 kabla ya react, ili isionekane
+          // ni bot inayofanya kazi mara moja (haiblock processing ya status zingine).
+          const delayMs = 30000 + Math.floor(Math.random() * 30000); // 30s - 60s
 
-          await sock.sendMessage('status@broadcast', {
-            react: {
-              text: cfg.reaction,
-              key: msg.key
+          setTimeout(async () => {
+            try {
+              // Emoji: kama randomReact imewashwa, chagua kutoka STATUS_REACTIONS pool,
+              // vinginevyo tumia emoji uliyoweka kwa `.autostatus reaction <emoji>`.
+              const reaction = cfg.randomReact ? randomReaction() : cfg.reaction;
+
+              // ⚠️ Baileys rc: participant inaweza kuja kama @lid.
+              // WhatsApp inahitaji phone-number JID (@s.whatsapp.net) kwenye statusJidList,
+              // hivyo tunatumia normalizeJidWithLid iliyopo tayari kwenye faili hili.
+              const deliverJid = normalizeJidWithLid(posterJid) || posterJid;
+
+              await sock.sendMessage('status@broadcast', {
+                react: {
+                  text: reaction,
+                  key: msg.key
+                }
+              }, {
+                statusJidList: [deliverJid, sock.user.id]
+              });
+              console.log(`✅ Status +${posterNum} → ${cfg.view ? 'viewed ✅' : ''} reacted ${reaction} (delay ${Math.round(delayMs / 1000)}s, deliverJid: ${deliverJid})`);
+            } catch (delayedErr) {
+              console.error(`❌ Delayed react error (+${posterNum}):`, delayedErr.message);
             }
-          }, {
-            statusJidList: [deliverJid, sock.user.id]
-          });
-          console.log(`✅ Status +${posterNum} → ${cfg.view ? 'viewed ✅' : ''} reacted ${cfg.reaction} (deliverJid: ${deliverJid})`);
+          }, delayMs);
         } else if (cfg.view) {
           console.log(`✅ Status +${posterNum} → viewed only (react disabled)`);
         }
@@ -1782,7 +1801,7 @@ function setupAutoStatusViewer(sock) {
     }
   });
 
-  console.log('📊 Auto Status Viewer: ✅ Imewashwa | Anti-Duplicate ✅ | LID-aware ✅');
+  console.log(`📊 Auto Status Viewer: ✅ Imewashwa | Mode: INSTANT VIEW + ${getAutoStatusCfg().randomReact ? 'RANDOM REACT 🎲' : 'FIXED REACTION'} | Anti-Duplicate ✅`);
 }
 
 module.exports = {
