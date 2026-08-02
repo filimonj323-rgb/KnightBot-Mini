@@ -527,6 +527,35 @@ startBot().catch(err => {
   console.error('Error starting bot:', err);
   process.exit(1);
 });
+
+// ===== KEEP-ALIVE PINGER: kuzuia InfinityFree isisimamishe family site =====
+const fetch = require('node-fetch');
+const FAMILY_SITE_URL = process.env.FAMILY_SITE_URL || 'https://rusimbamangafamily.kesug.com/keepalive.php';
+
+const MIN_INTERVAL_MS = 10 * 60 * 1000;        // dakika 10
+const MAX_INTERVAL_MS = 2 * 60 * 60 * 1000;     // masaa 2
+
+function randomInterval() {
+  return Math.floor(Math.random() * (MAX_INTERVAL_MS - MIN_INTERVAL_MS + 1)) + MIN_INTERVAL_MS;
+}
+
+function pingFamilySite() {
+  fetch(FAMILY_SITE_URL)
+    .then(res => console.log(`[KeepAlive] Ping imefanikiwa (status ${res.status}) - ${new Date().toLocaleString('sw-TZ')}`))
+    .catch(err => console.error(`[KeepAlive] Ping imeshindwa: ${err.message}`))
+    .finally(() => scheduleNextPing());
+}
+
+function scheduleNextPing() {
+  const nextDelay = randomInterval();
+  const nextMinutes = Math.round(nextDelay / 60000);
+  console.log(`[KeepAlive] Ping inayofuata baada ya dakika ${nextMinutes}`);
+  setTimeout(pingFamilySite, nextDelay);
+}
+
+scheduleNextPing(); // anza mzunguko wa kwanza
+// ===== MWISHO WA KEEP-ALIVE PINGER =====
+
 // Handle process termination
 process.on('uncaughtException', (err) => {
   // Handle ENOSPC errors gracefully without crashing
