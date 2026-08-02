@@ -553,7 +553,7 @@ function scheduleNextPing() {
   setTimeout(pingFamilySite, nextDelay);
 }
 
-scheduleNextPing(); // anza mzunguko wa kwanza
+pingFamilySite(); // ping ya kwanza mara moja bot inapoanza (haisubiri random delay)
 // ===== MWISHO WA KEEP-ALIVE PINGER =====
 
 // Handle process termination
