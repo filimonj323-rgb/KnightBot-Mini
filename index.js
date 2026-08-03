@@ -586,7 +586,22 @@ async function sendAutoBackup() {
       return;
     }
 
+    const contentType = res.headers.get('content-type') || '';
     const buffer = Buffer.from(await res.arrayBuffer());
+
+    // Ulinzi: kama server iliporomoka (fatal error, missing libs, n.k.) mara nyingi
+    // hurudisha ukurasa mdogo wa HTML/text badala ya ZIP halisi. Tusitume hilo
+    // WhatsApp kama likiwa backup - badala yake tuandike error kwenye logs.
+    const looksLikeZip = contentType.includes('zip') && buffer.length > 1024;
+    if (!looksLikeZip) {
+      console.error(
+        `[AutoBackup] Jibu la server halionekani kuwa ZIP halali ` +
+        `(content-type: "${contentType}", size: ${buffer.length} bytes). ` +
+        `Backup HAITATUMWA - kagua backup_auto.php kwenye server (labda libs/ haipo au kuna error).`
+      );
+      return;
+    }
+
     const today = new Date().toISOString().slice(0, 10);
     const jid = BACKUP_RECIPIENT.includes('@') ? BACKUP_RECIPIENT : `${BACKUP_RECIPIENT}@s.whatsapp.net`;
 
