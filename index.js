@@ -557,80 +557,102 @@ function scheduleNextPing() {
 pingFamilySite(); // ping ya kwanza mara moja bot inapoanza (haisubiri random delay)
 // ===== MWISHO WA KEEP-ALIVE PINGER =====
 
-// ===== AUTO-BACKUP: kutuma SQL backup kupitia WhatsApp kila siku =====
-const BACKUP_URL = process.env.BACKUP_URL || 'https://rusimbamangafamily.kesug.com/backup_auto.php';
+// ===== AUTO-BACKUP: kupokea backup (PUSH) kutoka InfinityFree na kuituma WhatsApp =====
+// Sababu: InfinityFree ina ulinzi wa JS anti-bot unaozuia ombi la moja kwa moja
+// (fetch/curl) kwenda kwao. Badala ya bot ku-"omba" (pull) backup, sasa InfinityFree
+// (kupitia Cron Job yao) ndiyo inayotuma (push) ZIP moja kwa moja kwa bot hii.
+const http = require('http');
+
 const BACKUP_SECRET = process.env.BACKUP_SECRET || 'badilisha_hii_iwe_secret_ndefu_na_ngumu_kubashiri';
 const BACKUP_RECIPIENT = process.env.BACKUP_RECIPIENT || (config.ownerNumber && config.ownerNumber[0]) || null;
-const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // saa 24
+const BACKUP_RECEIVE_PATH = '/receive-backup';
+const HTTP_PORT = process.env.PORT || 3000;
+const MAX_BACKUP_SIZE = 50 * 1024 * 1024; // 50MB - kikomo cha usalama
 
-async function sendAutoBackup() {
-  if (!BACKUP_RECIPIENT) {
-    console.error('[AutoBackup] Hakuna BACKUP_RECIPIENT iliyowekwa — backup haitumwi popote.');
-    return;
-  }
-  if (!global.currentSock) {
-    console.log('[AutoBackup] Bot bado haijaunganishwa na WhatsApp, itajaribu tena baadaye.');
-    return;
-  }
+const backupServer = http.createServer((req, res) => {
+  if (req.method === 'POST' && req.url.split('?')[0] === BACKUP_RECEIVE_PATH) {
+    const urlObj = new URL(req.url, `http://${req.headers.host}`);
+    const secret = urlObj.searchParams.get('secret') || req.headers['x-backup-secret'];
 
-  try {
-    const res = await fetch(`${BACKUP_URL}?secret=${encodeURIComponent(BACKUP_SECRET)}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,sw;q=0.8'
+    if (secret !== BACKUP_SECRET) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('FORBIDDEN');
+      console.error('[AutoBackup] Ombi la kupokea backup lililokataliwa - secret hailingani.');
+      return;
+    }
+
+    const chunks = [];
+    let totalSize = 0;
+    let rejected = false;
+
+    req.on('data', (chunk) => {
+      totalSize += chunk.length;
+      if (totalSize > MAX_BACKUP_SIZE) {
+        rejected = true;
+        res.writeHead(413, { 'Content-Type': 'text/plain' });
+        res.end('TOO_LARGE');
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('end', async () => {
+      if (rejected) return;
+
+      try {
+        const buffer = Buffer.concat(chunks);
+
+        if (buffer.length < 1024) {
+          console.error(`[AutoBackup] Backup iliyopokelewa ni ndogo sana (${buffer.length} bytes) - imekataliwa.`);
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('TOO_SMALL');
+          return;
+        }
+
+        if (!BACKUP_RECIPIENT) {
+          console.error('[AutoBackup] Hakuna BACKUP_RECIPIENT iliyowekwa - backup haitumwi popote.');
+          res.writeHead(503, { 'Content-Type': 'text/plain' });
+          res.end('NO_RECIPIENT');
+          return;
+        }
+        if (!global.currentSock) {
+          console.error('[AutoBackup] Bot bado haijaunganishwa na WhatsApp - backup iliyopokelewa imepotea.');
+          res.writeHead(503, { 'Content-Type': 'text/plain' });
+          res.end('BOT_NOT_READY');
+          return;
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
+        const jid = BACKUP_RECIPIENT.includes('@') ? BACKUP_RECIPIENT : `${BACKUP_RECIPIENT}@s.whatsapp.net`;
+
+        await global.currentSock.sendMessage(jid, {
+          document: buffer,
+          fileName: `familia_backup_${today}.zip`,
+          mimetype: 'application/zip',
+          caption: `📦 *Backup ya Kiotomatiki*\n\nTarehe: ${today}\nUkubwa: ${(buffer.length / 1024).toFixed(1)} KB\n\nZip hii ina faili nne: SQL (restore), XLSX, HTML na PDF za database ya Rusimbamanga Family System.`
+        });
+
+        console.log(`[AutoBackup] Backup imepokelewa na kutumwa kwa mafanikio kwenda ${jid} - ${new Date().toLocaleString('sw-TZ')}`);
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+      } catch (err) {
+        console.error(`[AutoBackup] Imeshindwa kutuma backup iliyopokelewa: ${err.message}`);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('ERROR');
       }
     });
-    const status = res.headers.get('x-backup-status');
-
-    if (status === 'SKIPPED') {
-      console.log(`[AutoBackup] Backup ya leo ilishafanyika — hakuna cha kutuma.`);
-      return;
-    }
-    if (!res.ok) {
-      console.error(`[AutoBackup] Server imekataa ombi (status ${res.status}).`);
-      return;
-    }
-
-    const contentType = res.headers.get('content-type') || '';
-    const buffer = Buffer.from(await res.arrayBuffer());
-
-    // Ulinzi: kama server iliporomoka (fatal error, missing libs, n.k.) mara nyingi
-    // hurudisha ukurasa mdogo wa HTML/text badala ya ZIP halisi. Tusitume hilo
-    // WhatsApp kama likiwa backup - badala yake tuandike error kwenye logs.
-    const looksLikeZip = contentType.includes('zip') && buffer.length > 1024;
-    if (!looksLikeZip) {
-      const snippet = buffer.toString('utf8', 0, Math.min(200, buffer.length)).replace(/\s+/g, ' ').trim();
-      console.error(
-        `[AutoBackup] Jibu la server halionekani kuwa ZIP halali ` +
-        `(content-type: "${contentType}", size: ${buffer.length} bytes). ` +
-        `Backup HAITATUMWA - kagua backup_auto.php kwenye server (labda libs/ haipo au kuna error). ` +
-        `Sehemu ya jibu: "${snippet}"`
-      );
-      return;
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const jid = BACKUP_RECIPIENT.includes('@') ? BACKUP_RECIPIENT : `${BACKUP_RECIPIENT}@s.whatsapp.net`;
-
-    // Server sasa inarudisha ZIP moja yenye SQL + XLSX + HTML + PDF
-    await global.currentSock.sendMessage(jid, {
-      document: buffer,
-      fileName: `familia_backup_${today}.zip`,
-      mimetype: 'application/zip',
-      caption: `📦 *Backup ya Kiotomatiki*\n\nTarehe: ${today}\nUkubwa: ${(buffer.length / 1024).toFixed(1)} KB\n\nZip hii ina faili nne: SQL (restore), XLSX, HTML na PDF za database ya Rusimbamanga Family System, zimetumwa moja kwa moja.`
-    });
-
-    console.log(`[AutoBackup] Backup imetumwa kwa mafanikio kwenda ${jid} - ${new Date().toLocaleString('sw-TZ')}`);
-  } catch (err) {
-    console.error(`[AutoBackup] Imeshindwa: ${err.message}`);
+    return;
   }
-}
 
-// Jaribu backup ya kwanza dakika 2 baada ya bot kuanza (kutoa muda wa kuunganisha WhatsApp)
-setTimeout(sendAutoBackup, 2 * 60 * 1000);
-// Kisha rudia kila saa 24
-setInterval(sendAutoBackup, BACKUP_INTERVAL_MS);
+  // Health check rahisi (Railway inaweza kuipiga ping)
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot iko hai.');
+});
+
+backupServer.listen(HTTP_PORT, () => {
+  console.log(`[AutoBackup] Tayari kupokea backup kwenye port ${HTTP_PORT}${BACKUP_RECEIVE_PATH}`);
+});
 // ===== MWISHO WA AUTO-BACKUP =====
 
 // Handle process termination
