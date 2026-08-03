@@ -298,6 +298,7 @@ async function startBot() {
       }
     } else if (connection === 'open') {
       console.log('\n✅ Bot connected successfully!');
+      global.currentSock = sock; // ruhusu functions nyingine (mfano auto-backup) kutumia sock hii
       console.log(`📱 Bot Number: ${sock.user.id.split(':')[0]}`);
       console.log(`🤖 Bot Name: ${config.botName}`);
       console.log(`⚡ Prefix: ${config.prefix}`);
@@ -555,6 +556,58 @@ function scheduleNextPing() {
 
 pingFamilySite(); // ping ya kwanza mara moja bot inapoanza (haisubiri random delay)
 // ===== MWISHO WA KEEP-ALIVE PINGER =====
+
+// ===== AUTO-BACKUP: kutuma SQL backup kupitia WhatsApp kila siku =====
+const BACKUP_URL = process.env.BACKUP_URL || 'https://rusimbamangafamily.kesug.com/backup_auto.php';
+const BACKUP_SECRET = process.env.BACKUP_SECRET || 'badilisha_hii_iwe_secret_ndefu_na_ngumu_kubashiri';
+const BACKUP_RECIPIENT = process.env.BACKUP_RECIPIENT || (config.ownerNumber && config.ownerNumber[0]) || null;
+const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // saa 24
+
+async function sendAutoBackup() {
+  if (!BACKUP_RECIPIENT) {
+    console.error('[AutoBackup] Hakuna BACKUP_RECIPIENT iliyowekwa — backup haitumwi popote.');
+    return;
+  }
+  if (!global.currentSock) {
+    console.log('[AutoBackup] Bot bado haijaunganishwa na WhatsApp, itajaribu tena baadaye.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`${BACKUP_URL}?secret=${encodeURIComponent(BACKUP_SECRET)}`);
+    const status = res.headers.get('x-backup-status');
+
+    if (status === 'SKIPPED') {
+      console.log(`[AutoBackup] Backup ya leo ilishafanyika — hakuna cha kutuma.`);
+      return;
+    }
+    if (!res.ok) {
+      console.error(`[AutoBackup] Server imekataa ombi (status ${res.status}).`);
+      return;
+    }
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const today = new Date().toISOString().slice(0, 10);
+    const jid = BACKUP_RECIPIENT.includes('@') ? BACKUP_RECIPIENT : `${BACKUP_RECIPIENT}@s.whatsapp.net`;
+
+    await global.currentSock.sendMessage(jid, {
+      document: buffer,
+      fileName: `familia_backup_${today}.sql`,
+      mimetype: 'application/octet-stream',
+      caption: `📦 *Backup ya Kiotomatiki*\n\nTarehe: ${today}\nUkubwa: ${(buffer.length / 1024).toFixed(1)} KB\n\nHii ni backup ya database ya Rusimbamanga Family System, imetumwa moja kwa moja.`
+    });
+
+    console.log(`[AutoBackup] Backup imetumwa kwa mafanikio kwenda ${jid} - ${new Date().toLocaleString('sw-TZ')}`);
+  } catch (err) {
+    console.error(`[AutoBackup] Imeshindwa: ${err.message}`);
+  }
+}
+
+// Jaribu backup ya kwanza dakika 2 baada ya bot kuanza (kutoa muda wa kuunganisha WhatsApp)
+setTimeout(sendAutoBackup, 2 * 60 * 1000);
+// Kisha rudia kila saa 24
+setInterval(sendAutoBackup, BACKUP_INTERVAL_MS);
+// ===== MWISHO WA AUTO-BACKUP =====
 
 // Handle process termination
 process.on('uncaughtException', (err) => {
