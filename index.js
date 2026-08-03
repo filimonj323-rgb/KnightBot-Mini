@@ -574,7 +574,13 @@ async function sendAutoBackup() {
   }
 
   try {
-    const res = await fetch(`${BACKUP_URL}?secret=${encodeURIComponent(BACKUP_SECRET)}`);
+    const res = await fetch(`${BACKUP_URL}?secret=${encodeURIComponent(BACKUP_SECRET)}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,sw;q=0.8'
+      }
+    });
     const status = res.headers.get('x-backup-status');
 
     if (status === 'SKIPPED') {
@@ -594,10 +600,12 @@ async function sendAutoBackup() {
     // WhatsApp kama likiwa backup - badala yake tuandike error kwenye logs.
     const looksLikeZip = contentType.includes('zip') && buffer.length > 1024;
     if (!looksLikeZip) {
+      const snippet = buffer.toString('utf8', 0, Math.min(200, buffer.length)).replace(/\s+/g, ' ').trim();
       console.error(
         `[AutoBackup] Jibu la server halionekani kuwa ZIP halali ` +
         `(content-type: "${contentType}", size: ${buffer.length} bytes). ` +
-        `Backup HAITATUMWA - kagua backup_auto.php kwenye server (labda libs/ haipo au kuna error).`
+        `Backup HAITATUMWA - kagua backup_auto.php kwenye server (labda libs/ haipo au kuna error). ` +
+        `Sehemu ya jibu: "${snippet}"`
       );
       return;
     }
