@@ -590,11 +590,12 @@ async function sendAutoBackup() {
     const today = new Date().toISOString().slice(0, 10);
     const jid = BACKUP_RECIPIENT.includes('@') ? BACKUP_RECIPIENT : `${BACKUP_RECIPIENT}@s.whatsapp.net`;
 
+    // Server sasa inarudisha ZIP moja yenye SQL + XLSX + HTML + PDF
     await global.currentSock.sendMessage(jid, {
       document: buffer,
-      fileName: `familia_backup_${today}.sql`,
-      mimetype: 'application/octet-stream',
-      caption: `📦 *Backup ya Kiotomatiki*\n\nTarehe: ${today}\nUkubwa: ${(buffer.length / 1024).toFixed(1)} KB\n\nHii ni backup ya database ya Rusimbamanga Family System, imetumwa moja kwa moja.`
+      fileName: `familia_backup_${today}.zip`,
+      mimetype: 'application/zip',
+      caption: `📦 *Backup ya Kiotomatiki*\n\nTarehe: ${today}\nUkubwa: ${(buffer.length / 1024).toFixed(1)} KB\n\nZip hii ina faili nne: SQL (restore), XLSX, HTML na PDF za database ya Rusimbamanga Family System, zimetumwa moja kwa moja.`
     });
 
     console.log(`[AutoBackup] Backup imetumwa kwa mafanikio kwenda ${jid} - ${new Date().toLocaleString('sw-TZ')}`);
