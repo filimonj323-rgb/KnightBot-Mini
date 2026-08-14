@@ -7,6 +7,17 @@ const {
 const { PassThrough } = require('stream');
 const ffmpeg = require('fluent-ffmpeg');
 
+// Same pattern used by sticker.js / song.js in this project: point fluent-ffmpeg
+// (and baileys' own internal thumbnail/waveform generation, which shells out to
+// "ffmpeg") at the bundled static binary. Without this, servers like Railway that
+// don't have a system-wide ffmpeg on PATH will silently fail to post video/audio
+// group statuses (image/text keep working, which matches the reported symptom).
+const ffmpegStaticPath = require('ffmpeg-static');
+if (ffmpegStaticPath) {
+  ffmpeg.setFfmpegPath(ffmpegStaticPath);
+  if (!process.env.FFMPEG_PATH) process.env.FFMPEG_PATH = ffmpegStaticPath;
+}
+
 // Single default color for text statuses (purple)
 const PURPLE_COLOR = '#9C27B0';
 
