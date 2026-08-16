@@ -59,7 +59,7 @@ const {
   DisconnectReason,
   Browsers,
   fetchLatestBaileysVersion
-} = require('@whiskeysockets/baileys');
+} = require('@itsliaaa/baileys');
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
 const handler = require('./handler');
