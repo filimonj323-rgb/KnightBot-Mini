@@ -52,6 +52,7 @@
     "wasitech": "npm:@distube/ytdl-core",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "fs-extra": "^11.2.0"
+    "@itsliaaa/baileys": "^0.3.18-final",
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
