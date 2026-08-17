@@ -19,6 +19,29 @@ const CACHE_TTL = 60000; // 1 minute cache
 
 // Load all commands
 const commands = loadCommands();
+const pendingGroupStatus = require('./utils/pendingGroupStatus');
+
+// Chomoa "id" iliyochaguliwa kutoka aina mbalimbali za majibu ya
+// list/interactive buttons - matoleo tofauti ya baileys hutumia
+// muundo tofauti kidogo (legacy listResponseMessage vs native flow).
+const extractInteractiveSelection = (content) => {
+  if (!content) return null;
+
+  const listReply = content.listResponseMessage?.singleSelectReply?.selectedRowId;
+  if (listReply) return listReply;
+
+  const nativeFlow = content.interactiveResponseMessage?.nativeFlowResponseMessage;
+  if (nativeFlow?.paramsJson) {
+    try {
+      const parsed = JSON.parse(nativeFlow.paramsJson);
+      if (parsed?.id) return parsed.id;
+    } catch {
+      // ignore malformed paramsJson
+    }
+  }
+
+  return null;
+};
 
 // Unwrap WhatsApp containers (ephemeral, view once, etc.)
 const getMessageContent = (msg) => {
@@ -724,7 +747,59 @@ const handleMessage = async (sock, msg) => {
         return;
       }
     }
-    
+
+    // 🔹 Group status selection (namba ya button kutoka .gm groupstatus chagua)
+    const gmSelection = extractInteractiveSelection(content);
+    if (gmSelection && gmSelection.startsWith('gmgs_')) {
+      if (!isOwner(sender)) return;
+
+      const payload = pendingGroupStatus.get(sender);
+      if (!payload) {
+        await sock.sendMessage(from, {
+          text: '⌛ Muda wa kuchagua umeisha au hakuna status iliyosubiri. Rudia *.gm groupstatus chagua ...*'
+        }, { quoted: msg });
+        return;
+      }
+
+      const target = gmSelection.slice('gmgs_'.length);
+      const gmCommand = commands.get('gm');
+
+      await sock.sendMessage(from, { text: '⏳ Inatuma group status...' }, { quoted: msg });
+
+      try {
+        if (target === 'all') {
+          const allGroups = await sock.groupFetchAllParticipating();
+          const groupIds = Object.keys(allGroups);
+          let success = 0, failed = 0;
+
+          for (const gid of groupIds) {
+            try {
+              await gmCommand.postGroupStatus(sock, gid, payload);
+              success++;
+              await new Promise(r => setTimeout(r, 1500));
+            } catch (e) {
+              failed++;
+            }
+          }
+
+          await sock.sendMessage(from, {
+            text: `✅ *Group Status Imekamilika!*\n\n📨 Imefanikiwa: ${success}\n❌ Imeshindwa: ${failed}\n📊 Jumla: ${groupIds.length}`
+          }, { quoted: msg });
+        } else {
+          await gmCommand.postGroupStatus(sock, target, payload);
+          const meta = await sock.groupMetadata(target);
+          await sock.sendMessage(from, {
+            text: `✅ Group status imetumwa kwenye *${meta.subject}*!`
+          }, { quoted: msg });
+        }
+      } catch (e) {
+        await sock.sendMessage(from, { text: `❌ Imeshindwa kutuma group status: ${e.message}` }, { quoted: msg });
+      }
+
+      pendingGroupStatus.clear(sender);
+      return;
+    }
+
     // Get message body from unwrapped content
     let body = '';
     if (content.conversation) {
