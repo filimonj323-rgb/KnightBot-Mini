@@ -4,42 +4,20 @@
  */
 
 const config = require('../../config');
-const crypto = require('crypto');
-const {
-  generateWAMessageContent,
-  generateWAMessageFromContent,
-} = require('@whiskeysockets/baileys');
 
 const PURPLE_COLOR = '#9C27B0';
 
-// Helper: tuma group status (text/image) kwa group fulani - inafuata muundo wa groupstatus.js
+// Helper: tuma group status (text/image) kwa group fulani.
+// Uses @itsliaaa/baileys' native groupStatus:true support (same mechanism as
+// commands/admin/groupstatus.js) instead of hand-built groupStatusMessageV2 —
+// the hand-built version used to relay without error but never actually show
+// up as a status for group members.
 async function postGroupStatus(sock, jid, content) {
-  const { backgroundColor } = content;
-  delete content.backgroundColor;
-
-  const inside = await generateWAMessageContent(content, {
-    upload: sock.waUploadToServer,
-    backgroundColor: backgroundColor || PURPLE_COLOR,
-  });
-
-  const secret = crypto.randomBytes(32);
-
-  const statusMsg = generateWAMessageFromContent(
-    jid,
-    {
-      messageContextInfo: { messageSecret: secret },
-      groupStatusMessageV2: {
-        message: {
-          ...inside,
-          messageContextInfo: { messageSecret: secret },
-        },
-      },
-    },
-    {}
-  );
-
-  await sock.relayMessage(jid, statusMsg.message, { messageId: statusMsg.key.id });
-  return statusMsg;
+  const payload = { ...content, groupStatus: true };
+  if (payload.text && !payload.backgroundColor) {
+    payload.backgroundColor = PURPLE_COLOR;
+  }
+  return sock.sendMessage(jid, payload);
 }
 
 module.exports = {
