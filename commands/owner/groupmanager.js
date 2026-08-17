@@ -34,6 +34,36 @@ async function downloadQuotedMedia(quotedMsg, type) {
   return Buffer.concat(chunks);
 }
 
+// Helper: geuza "namba" (mfano 1, 2, 3 - kama zinavyoonekana kwenye .gm list)
+// kuwa groupId halisi. Kama tayari ni groupId kamili (ina @g.us) au ni "all",
+// inarudishwa kama ilivyo bila kubadilishwa.
+// Mpangilio wa namba unafuata mpangilio wa sock.groupFetchAllParticipating(),
+// sawasawa na jinsi .gm list inavyoorodhesha groups (1, 2, 3, ...).
+async function resolveGroupId(sock, raw) {
+  if (!raw) return raw;
+  const val = raw.toString().trim();
+
+  if (val.toLowerCase() === 'all') return val;
+  if (val.endsWith('@g.us')) return val;
+
+  // Namba fupi (mfano "1", "2", "23") -> tafsiri kwa mpangilio wa .gm list
+  if (/^\d{1,4}$/.test(val)) {
+    const idx = parseInt(val, 10);
+    const allGroups = await sock.groupFetchAllParticipating();
+    const groups = Object.values(allGroups);
+    const chosen = groups[idx - 1];
+    if (!chosen) {
+      throw new Error(
+        `Group namba ${idx} haipo. Tumia .gm list kuona namba sahihi (1-${groups.length}).`
+      );
+    }
+    return chosen.id;
+  }
+
+  // Kitu kingine chochote (mfano groupId ndefu bila @g.us) - rudisha kama ilivyo
+  return val;
+}
+
 // Helper: angalia kama ujumbe una quoted image/video, na kama ndiyo, rudisha
 // { type: 'image'|'video', buffer } tayari kutumika kama status.
 async function getQuotedStatusMedia(msg) {
@@ -91,8 +121,8 @@ module.exports = {
           `• .gm resetlink <groupId> — Reset invite link\n` +
           `• .gm send <groupId> <message> — Tuma message\n` +
           `• .gm broadcast <message> — Tuma kwa GROUPS ZOTE\n` +
-          `• .gm groupstatus <groupId|all> <text> — Tuma text status\n` +
-          `• (reply picha/video) .gm groupstatus <groupId|all> [caption] — Tuma image/video status\n` +
+          `• .gm groupstatus <namba|groupId|all> <text> — Tuma text status\n` +
+          `• (reply picha/video) .gm groupstatus <namba|groupId|all> [caption] — Tuma image/video status\n` +
           `• .gm autoreact <groupId|all> on/off [bot|all] — Auto react\n` +
           `• .gm restore <groupId|all> [namba] — Rudisha walioondoka\n` +
           `• .gm leave <groupId> — Bot itoke group\n\n` +
@@ -117,6 +147,7 @@ module.exports = {
           text += `   👥 ${g.participants.length} members\n`;
           text += `   🆔 \`${g.id}\`\n\n`;
         });
+        text += `💡 Tumia namba (mfano *${groups.length > 0 ? 1 : ''}*) badala ya groupId kwenye *.gm groupstatus*, mfano: *.gm groupstatus 1 Habari*`;
 
         return extra.reply(text);
       }
@@ -468,7 +499,7 @@ module.exports = {
       // ikiwa na caption ya hiari: .gm groupstatus <groupId|all> [caption]
       // ══════════════════════════════════════
       if (opt === 'groupstatus' || opt === 'gstatus') {
-        const groupId = args[1];
+        let groupId = args[1];
         const captionOrText = args.slice(2).join(' ');
 
         const quotedMedia = await getQuotedStatusMedia(msg);
@@ -476,10 +507,17 @@ module.exports = {
         if (!groupId || (!quotedMedia && !captionOrText)) {
           return extra.reply(
             '❌ Tumia:\n' +
-            '.gm groupstatus <groupId|all> <text> — TEXT status\n' +
-            '(reply picha/video) .gm groupstatus <groupId|all> [caption] — IMAGE/VIDEO status\n\n' +
+            '.gm groupstatus <namba|groupId|all> <text> — TEXT status\n' +
+            '(reply picha/video) .gm groupstatus <namba|groupId|all> [caption] — IMAGE/VIDEO status\n\n' +
+            '💡 "Namba" ni namba ya group kama inavyoonekana kwenye *.gm list* (mfano: 1, 2, 3) - rahisi zaidi kuliko kuandika groupId ndefu.\n' +
             '💡 Reply (jibu) picha au video moja kwa moja hapa kwenye DM, kisha andika command hii kama caption/reply.'
           );
+        }
+
+        try {
+          groupId = await resolveGroupId(sock, groupId);
+        } catch (e) {
+          return extra.reply(`❌ ${e.message}`);
         }
 
         const buildPayload = () => {
