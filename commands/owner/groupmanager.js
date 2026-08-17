@@ -4,10 +4,11 @@
  */
 
 const config = require('../../config');
+const { downloadContentFromMessage } = global.__baileys;
 
 const PURPLE_COLOR = '#9C27B0';
 
-// Helper: tuma group status (text/image) kwa group fulani.
+// Helper: tuma group status (text/image/video) kwa group fulani.
 // Uses @itsliaaa/baileys' native groupStatus:true support (same mechanism as
 // commands/admin/groupstatus.js) instead of hand-built groupStatusMessageV2 —
 // the hand-built version used to relay without error but never actually show
@@ -18,6 +19,36 @@ async function postGroupStatus(sock, jid, content) {
     payload.backgroundColor = PURPLE_COLOR;
   }
   return sock.sendMessage(jid, payload);
+}
+
+// Helper: pakua media iliyo-quote (reply) kwenye DM — image au video —
+// ili itumike kama group status. Muundo sawa na downloadMedia() ndani ya
+// commands/admin/groupstatus.js.
+async function downloadQuotedMedia(quotedMsg, type) {
+  const mediaMsg = quotedMsg[`${type}Message`] || quotedMsg;
+  const stream = await downloadContentFromMessage(mediaMsg, type);
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+// Helper: angalia kama ujumbe una quoted image/video, na kama ndiyo, rudisha
+// { type: 'image'|'video', buffer } tayari kutumika kama status.
+async function getQuotedStatusMedia(msg) {
+  const ctxInfo = msg.message?.extendedTextMessage?.contextInfo;
+  const quoted = ctxInfo?.quotedMessage;
+  if (!quoted) return null;
+
+  const mtype = Object.keys(quoted)[0] || '';
+  if (/image/i.test(mtype)) {
+    return { type: 'image', buffer: await downloadQuotedMedia(quoted, 'image') };
+  }
+  if (/video/i.test(mtype)) {
+    return { type: 'video', buffer: await downloadQuotedMedia(quoted, 'video') };
+  }
+  return null;
 }
 
 module.exports = {
@@ -60,7 +91,8 @@ module.exports = {
           `• .gm resetlink <groupId> — Reset invite link\n` +
           `• .gm send <groupId> <message> — Tuma message\n` +
           `• .gm broadcast <message> — Tuma kwa GROUPS ZOTE\n` +
-          `• .gm groupstatus <groupId|all> <text> — Tuma group status\n` +
+          `• .gm groupstatus <groupId|all> <text> — Tuma text status\n` +
+          `• (reply picha/video) .gm groupstatus <groupId|all> [caption] — Tuma image/video status\n` +
           `• .gm autoreact <groupId|all> on/off [bot|all] — Auto react\n` +
           `• .gm restore <groupId|all> [namba] — Rudisha walioondoka\n` +
           `• .gm leave <groupId> — Bot itoke group\n\n` +
@@ -430,20 +462,34 @@ module.exports = {
       }
 
       // ══════════════════════════════════════
-      // GROUPSTATUS - Tuma group status (text) kwa group|groups zote
-      // (Kwa image/video, tumia .groupstatus ndani ya group kwa "reply")
+      // GROUPSTATUS - Tuma group status (text AU image/video) kwa
+      // group|groups zote, moja kwa moja kutoka DM.
+      // Kwa image/video: reply (jibu) picha/video na uandike command hii
+      // ikiwa na caption ya hiari: .gm groupstatus <groupId|all> [caption]
       // ══════════════════════════════════════
       if (opt === 'groupstatus' || opt === 'gstatus') {
         const groupId = args[1];
-        const text = args.slice(2).join(' ');
+        const captionOrText = args.slice(2).join(' ');
 
-        if (!groupId || !text) {
+        const quotedMedia = await getQuotedStatusMedia(msg);
+
+        if (!groupId || (!quotedMedia && !captionOrText)) {
           return extra.reply(
-            '❌ Tumia: .gm groupstatus <groupId|all> <text>\n\n' +
-            '💡 Hii inatuma TEXT status pekee.\n' +
-            'Kwa image/video status, tumia *.groupstatus* ukiwa ndani ya group (reply kwa media).'
+            '❌ Tumia:\n' +
+            '.gm groupstatus <groupId|all> <text> — TEXT status\n' +
+            '(reply picha/video) .gm groupstatus <groupId|all> [caption] — IMAGE/VIDEO status\n\n' +
+            '💡 Reply (jibu) picha au video moja kwa moja hapa kwenye DM, kisha andika command hii kama caption/reply.'
           );
         }
+
+        const buildPayload = () => {
+          if (quotedMedia) {
+            return quotedMedia.type === 'image'
+              ? { image: quotedMedia.buffer, caption: captionOrText || '' }
+              : { video: quotedMedia.buffer, caption: captionOrText || '' };
+          }
+          return { text: captionOrText, backgroundColor: PURPLE_COLOR };
+        };
 
         if (groupId.toLowerCase() === 'all') {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -456,10 +502,7 @@ module.exports = {
 
           for (const gid of groupIds) {
             try {
-              await postGroupStatus(sock, gid, {
-                text,
-                backgroundColor: PURPLE_COLOR,
-              });
+              await postGroupStatus(sock, gid, buildPayload());
               success++;
               await new Promise(r => setTimeout(r, 1500));
             } catch (e) {
@@ -476,10 +519,7 @@ module.exports = {
         }
 
         try {
-          await postGroupStatus(sock, groupId, {
-            text,
-            backgroundColor: PURPLE_COLOR,
-          });
+          await postGroupStatus(sock, groupId, buildPayload());
           const meta = await sock.groupMetadata(groupId);
           return extra.reply(`✅ Group status imetumwa kwenye *${meta.subject}*!`);
         } catch (e) {
