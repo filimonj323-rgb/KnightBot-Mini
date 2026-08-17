@@ -5,8 +5,12 @@
 
 const config = require('../../config');
 const { downloadContentFromMessage } = global.__baileys;
+const { sendButtons } = require('gifted-btns');
+const pendingGroupStatus = require('../../utils/pendingGroupStatus');
 
 const PURPLE_COLOR = '#9C27B0';
+// Kikomo cha rows kwenye orodha ya button - epuka ujumbe mkubwa mno
+const MAX_LIST_ROWS = 30;
 
 // Helper: tuma group status (text/image/video) kwa group fulani.
 // Uses @itsliaaa/baileys' native groupStatus:true support (same mechanism as
@@ -123,6 +127,7 @@ module.exports = {
           `• .gm broadcast <message> — Tuma kwa GROUPS ZOTE\n` +
           `• .gm groupstatus <namba|groupId|all> <text> — Tuma text status\n` +
           `• (reply picha/video) .gm groupstatus <namba|groupId|all> [caption] — Tuma image/video status\n` +
+          `• .gm groupstatus chagua <text> — Bot inaleta vitufe vya kuchagua group\n` +
           `• .gm autoreact <groupId|all> on/off [bot|all] — Auto react\n` +
           `• .gm restore <groupId|all> [namba] — Rudisha walioondoka\n` +
           `• .gm leave <groupId> — Bot itoke group\n\n` +
@@ -500,6 +505,84 @@ module.exports = {
       // ══════════════════════════════════════
       if (opt === 'groupstatus' || opt === 'gstatus') {
         let groupId = args[1];
+
+        // ══════════════════════════════════════
+        // NJIA YA MABONYEZO: .gm groupstatus chagua <text>
+        // Badala ya kuandika namba/groupId, bot inaleta orodha ya
+        // groups kama vitufe (buttons) - unabonyeza moja tu.
+        // ══════════════════════════════════════
+        if (groupId?.toLowerCase() === 'chagua') {
+          const captionOrText = args.slice(2).join(' ');
+          const quotedMedia = await getQuotedStatusMedia(msg);
+
+          if (!quotedMedia && !captionOrText) {
+            return extra.reply(
+              '❌ Tumia:\n' +
+              '.gm groupstatus chagua <text> — TEXT status\n' +
+              '(reply picha/video) .gm groupstatus chagua [caption] — IMAGE/VIDEO status\n\n' +
+              '💡 Baada ya hii, bot itakuletea orodha ya groups - bonyeza moja kuchagua.'
+            );
+          }
+
+          const payload = quotedMedia
+            ? (quotedMedia.type === 'image'
+                ? { image: quotedMedia.buffer, caption: captionOrText || '' }
+                : { video: quotedMedia.buffer, caption: captionOrText || '' })
+            : { text: captionOrText, backgroundColor: PURPLE_COLOR };
+
+          const allGroups = await sock.groupFetchAllParticipating();
+          const groups = Object.values(allGroups);
+          if (!groups.length) return extra.reply('📭 Bot haipo kwenye group yoyote!');
+
+          const sender = msg.key.remoteJid;
+          pendingGroupStatus.set(sender, payload);
+
+          const limited = groups.slice(0, MAX_LIST_ROWS);
+          const rows = limited.map((g) => ({
+            title: (g.subject || 'Group').slice(0, 24),
+            description: `${g.participants.length} members`,
+            id: `gmgs_${g.id}`,
+          }));
+          rows.unshift({
+            title: '📢 GROUPS ZOTE',
+            description: `Tuma kwa groups zote (${groups.length})`,
+            id: 'gmgs_all',
+          });
+
+          try {
+            await sendButtons(sock, sender, {
+              title: '📋 Chagua Group',
+              text:
+                'Bonyeza group unayotaka kutuma status:' +
+                (groups.length > MAX_LIST_ROWS
+                  ? `\n\n⚠️ Zinaonyeshwa groups ${MAX_LIST_ROWS} za kwanza tu (jumla ${groups.length}). Tumia namba/groupId kwa nyingine.`
+                  : ''),
+              footer: 'Chaguo litaisha baada ya dakika 5',
+              buttons: [
+                {
+                  name: 'single_select',
+                  buttonParamsJson: JSON.stringify({
+                    title: 'Chagua Group',
+                    sections: [{ title: 'Groups', rows }],
+                  }),
+                },
+              ],
+            }, { quoted: msg });
+          } catch (e) {
+            pendingGroupStatus.clear(sender);
+            console.error('groupstatus chagua sendButtons error:', e);
+            return extra.reply(
+              `❌ Imeshindwa kutuma orodha ya vitufe: ${e.message}\n\n` +
+              `💡 Tumia njia ya kawaida badala yake: .gm groupstatus <namba|groupId|all> <text>`
+            );
+          }
+
+          return;
+        }
+
+        // ══════════════════════════════════════
+        // NJIA YA KAWAIDA: .gm groupstatus <namba|groupId|all> <text>
+        // ══════════════════════════════════════
         const captionOrText = args.slice(2).join(' ');
 
         const quotedMedia = await getQuotedStatusMedia(msg);
@@ -509,7 +592,8 @@ module.exports = {
             '❌ Tumia:\n' +
             '.gm groupstatus <namba|groupId|all> <text> — TEXT status\n' +
             '(reply picha/video) .gm groupstatus <namba|groupId|all> [caption] — IMAGE/VIDEO status\n\n' +
-            '💡 "Namba" ni namba ya group kama inavyoonekana kwenye *.gm list* (mfano: 1, 2, 3) - rahisi zaidi kuliko kuandika groupId ndefu.\n' +
+            '💡 "Namba" ni namba ya group kama inavyoonekana kwenye *.gm list* (mfano: 1, 2, 3).\n' +
+            '💡 Au tumia *.gm groupstatus chagua <text>* kupata vitufe vya kubonyeza.\n' +
             '💡 Reply (jibu) picha au video moja kwa moja hapa kwenye DM, kisha andika command hii kama caption/reply.'
           );
         }
@@ -747,5 +831,10 @@ module.exports = {
     } catch (err) {
       extra.reply(`❌ Error: ${err.message}\n\nHakikisha:\n• Group ID ni sahihi\n• Bot ni admin wa group hiyo`);
     }
-  }
+  },
+
+  // Zinatumika na handler.js baada ya owner kubonyeza button ya kuchagua
+  // group kwenye njia ya ".gm groupstatus chagua ..."
+  postGroupStatus,
+  resolveGroupId,
 };
