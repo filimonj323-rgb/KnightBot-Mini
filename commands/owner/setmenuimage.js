@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { downloadMediaMessage } = global.__baileys;
 
 module.exports = {
   name: 'setmenuimage',

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { downloadContentFromMessage } = global.__baileys;
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
 
 // Max file size: 10MB for profile pictures
