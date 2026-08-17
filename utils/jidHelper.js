@@ -3,7 +3,7 @@
  * Shared by promote, demote, and other commands
  */
 
-const { jidDecode, jidEncode } = require('@whiskeysockets/baileys');
+const { jidDecode, jidEncode } = global.__baileys;
 const path = require('path');
 const fs = require('fs');
 const config = require('../config');
