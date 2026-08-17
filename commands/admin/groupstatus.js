@@ -1,9 +1,4 @@
-const crypto = require('crypto');
-const {
-  generateWAMessageContent,
-  generateWAMessageFromContent,
-  downloadContentFromMessage,
-} = require('@whiskeysockets/baileys');
+const { downloadContentFromMessage } = global.__baileys;
 const { PassThrough } = require('stream');
 const ffmpeg = require('fluent-ffmpeg');
 
@@ -199,49 +194,18 @@ async function downloadMedia(msg, type) {
 }
 
 async function groupStatus(sock, jid, contentIn) {
-  const content = { ...contentIn };
-  const { backgroundColor } = content;
-  delete content.backgroundColor;
-
-  console.log('[groupStatus] content keys:', Object.keys(content));
-  if (content.image) console.log('[groupStatus] image buffer size:', content.image.length);
-  if (content.video) console.log('[groupStatus] video buffer size:', content.video.length);
-  if (content.audio) console.log('[groupStatus] audio buffer size:', content.audio.length);
-
-  const inside = await generateWAMessageContent(content, {
-    upload: sock.waUploadToServer,
-    backgroundColor: backgroundColor || PURPLE_COLOR,
-  });
-
-  console.log('[groupStatus] generateWAMessageContent result keys:', Object.keys(inside));
-  console.log('[groupStatus] inside content (truncated):', JSON.stringify(inside, (k, v) => {
-    if (Buffer.isBuffer(v)) return `<Buffer len=${v.length}>`;
-    if (k === 'jpegThumbnail' || k === 'mediaKey' || k === 'fileSha256' || k === 'fileEncSha256') return '<omitted>';
-    return v;
-  }, 2));
-
-  const secret = crypto.randomBytes(32);
-
-  const msg = generateWAMessageFromContent(
-    jid,
-    {
-      messageContextInfo: { messageSecret: secret },
-      groupStatusMessageV2: {
-        message: {
-          ...inside,
-          messageContextInfo: { messageSecret: secret },
-        },
-      },
-    },
-    {}
-  );
-
-  console.log('[groupStatus] relaying message id:', msg.key.id);
-
-  const relayResult = await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
-  console.log('[groupStatus] relayMessage result:', relayResult);
-
-  return msg;
+  // @itsliaaa/baileys builds the groupStatusMessageV2 wrapping, message
+  // secret, and per-participant relay internally when groupStatus:true is
+  // passed to sendMessage — this is the fork's whole reason for existing
+  // here: stock @whiskeysockets/baileys didn't have a working implementation
+  // of this proto, which is why relayMessage used to "succeed" with no error
+  // but the status never actually showed up for anyone in the group.
+  const content = { ...contentIn, groupStatus: true };
+  if (content.text && !content.backgroundColor) {
+    content.backgroundColor = PURPLE_COLOR;
+  }
+  console.log('[groupStatus] sending via groupStatus:true, keys:', Object.keys(content));
+  return sock.sendMessage(jid, content);
 }
 
 function toVN(buffer) {
