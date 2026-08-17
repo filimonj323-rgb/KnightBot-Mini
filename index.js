@@ -53,16 +53,15 @@ console.warn = (...args) => {
 
 // Now safe to load libraries
 const pino = require('pino');
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  Browsers,
-  fetchLatestBaileysVersion
-} = require('@itsliaaa/baileys');
+// @itsliaaa/baileys is ESM-only, but this project stays CommonJS.
+// These are declared here and populated by loadBaileysBridge() below via
+// dynamic import(), BEFORE './handler' (and the ~130 command files it loads
+// via loadCommands()) are required — so any command file's top-level
+// `const { X } = global.__baileys` line resolves correctly.
+let makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion;
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
-const handler = require('./handler');
+let handler; // populated by loadBaileysBridge()
 const { groqReply } = require('./utils/groqChat');
 const fs = require('fs');
 const path = require('path');
@@ -186,6 +185,24 @@ const createSuppressedLogger = (level = 'silent') => {
   logger.trace = () => { }; // Fully disable trace
   return logger;
 };
+
+// Loads the ESM-only @itsliaaa/baileys fork into this CommonJS project via
+// dynamic import(), caches it on global.__baileys (so command files that
+// need baileys helpers can read `global.__baileys` instead of `require(...)`),
+// and only THEN requires './handler' — which synchronously requires every
+// command file through loadCommands(). Must be awaited before startBot().
+async function loadBaileysBridge() {
+  const baileys = await import('@itsliaaa/baileys');
+  global.__baileys = baileys;
+  ({
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    Browsers,
+    fetchLatestBaileysVersion
+  } = baileys);
+  handler = require('./handler');
+}
 
 // Main connection function
 async function startBot() {
@@ -524,10 +541,19 @@ console.log(`👑 Owner: ${ownerNames}\n`);
 // Proactively delete Puppeteer cache so it doesn't fill disk on panels
 cleanupPuppeteerCache();
 
-startBot().catch(err => {
-  console.error('Error starting bot:', err);
-  process.exit(1);
-});
+(async () => {
+  try {
+    await loadBaileysBridge();
+  } catch (err) {
+    console.error('❌ Imeshindwa kupakia @itsliaaa/baileys:', err && err.message ? err.message : err);
+    process.exit(1);
+    return;
+  }
+  startBot().catch(err => {
+    console.error('❌ Bot ilishindwa kuanza:', err);
+    process.exit(1);
+  });
+})();
 
 // ===== KEEP-ALIVE PINGER: kuzuia InfinityFree isisimamishe family site =====
 const fetch = require('node-fetch');
