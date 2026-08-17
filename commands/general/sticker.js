@@ -9,7 +9,7 @@ const { exec } = require('child_process');
 const crypto = require('crypto');
 const webp = require('node-webpmux');
 const ffmpegPath = require('ffmpeg-static');
-const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { downloadMediaMessage } = global.__baileys;
 const config = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
 

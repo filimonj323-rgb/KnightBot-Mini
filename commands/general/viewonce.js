@@ -2,7 +2,7 @@
  * ViewOnce Command - Reveal view-once messages
  */
 
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { downloadContentFromMessage } = global.__baileys;
 
 module.exports = {
   name: 'viewonce',

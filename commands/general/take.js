@@ -3,7 +3,7 @@
  * Steal a sticker and re-pack with custom or user packname
  */
 
-const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { downloadMediaMessage } = global.__baileys;
 const webp = require('node-webpmux');
 const crypto = require('crypto');
 const config = require('../../config');
