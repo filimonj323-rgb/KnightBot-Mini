@@ -27,8 +27,52 @@ const forbiddenPatternsConsole = [
   'signal protocol',
   'ephemeralkeypair',
   'indexinfo',
-  'basekey'
+  'basekey',
+  'bad mac',
+  'session error',
+  'failed to decrypt message',
+  'decrypted message with closed session',
+  'verifymac',
+  'decryptwithsessions',
+  'doDecryptWhisperMessage'.toLowerCase(),
+  '_asyncqueueexecutor',
+  'as awaitable'
 ];
+
+function isNoisySignalLog(text) {
+  const lower = text.toLowerCase();
+  return forbiddenPatternsConsole.some(pattern => lower.includes(pattern));
+}
+
+// libsignal (used internally by @itsliaaa/baileys) writes some of this noise
+// straight to process.stdout/stderr, bypassing console.log/console.error
+// entirely — so the filter below on console.* alone doesn't catch it. That
+// flood (thousands of lines/sec of "Bad MAC" + full SessionEntry dumps) was
+// hitting Railway's log rate limit and blocking the event loop, which is
+// what caused commands to respond slowly. Filtering at the stream-write
+// level catches it regardless of how a dependency chooses to log.
+const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+const originalStderrWrite = process.stderr.write.bind(process.stderr);
+
+process.stdout.write = (chunk, encoding, callback) => {
+  const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+  if (isNoisySignalLog(text)) {
+    if (typeof encoding === 'function') encoding();
+    else if (typeof callback === 'function') callback();
+    return true;
+  }
+  return originalStdoutWrite(chunk, encoding, callback);
+};
+
+process.stderr.write = (chunk, encoding, callback) => {
+  const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+  if (isNoisySignalLog(text)) {
+    if (typeof encoding === 'function') encoding();
+    else if (typeof callback === 'function') callback();
+    return true;
+  }
+  return originalStderrWrite(chunk, encoding, callback);
+};
 
 console.log = (...args) => {
   const message = args.map(a => typeof a === 'string' ? a : typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ').toLowerCase();
