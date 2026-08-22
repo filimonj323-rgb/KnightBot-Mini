@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const mediaDownloader = require('./mediaDownloader');
 
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
@@ -398,6 +399,78 @@ async function postGroupStatusForToken(token, { groupId, text, caption, imageBas
 }
 
 /**
+ * Sends a normal chat message (text, or image/video with optional caption)
+ * to one or more groups at once — used by the dashboard's "Tuma Ujumbe kwa
+ * Groups" picker. Unlike postGroupStatusForToken(), this posts a REGULAR
+ * group message (no groupStatus:true flag), and accepts an array of group
+ * ids so the customer can broadcast to several groups in one go.
+ */
+async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64, videoBase64 }) {
+  const inst = getInstanceByToken(token);
+  if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
+  if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
+  if (!Array.isArray(groupIds) || groupIds.length === 0) {
+    throw new Error('Chagua angalau group moja.');
+  }
+
+  let payload;
+  if (imageBase64) {
+    payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
+  } else if (videoBase64) {
+    payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
+  } else if (text) {
+    payload = { text };
+  } else {
+    throw new Error('Weka maandishi au chagua picha/video.');
+  }
+
+  const targets = groupIds.includes('all')
+    ? Object.keys(await inst.sock.groupFetchAllParticipating())
+    : groupIds;
+
+  let success = 0;
+  let failed = 0;
+  for (const gid of targets) {
+    try {
+      await inst.sock.sendMessage(gid, payload);
+      success++;
+      if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
+    } catch (e) {
+      failed++;
+    }
+  }
+
+  return { success, failed, total: targets.length };
+}
+
+/**
+ * Dashboard "Downloads" section — step 1: resolve a user-typed song/video
+ * name or a pasted YouTube link into preview info (title, thumbnail,
+ * duration) so the customer can confirm before actually downloading
+ * anything. Only requires a valid dashboard token (doesn't need the bot
+ * socket to be connected — this doesn't touch WhatsApp at all).
+ */
+async function previewMediaForToken(token, input) {
+  if (!getPhoneNumberByToken(token)) {
+    throw new Error('Dashboard link si sahihi. Tumia link uliyopewa baada ya kuunganisha.');
+  }
+  return mediaDownloader.previewMedia(input);
+}
+
+/**
+ * Dashboard "Downloads" section — step 2: called only when the customer
+ * presses "Pakua". Resolves a real, direct download URL for the given
+ * YouTube link (mp3 or mp4) so pairing/server.js can stream the file
+ * straight to the browser.
+ */
+async function resolveMediaDownloadForToken(token, youtubeUrl, type) {
+  if (!getPhoneNumberByToken(token)) {
+    throw new Error('Dashboard link si sahihi. Tumia link uliyopewa baada ya kuunganisha.');
+  }
+  return mediaDownloader.resolveDownload(youtubeUrl, type);
+}
+
+/**
  * Re-sends the dashboard link to a customer who already connected but lost
  * (forgot) their link. Only works if the instance is still live in THIS
  * process (i.e. no redeploy happened since they connected) and connected.
@@ -424,5 +497,8 @@ module.exports = {
   getInstanceByToken,
   listGroups,
   postGroupStatusForToken,
+  sendMessageToGroups,
+  previewMediaForToken,
+  resolveMediaDownloadForToken,
   resendDashboardLink,
 };
