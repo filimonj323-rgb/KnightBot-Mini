@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dashboard ya Bot Yako</title>
+<style>
+  :root {
+    --purple: #9C27B0;
+    --bg: #0f1115;
+    --card: #171a21;
+    --text: #f2f2f5;
+    --muted: #9a9fae;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+  }
+  .wrap { max-width: 520px; margin: 0 auto; }
+  .card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 26px;
+    margin-bottom: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  select, textarea, input[type="file"] {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #2a2e38;
+    background: #10131a;
+    color: var(--text);
+    font-size: 14px;
+    margin-bottom: 16px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .file-preview {
+    display: none;
+    margin: -6px 0 16px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  button {
+    width: 100%;
+    padding: 14px;
+    border-radius: 10px;
+    border: none;
+    background: var(--purple);
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .msg {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    display: none;
+  }
+  .msg.success { background: rgba(76,175,80,0.12); color: #4caf50; display: block; }
+  .msg.error { background: rgba(224,85,85,0.12); color: #e05555; display: block; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    background: #10131a;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .tab.active { background: var(--purple); color: white; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>📤 Tuma Group Status</h1>
+    <p class="sub">Chagua group, andika au ambatanisha picha/video, kisha tuma.</p>
+
+    <label for="groupSelect">Group</label>
+    <select id="groupSelect">
+      <option value="">Inapakia groups...</option>
+    </select>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="text">📝 Text</div>
+      <div class="tab" data-tab="media">🖼️ Picha/Video</div>
+    </div>
+
+    <div id="textTab">
+      <label for="textInput">Maandishi</label>
+      <textarea id="textInput" placeholder="Andika status yako hapa..."></textarea>
+    </div>
+
+    <div id="mediaTab" style="display:none;">
+      <label for="mediaInput">Chagua picha au video</label>
+      <input type="file" id="mediaInput" accept="image/*,video/*" />
+      <div class="file-preview" id="filePreview"></div>
+      <label for="captionInput">Caption (hiari)</label>
+      <textarea id="captionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
+    </div>
+
+    <button id="postBtn">Tuma Status</button>
+    <div class="msg" id="msgBox"></div>
+  </div>
+</div>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+
+  const groupSelect = document.getElementById('groupSelect');
+  const tabs = document.querySelectorAll('.tab');
+  const textTab = document.getElementById('textTab');
+  const mediaTab = document.getElementById('mediaTab');
+  const textInput = document.getElementById('textInput');
+  const mediaInput = document.getElementById('mediaInput');
+  const captionInput = document.getElementById('captionInput');
+  const filePreview = document.getElementById('filePreview');
+  const postBtn = document.getElementById('postBtn');
+  const msgBox = document.getElementById('msgBox');
+
+  let activeTab = 'text';
+
+  if (!token) {
+    msgBox.className = 'msg error';
+    msgBox.textContent = '❌ Link hii haina token. Tumia link uliyopewa baada ya kuunganisha.';
+    postBtn.disabled = true;
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      activeTab = tab.dataset.tab;
+      textTab.style.display = activeTab === 'text' ? 'block' : 'none';
+      mediaTab.style.display = activeTab === 'media' ? 'block' : 'none';
+    });
+  });
+
+  mediaInput.addEventListener('change', () => {
+    const file = mediaInput.files[0];
+    if (file) {
+      filePreview.style.display = 'block';
+      filePreview.textContent = `📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+    } else {
+      filePreview.style.display = 'none';
+    }
+  });
+
+  async function loadGroups() {
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groups');
+      const data = await res.json();
+      if (!data.ok) {
+        groupSelect.innerHTML = '<option value="">Imeshindwa kupakia groups</option>';
+        return;
+      }
+      groupSelect.innerHTML =
+        '<option value="all">🌍 Groups Zote (' + data.groups.length + ')</option>' +
+        data.groups.map(g => `<option value="${g.id}">${g.subject} (${g.participants} members)</option>`).join('');
+    } catch (e) {
+      groupSelect.innerHTML = '<option value="">Hitilafu — jaribu kupakua upya ukurasa</option>';
+    }
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result; // data:<mime>;base64,<data>
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  postBtn.addEventListener('click', async () => {
+    msgBox.className = 'msg';
+    msgBox.style.display = 'none';
+
+    const groupId = groupSelect.value;
+    if (!groupId) {
+      msgBox.className = 'msg error';
+      msgBox.textContent = '❌ Chagua group kwanza.';
+      return;
+    }
+
+    const payload = { groupId };
+
+    if (activeTab === 'text') {
+      const text = textInput.value.trim();
+      if (!text) {
+        msgBox.className = 'msg error';
+        msgBox.textContent = '❌ Andika maandishi kwanza.';
+        return;
+      }
+      payload.text = text;
+    } else {
+      const file = mediaInput.files[0];
+      if (!file) {
+        msgBox.className = 'msg error';
+        msgBox.textContent = '❌ Chagua picha au video kwanza.';
+        return;
+      }
+      const base64 = await fileToBase64(file);
+      if (file.type.startsWith('video/')) {
+        payload.videoBase64 = base64;
+      } else {
+        payload.imageBase64 = base64;
+      }
+      payload.caption = captionInput.value.trim();
+    }
+
+    postBtn.disabled = true;
+    postBtn.textContent = 'Inatuma...';
+
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groupstatus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!data.ok) {
+        msgBox.className = 'msg error';
+        msgBox.textContent = '❌ ' + (data.error || 'Hitilafu imetokea.');
+      } else {
+        msgBox.className = 'msg success';
+        msgBox.textContent = `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total}`;
+        textInput.value = '';
+        mediaInput.value = '';
+        captionInput.value = '';
+        filePreview.style.display = 'none';
+      }
+    } catch (e) {
+      msgBox.className = 'msg error';
+      msgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+    } finally {
+      postBtn.disabled = false;
+      postBtn.textContent = 'Tuma Status';
+    }
+  });
+
+  if (token) loadGroups();
+</script>
+</body>
+</html>

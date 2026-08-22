@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Unganisha WhatsApp Bot</title>
+<style>
+  :root {
+    --purple: #9C27B0;
+    --purple-dark: #6a1b7a;
+    --bg: #0f1115;
+    --card: #171a21;
+    --text: #f2f2f5;
+    --muted: #9a9fae;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 16px;
+    padding: 32px 28px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  }
+  h1 {
+    font-size: 22px;
+    margin: 0 0 6px;
+    text-align: center;
+  }
+  p.sub {
+    color: var(--muted);
+    text-align: center;
+    margin: 0 0 26px;
+    font-size: 14px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 6px;
+    color: var(--muted);
+  }
+  input[type="tel"] {
+    width: 100%;
+    padding: 14px;
+    border-radius: 10px;
+    border: 1px solid #2a2e38;
+    background: #10131a;
+    color: var(--text);
+    font-size: 16px;
+    outline: none;
+  }
+  input[type="tel"]:focus {
+    border-color: var(--purple);
+  }
+  button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 14px;
+    border-radius: 10px;
+    border: none;
+    background: var(--purple);
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+  .result {
+    margin-top: 24px;
+    text-align: center;
+    display: none;
+  }
+  .code {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: var(--purple);
+    background: #10131a;
+    border: 1px dashed var(--purple);
+    border-radius: 10px;
+    padding: 16px;
+    margin: 12px 0;
+  }
+  .steps {
+    text-align: left;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.7;
+    margin-top: 14px;
+  }
+  .status {
+    margin-top: 16px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .status.connected { color: #4caf50; }
+  .status.pairing { color: #f0ad4e; }
+  .status.error { color: #e05555; }
+  .error-box {
+    display: none;
+    margin-top: 16px;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(224,85,85,0.12);
+    color: #e05555;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Unganisha Bot Yako</h1>
+    <p class="sub">Weka namba yako ya WhatsApp upate pairing code — bila session ID.</p>
+
+    <label for="phone">Namba ya simu (na country code)</label>
+    <input type="tel" id="phone" placeholder="255712345678" inputmode="numeric" />
+    <div class="hint">Mfano: Tanzania 2557XXXXXXXX (bila + wala 0 mwanzoni)</div>
+
+    <button id="pairBtn">Pata Pairing Code</button>
+
+    <div class="error-box" id="errorBox"></div>
+
+    <div class="result" id="result">
+      <div>Pairing Code yako:</div>
+      <div class="code" id="codeDisplay">------</div>
+      <div class="steps">
+        1. Fungua WhatsApp kwenye simu yako<br/>
+        2. Nenda <b>Settings → Linked Devices</b><br/>
+        3. Chagua <b>Link a Device → Link with phone number instead</b><br/>
+        4. Andika code hii uliyopewa hapo juu
+      </div>
+      <div class="status pairing" id="statusText">⏳ Inasubiri uunganishe...</div>
+    </div>
+  </div>
+
+<script>
+  const phoneInput = document.getElementById('phone');
+  const pairBtn = document.getElementById('pairBtn');
+  const result = document.getElementById('result');
+  const codeDisplay = document.getElementById('codeDisplay');
+  const statusText = document.getElementById('statusText');
+  const errorBox = document.getElementById('errorBox');
+
+  let pollTimer = null;
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+  }
+
+  function clearError() {
+    errorBox.style.display = 'none';
+    errorBox.textContent = '';
+  }
+
+  async function pollStatus(phoneNumber) {
+    try {
+      const res = await fetch('/api/status/' + encodeURIComponent(phoneNumber));
+      const data = await res.json();
+      if (!data.ok) return;
+
+      if (data.status === 'connected') {
+        statusText.textContent = '✅ Umeunganishwa! Bot yako iko tayari.';
+        statusText.className = 'status connected';
+        clearInterval(pollTimer);
+        if (data.dashboardToken) showDashboardLink(data.dashboardToken);
+      } else if (data.status === 'error' || data.status === 'disconnected') {
+        statusText.textContent = '❌ Muunganisho umeshindwa. Jaribu tena.';
+        statusText.className = 'status error';
+        clearInterval(pollTimer);
+      } else {
+        statusText.textContent = '⏳ Inasubiri uunganishe...';
+        statusText.className = 'status pairing';
+      }
+    } catch (e) {
+      // Silent — will retry on next poll tick.
+    }
+  }
+
+  function showDashboardLink(token) {
+    const url = window.location.origin + '/dashboard.html?token=' + token;
+    let box = document.getElementById('dashboardBox');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'dashboardBox';
+      box.style.marginTop = '18px';
+      box.style.padding = '14px';
+      box.style.borderRadius = '10px';
+      box.style.background = 'rgba(156,39,176,0.12)';
+      box.style.textAlign = 'center';
+      document.getElementById('result').appendChild(box);
+    }
+    box.innerHTML =
+      '<div style="font-size:13px;color:#9a9fae;margin-bottom:8px;">Link yako binafsi ya kudhibiti bot:</div>' +
+      '<a href="' + url + '" target="_blank" style="color:#c084dc;font-weight:600;word-break:break-all;">' + url + '</a>';
+  }
+
+  pairBtn.addEventListener('click', async () => {
+    clearError();
+    const phoneNumber = phoneInput.value.trim();
+    if (!phoneNumber || phoneNumber.length < 9) {
+      showError('Tafadhali weka namba sahihi yenye country code.');
+      return;
+    }
+
+    pairBtn.disabled = true;
+    pairBtn.textContent = 'Inatengeneza code...';
+
+    try {
+      const res = await fetch('/api/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber }),
+      });
+      const data = await res.json();
+
+      if (!data.ok) {
+        showError(data.error || 'Hitilafu imetokea. Jaribu tena.');
+        pairBtn.disabled = false;
+        pairBtn.textContent = 'Pata Pairing Code';
+        return;
+      }
+
+      if (data.status === 'connected') {
+        result.style.display = 'block';
+        codeDisplay.textContent = '✅';
+        statusText.textContent = '✅ Namba hii tayari imeunganishwa.';
+        statusText.className = 'status connected';
+        if (data.dashboardToken) showDashboardLink(data.dashboardToken);
+      } else {
+        codeDisplay.textContent = data.pairingCode || '------';
+        result.style.display = 'block';
+        statusText.textContent = '⏳ Inasubiri uunganishe...';
+        statusText.className = 'status pairing';
+        clearInterval(pollTimer);
+        pollTimer = setInterval(() => pollStatus(phoneNumber), 3000);
+      }
+    } catch (e) {
+      showError('Imeshindwa kuwasiliana na server. Jaribu tena.');
+    } finally {
+      pairBtn.disabled = false;
+      pairBtn.textContent = 'Pata Pairing Code';
+    }
+  });
+</script>
+</body>
+</html>
