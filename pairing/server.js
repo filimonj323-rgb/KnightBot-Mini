@@ -20,6 +20,7 @@ const {
   getInstanceStatus,
   listGroups,
   postGroupStatusForToken,
+  resendDashboardLink,
 } = require('./instanceManager');
 
 const PORT = process.env.PORT || process.env.PAIRING_PORT || 3000;
@@ -70,7 +71,13 @@ const MIME = {
 };
 
 function serveStatic(req, res, urlPath) {
-  const filePath = urlPath === '/' ? '/index.html' : urlPath;
+  // Strip query string (e.g. "?token=abc123") — without this, a request for
+  // "/dashboard.html?token=xxx" was resolved as a literal filename
+  // "dashboard.html?token=xxx" on disk, which never exists, causing every
+  // dashboard link to 404 ("Not Found") even though dashboard.html itself
+  // is present.
+  const pathOnly = urlPath.split('?')[0];
+  const filePath = pathOnly === '/' ? '/index.html' : pathOnly;
   const resolved = path.join(PUBLIC_DIR, filePath);
 
   // Prevent path traversal outside the public/ directory.
@@ -95,6 +102,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/pair') {
       const body = await readJsonBody(req);
       const result = await createOrPairInstance(body.phoneNumber);
+      return sendJson(res, 200, { ok: true, ...result });
+    }
+
+    if (req.method === 'POST' && req.url === '/api/resend-link') {
+      const body = await readJsonBody(req);
+      const result = await resendDashboardLink(body.phoneNumber);
       return sendJson(res, 200, { ok: true, ...result });
     }
 
