@@ -13,6 +13,7 @@
  */
 
 const http = require('http');
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -20,6 +21,9 @@ const {
   getInstanceStatus,
   listGroups,
   postGroupStatusForToken,
+  sendMessageToGroups,
+  previewMediaForToken,
+  resolveMediaDownloadForToken,
   resendDashboardLink,
 } = require('./instanceManager');
 
@@ -130,6 +134,60 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req, 30 * 1e6);
       const result = await postGroupStatusForToken(token, body);
       return sendJson(res, 200, { ok: true, ...result });
+    }
+
+    // Send a normal message (text/image/video) to one or several chosen
+    // groups at once — the dashboard's "Tuma Ujumbe kwa Groups" picker.
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/broadcast')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/broadcast', ''));
+      // 30MB cap — same headroom as groupstatus, for base64 image/video.
+      const body = await readJsonBody(req, 30 * 1e6);
+      const result = await sendMessageToGroups(token, body);
+      return sendJson(res, 200, { ok: true, ...result });
+    }
+
+    // Downloads step 1: resolve a typed song/video name or pasted YouTube
+    // link into preview info (title/thumbnail/duration) — no download yet.
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/media-preview')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/media-preview', ''));
+      const body = await readJsonBody(req);
+      const preview = await previewMediaForToken(token, body.input);
+      return sendJson(res, 200, { ok: true, ...preview });
+    }
+
+    // Downloads step 2: the customer confirmed the preview and pressed
+    // "Pakua" — resolve a real direct link, then stream the file straight
+    // through to the browser as an attachment (mp3 or mp4).
+    if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.includes('/media-download')) {
+      const [tokenPart, queryPart] = req.url.split('/media-download');
+      const token = decodeURIComponent(tokenPart.split('/api/dashboard/')[1]);
+      const query = new URLSearchParams(queryPart || '');
+      const youtubeUrl = query.get('url');
+      const type = query.get('type') === 'mp4' ? 'mp4' : 'mp3';
+      const requestedTitle = query.get('title') || 'download';
+
+      const resolved = await resolveMediaDownloadForToken(token, youtubeUrl, type);
+      const safeTitle = String(resolved.title || requestedTitle)
+        .replace(/[^\w\s.-]/g, '')
+        .trim()
+        .slice(0, 80) || 'download';
+      const ext = type === 'mp4' ? 'mp4' : 'mp3';
+      const mimetype = type === 'mp4' ? 'video/mp4' : 'audio/mpeg';
+
+      const upstream = await axios.get(resolved.download, {
+        responseType: 'stream',
+        timeout: 120000,
+        maxRedirects: 5,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      });
+
+      res.writeHead(200, {
+        'Content-Type': mimetype,
+        'Content-Disposition': `attachment; filename="${safeTitle}.${ext}"`,
+      });
+      upstream.data.on('error', () => res.destroy());
+      upstream.data.pipe(res);
+      return;
     }
 
     if (req.method === 'GET') {
