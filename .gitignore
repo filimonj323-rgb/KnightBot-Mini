@@ -1,0 +1,13 @@
+node_modules/
+npm-debug.log
+
+# Main bot's own WhatsApp session (sensitive — never commit)
+session/
+
+# Pairing website - per-customer WhatsApp sessions + token map (sensitive, never commit)
+pairing/sessions/
+
+# Temp / cache
+tmp/
+*.log
+.DS_Store
