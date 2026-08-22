@@ -190,6 +190,12 @@ async function createOrPairInstance(rawPhoneNumber) {
 
   if (!state.creds.registered) {
     try {
+      // Baileys needs the underlying WebSocket handshake with WhatsApp to
+      // fully settle before it will accept a pairing-code request. Asking
+      // immediately after makeWASocket() throws "Connection Closed" (428
+      // Precondition Required) — a well-known Baileys race condition.
+      // A short delay here avoids it.
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const code = await sock.requestPairingCode(phoneNumber);
       record.pairingCode = code;
     } catch (e) {

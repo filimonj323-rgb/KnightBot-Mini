@@ -21,8 +21,10 @@ const {
   listGroups,
   postGroupStatusForToken,
 } = require('./instanceManager');
+
 const PORT = process.env.PORT || process.env.PAIRING_PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
 function sendJson(res, statusCode, data) {
   const body = JSON.stringify(data);
   res.writeHead(statusCode, {
