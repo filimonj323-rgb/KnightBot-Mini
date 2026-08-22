@@ -53,6 +53,7 @@ function ensureUser(phoneNumber) {
       paidUntil: null,
       blocked: false,
       expiryNotifiedAt: null,
+      lastReminderAt: null,
       paymentHistory: [], // { at, days, amount, orderReference, method }
     };
     persist();
@@ -138,6 +139,28 @@ function markExpiryNotified(phoneNumber) {
   persist();
 }
 
+/**
+ * Used by the daily payment-reminder scheduler in instanceManager.js.
+ * Returns true if this customer is currently locked out (trial/sub
+ * expired, not blocked) AND enough time has passed since their last
+ * reminder (or they've never gotten one).
+ */
+function isReminderDue(phoneNumber, intervalHours) {
+  const u = ensureUser(phoneNumber);
+  if (u.blocked) return false;
+  const now = Date.now();
+  const stillHasAccess = (u.isPaid && u.paidUntil > now) || (!u.isPaid && u.trialExpiresAt > now);
+  if (stillHasAccess) return false;
+  const intervalMs = intervalHours * 60 * 60 * 1000;
+  return !u.lastReminderAt || (now - u.lastReminderAt) >= intervalMs;
+}
+
+function markReminderSent(phoneNumber) {
+  const u = ensureUser(phoneNumber);
+  u.lastReminderAt = Date.now();
+  persist();
+}
+
 module.exports = {
   TRIAL_DAYS,
   ensureUser,
@@ -148,4 +171,6 @@ module.exports = {
   extendTrial,
   setBlocked,
   markExpiryNotified,
+  isReminderDue,
+  markReminderSent,
 };

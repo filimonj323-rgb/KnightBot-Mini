@@ -33,6 +33,7 @@ const {
   adminExtendTrial,
   adminSetBlocked,
   getBillingForToken,
+  startReminderScheduler,
 } = require('./instanceManager');
 const adminAuth = require('./adminAuth');
 const clickpesa = require('./clickpesa');
@@ -48,10 +49,6 @@ try { pendingOrders = JSON.parse(fs.readFileSync(PENDING_ORDERS_FILE, 'utf8')); 
 function savePendingOrders() {
   fs.writeFileSync(PENDING_ORDERS_FILE, JSON.stringify(pendingOrders, null, 2));
 }
-
-// Price for a 30-day subscription, in TZS — edit PRICE_PER_30_DAYS in
-// pairing/pairingConfig.js to change.
-const PRICE_PER_30_DAYS = cfg.PRICE_PER_30_DAYS;
 
 const PORT = process.env.PORT || process.env.PAIRING_PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -258,7 +255,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/billing')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/billing', ''));
       const billing = getBillingForToken(token);
-      return sendJson(res, 200, { ok: true, ...billing, pricePer30Days: PRICE_PER_30_DAYS });
+      return sendJson(res, 200, { ok: true, ...billing, plans: cfg.PLANS });
     }
 
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/pay')) {
@@ -267,14 +264,14 @@ const server = http.createServer(async (req, res) => {
       if (!phoneNumber) return sendJson(res, 404, { ok: false, error: 'Dashboard link si sahihi.' });
 
       const body = await readJsonBody(req);
-      const days = Number(body.days) || 30;
-      const amount = Math.round((days / 30) * PRICE_PER_30_DAYS);
-      const orderReference = `SUB-${phoneNumber}-${Date.now()}`;
+      const plan = cfg.PLANS.find(p => p.days === Number(body.days));
+      if (!plan) return sendJson(res, 400, { ok: false, error: 'Package hii haipo.' });
 
-      pendingOrders[orderReference] = { phoneNumber, days, amount, createdAt: Date.now() };
+      const orderReference = `SUB-${phoneNumber}-${Date.now()}`;
+      pendingOrders[orderReference] = { phoneNumber, days: plan.days, amount: plan.price, createdAt: Date.now() };
       savePendingOrders();
 
-      await clickpesa.initiateUssdPush({ amount, phoneNumber, orderReference });
+      await clickpesa.initiateUssdPush({ amount: plan.price, phoneNumber, orderReference });
       return sendJson(res, 200, {
         ok: true,
         message: 'Angalia simu yako — utaombwa kuweka PIN ya M-Pesa/Tigo Pesa/Airtel Money kukamilisha malipo.',
@@ -328,4 +325,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`🌐 Pairing website inaendesha kwenye port ${PORT}`);
+  startReminderScheduler();
 });

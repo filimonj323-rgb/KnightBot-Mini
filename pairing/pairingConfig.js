@@ -14,15 +14,28 @@
 
 module.exports = {
   // ── Admin dashboard login ────────────────────────────────────────────
-  ADMIN_USERNAME: 'mbowe1',
-  ADMIN_PASSWORD: 'Mbowe@1963',   // BADILISHA HII
-  ADMIN_SESSION_SECRET: 'LawamaFilimonNtigamagwa',
+  ADMIN_USERNAME: 'admin',
+  ADMIN_PASSWORD: 'BadilishaPassYangu123',   // BADILISHA HII
+  ADMIN_SESSION_SECRET: 'badilisha-hii-iwe-herufi-ndefu-za-nasibu-xyz987',
 
   // ── Free trial ────────────────────────────────────────────────────────
   TRIAL_DAYS: 3,
 
-  // ── Pricing ───────────────────────────────────────────────────────────
-  PRICE_PER_30_DAYS: 5000, // TZS
+  // ── Pricing packages ──────────────────────────────────────────────────
+  // Shown on the customer dashboard's "Malipo" tab. Edit freely — each
+  // entry is { days, price } in TZS. Order here = display order.
+  PLANS: [
+    { days: 1, price: 500 },
+    { days: 3, price: 1000 },
+    { days: 5, price: 2000 },
+    { days: 7, price: 4000 },
+    { days: 10, price: 5000 },
+    { days: 30, price: 7000 },
+  ],
+
+  // How often (in hours) a customer whose trial/subscription has expired
+  // gets a WhatsApp reminder with the payment link, until they pay.
+  REMINDER_INTERVAL_HOURS: 24,
 
   // ── ClickPesa (Dashboard -> Settings -> Developers -> Create Application) ──
   CLICKPESA_CLIENT_ID: 'WEKA_CLIENT_ID_YAKO_HAPA',
@@ -34,7 +47,8 @@ module.exports = {
 
   // ── Optional custom pairing code (must be EXACTLY 8 uppercase A-Z0-9) ──
   // NOTE: WhatsApp often rejects custom codes even when correctly
-  // formatted — see the earlier conversation. Leave as null to use
-  // Baileys' normal random codes (recommended).
+  // formatted — see the earlier conversation. If pairing keeps failing
+  // with this set, change it back to null to use Baileys' normal random
+  // codes (recommended, and known to work reliably).
   CUSTOM_PAIRING_CODE: 'UMOJASTA',
 };

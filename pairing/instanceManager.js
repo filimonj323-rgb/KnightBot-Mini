@@ -656,6 +656,36 @@ function getBillingForToken(token) {
   };
 }
 
+/**
+ * Daily payment-reminder scheduler. Every REMINDER_INTERVAL_HOURS, checks
+ * every currently-connected instance whose trial/subscription has expired
+ * (and who isn't blocked) and sends them a WhatsApp reminder with their
+ * dashboard payment link — until they pay, once per interval.
+ *
+ * Only reaches customers whose socket is live in THIS process (i.e. no
+ * redeploy since they last connected) — same limitation as the rest of
+ * this in-memory instance model.
+ */
+function startReminderScheduler() {
+  const intervalMs = (cfg.REMINDER_INTERVAL_HOURS || 24) * 60 * 60 * 1000;
+  setInterval(() => {
+    for (const [phoneNumber, record] of instances.entries()) {
+      if (record.status !== 'connected' || !record.sock || !record.token) continue;
+      if (!userStore.isReminderDue(phoneNumber, cfg.REMINDER_INTERVAL_HOURS || 24)) continue;
+
+      const selfJid = `${phoneNumber}@s.whatsapp.net`;
+      const link = dashboardUrl(record.token);
+      record.sock.sendMessage(selfJid, {
+        text: `⏰ *Kumbusho la Malipo*\n\nBot yako haijibu ujumbe kwa sasa kwa sababu muda umeisha.\n\n💳 Lipa hapa kuendelea kutumia:\n${link}`,
+      }).catch(() => {});
+      userStore.markReminderSent(phoneNumber);
+    }
+  }, Math.min(intervalMs, 60 * 60 * 1000) > 0 ? 60 * 60 * 1000 : intervalMs);
+  // ^ the scheduler itself ticks every hour and checks per-user due-time,
+  // so REMINDER_INTERVAL_HOURS can be set to any value (even < 1h) without
+  // changing this tick rate.
+}
+
 module.exports = {
   createOrPairInstance,
   getInstanceStatus,
@@ -675,4 +705,5 @@ module.exports = {
   adminExtendTrial,
   adminSetBlocked,
   getBillingForToken,
+  startReminderScheduler,
 };
