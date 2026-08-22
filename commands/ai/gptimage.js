@@ -5,7 +5,6 @@
 
 const axios = require('axios');
 const FormData = require('form-data');
-const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { webp2png } = require('../../utils/webp2mp4');
 const sharp = require('sharp');
 
@@ -17,6 +16,14 @@ module.exports = {
   usage: '.gptimage <prompt> (reply to image/sticker)',
   
   async execute(sock, msg, args, extra) {
+    // Read from global.__baileys lazily (at call-time, not require-time).
+    // This avoids failing to load if this file gets required before
+    // ensureBaileysBridge() has set global.__baileys (@itsliaaa/baileys).
+    const { downloadMediaMessage } = global.__baileys || {};
+    if (!downloadMediaMessage) {
+      return await extra.reply('❌ Baileys bado haijapakiwa kikamilifu. Jaribu tena baada ya sekunde chache.');
+    }
+
     try {
       // Check if message is a reply
       const ctxInfo = msg.message?.extendedTextMessage?.contextInfo;
@@ -176,4 +183,3 @@ module.exports = {
     }
   },
 };
-
