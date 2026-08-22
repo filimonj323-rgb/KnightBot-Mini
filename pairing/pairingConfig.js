@@ -14,9 +14,9 @@
 
 module.exports = {
   // ── Admin dashboard login ────────────────────────────────────────────
-  ADMIN_USERNAME: 'admin',
-  ADMIN_PASSWORD: 'BadilishaPassYangu123',   // BADILISHA HII
-  ADMIN_SESSION_SECRET: 'badilisha-hii-iwe-herufi-ndefu-za-nasibu-xyz987',
+  ADMIN_USERNAME: 'mbowe1',
+  ADMIN_PASSWORD: 'Mbowe@1963',   // BADILISHA HII
+  ADMIN_SESSION_SECRET: 'LawamaFilimonNtigamagwa',
 
   // ── Free trial ────────────────────────────────────────────────────────
   TRIAL_DAYS: 3,
