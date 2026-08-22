@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Dashboard</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0d0d14; color: #e8e8ec; padding: 20px;
+  }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .card {
+    background: #16161f; border: 1px solid #26263a; border-radius: 14px;
+    padding: 20px; max-width: 420px; margin: 40px auto;
+  }
+  input {
+    width: 100%; padding: 12px; margin-top: 6px; margin-bottom: 14px;
+    background: #0d0d14; border: 1px solid #33334a; border-radius: 10px;
+    color: #e8e8ec; font-size: 15px;
+  }
+  label { font-size: 13px; color: #9a9ab0; }
+  button {
+    width: 100%; padding: 13px; border: none; border-radius: 10px;
+    background: #a020c0; background: linear-gradient(135deg,#a020c0,#7b1fa2);
+    color: #fff; font-weight: 600; font-size: 15px; cursor: pointer;
+  }
+  button:active { opacity: 0.85; }
+  .error { color: #ff6b6b; font-size: 13px; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #22222f; }
+  th { color: #9a9ab0; font-weight: 600; }
+  .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.trial { background: #2b2410; color: #f5c542; }
+  .badge.paid { background: #10281c; color: #4ade80; }
+  .badge.expired { background: #2b1414; color: #ff6b6b; }
+  .badge.blocked { background: #3a1a1a; color: #ff8787; }
+  .row-actions button {
+    width: auto; padding: 6px 10px; font-size: 12px; margin-right: 4px; margin-bottom: 4px;
+    background: #26263a;
+  }
+  .row-actions button.danger { background: #4a1a1a; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .muted { color: #9a9ab0; font-size: 12px; }
+  #app { display: none; max-width: 900px; margin: 0 auto; }
+</style>
+</head>
+<body>
+
+<div class="card" id="loginCard">
+  <h1>🔐 Admin Login</h1>
+  <label>Username</label>
+  <input id="username" autocomplete="username">
+  <label>Password</label>
+  <input id="password" type="password" autocomplete="current-password">
+  <button onclick="doLogin()">Ingia</button>
+  <div class="error" id="loginError"></div>
+</div>
+
+<div id="app">
+  <div class="toolbar">
+    <h1>👥 Wateja (<span id="userCount">0</span>)</h1>
+    <span class="muted" id="trialInfo"></span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>Namba</th><th>Hali</th><th>Muda</th><th>Vitendo</th></tr>
+    </thead>
+    <tbody id="userRows"></tbody>
+  </table>
+</div>
+
+<script>
+  let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, {
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(ADMIN_TOKEN ? { Authorization: 'Bearer ' + ADMIN_TOKEN } : {}),
+        ...(opts.headers || {}),
+      },
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) throw new Error(data.error || 'Hitilafu');
+    return data;
+  }
+
+  async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    document.getElementById('loginError').textContent = '';
+    try {
+      const data = await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+      ADMIN_TOKEN = data.token;
+      sessionStorage.setItem('adminToken', ADMIN_TOKEN);
+      showApp();
+    } catch (e) {
+      document.getElementById('loginError').textContent = e.message;
+    }
+  }
+
+  function fmtDate(ms) {
+    if (!ms) return '—';
+    return new Date(ms).toLocaleString('sw-TZ', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function statusBadge(u) {
+    const now = Date.now();
+    if (u.blocked) return '<span class="badge blocked">Blocked</span>';
+    if (u.isPaid && u.paidUntil > now) return '<span class="badge paid">Amelipa</span>';
+    if (!u.isPaid && u.trialExpiresAt > now) return '<span class="badge trial">Trial</span>';
+    return '<span class="badge expired">Muda umeisha</span>';
+  }
+
+  function timeLeft(u) {
+    const now = Date.now();
+    if (u.isPaid && u.paidUntil > now) return 'Hadi ' + fmtDate(u.paidUntil);
+    if (!u.isPaid && u.trialExpiresAt > now) return 'Trial hadi ' + fmtDate(u.trialExpiresAt);
+    return '—';
+  }
+
+  async function loadUsers() {
+    const data = await api('/api/admin/users');
+    document.getElementById('userCount').textContent = data.users.length;
+    document.getElementById('trialInfo').textContent = `Trial: siku ${data.trialDays}`;
+    const rows = data.users.map((u) => `
+      <tr>
+        <td>${u.phoneNumber}<br><span class="muted">${u.liveStatus}</span></td>
+        <td>${statusBadge(u)}</td>
+        <td>${timeLeft(u)}</td>
+        <td class="row-actions">
+          <button onclick="markPaid('${u.phoneNumber}')">Weka Amelipa (30d)</button>
+          <button onclick="extendTrial('${u.phoneNumber}')">+1 siku Trial</button>
+          <button class="danger" onclick="toggleBlock('${u.phoneNumber}', ${!u.blocked})">${u.blocked ? 'Fungua' : 'Zuia'}</button>
+        </td>
+      </tr>
+    `).join('');
+    document.getElementById('userRows').innerHTML = rows;
+  }
+
+  async function markPaid(phone) {
+    const days = prompt('Siku ngapi za malipo?', '30');
+    if (!days) return;
+    await api(`/api/admin/users/${phone}/mark-paid`, { method: 'POST', body: JSON.stringify({ days: Number(days) }) });
+    loadUsers();
+  }
+
+  async function extendTrial(phone) {
+    await api(`/api/admin/users/${phone}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: 1 }) });
+    loadUsers();
+  }
+
+  async function toggleBlock(phone, blocked) {
+    await api(`/api/admin/users/${phone}/block`, { method: 'POST', body: JSON.stringify({ blocked }) });
+    loadUsers();
+  }
+
+  function showApp() {
+    document.getElementById('loginCard').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadUsers();
+    setInterval(loadUsers, 15000);
+  }
+
+  if (ADMIN_TOKEN) {
+    api('/api/admin/users').then(showApp).catch(() => { sessionStorage.removeItem('adminToken'); ADMIN_TOKEN = ''; });
+  }
+</script>
+
+</body>
+</html>
