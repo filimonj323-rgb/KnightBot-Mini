@@ -18,7 +18,20 @@ if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true
 
 const TOKENS_FILE = path.join(SESSIONS_ROOT, '_tokens.json');
 
-// phoneNumber -> { sock, status, pairingCode, createdAt, phoneNumber, token }
+// Optional custom pairing code. WhatsApp requires EXACTLY 8 uppercase
+// alphanumeric characters. Set CUSTOM_PAIRING_CODE on Railway (Settings ->
+// Variables) to override, e.g. "UMOJA4WA". Leave unset to let Baileys
+// generate a random code as normal.
+const RAW_CUSTOM_CODE = (process.env.CUSTOM_PAIRING_CODE || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const CUSTOM_PAIRING_CODE = RAW_CUSTOM_CODE.length === 8 ? RAW_CUSTOM_CODE : null;
+if (RAW_CUSTOM_CODE && !CUSTOM_PAIRING_CODE) {
+  console.warn(
+    `[pairing] CUSTOM_PAIRING_CODE ("${RAW_CUSTOM_CODE}") si sahihi — inahitajika herufi 8 hasa (A-Z, 0-9). ` +
+    'Baileys itatengeneza code ya nasibu badala yake.'
+  );
+}
+
+// phoneNumber -> { sock, status, pairingCode, createdAt, phoneNumber, token, reconnectAttempts }
 const instances = new Map();
 // token -> phoneNumber
 const tokenIndex = new Map();
@@ -103,11 +116,130 @@ function getInstanceStatus(phoneNumber) {
   if (!inst) return null;
   return {
     phoneNumber: inst.phoneNumber,
-    status: inst.status, // 'pairing' | 'connected' | 'disconnected' | 'error'
+    status: inst.status, // 'pairing' | 'connecting' | 'connected' | 'disconnected' | 'error'
     pairingCode: inst.pairingCode || null,
     error: inst.error || null,
     dashboardToken: inst.token || null,
   };
+}
+
+/**
+ * Opens (or re-opens) the actual WhatsApp socket for a phone number and
+ * wires up its event handlers. Called once to start pairing, then called
+ * AGAIN automatically whenever the connection drops for a reason other than
+ * being logged out — this is required by Baileys: after a pairing code is
+ * approved on the phone, WhatsApp closes the socket once with a
+ * "restart required" reason, and the client must reconnect using the SAME
+ * auth state to actually finish linking. Without this reconnect, a pairing
+ * code the customer approves on their phone will show a notification but
+ * the link will never complete — which is the exact symptom this fixes.
+ */
+async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) {
+  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    logger: require('pino')({ level: 'silent' }),
+    printQRInTerminal: false,
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
+    auth: state,
+    syncFullHistory: false,
+    downloadHistory: false,
+    markOnlineOnConnect: false,
+  });
+
+  record.sock = sock;
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect } = update;
+
+    if (connection === 'open') {
+      record.status = 'connected';
+      record.pairingCode = null;
+      record.reconnectAttempts = 0;
+      record.token = getOrCreateToken(phoneNumber);
+      return;
+    }
+
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
+
+      if (loggedOut) {
+        record.status = 'disconnected';
+        instances.delete(phoneNumber);
+        return;
+      }
+
+      record.reconnectAttempts = (record.reconnectAttempts || 0) + 1;
+
+      // Cap retries so a persistently failing link doesn't hammer WhatsApp
+      // and trip their rate limit ("connection closed" repeatedly).
+      if (record.reconnectAttempts > 6) {
+        record.status = 'error';
+        record.error = 'Imeshindwa kuunganisha baada ya majaribio kadhaa. Bofya "Pata Pairing Code" tena baada ya dakika chache.';
+        instances.delete(phoneNumber);
+        return;
+      }
+
+      record.status = 'connecting';
+      const backoffMs = Math.min(2000 * record.reconnectAttempts, 10000);
+      setTimeout(() => {
+        connectInstance(phoneNumber, sessionFolder, record, true).catch((e) => {
+          record.status = 'error';
+          record.error = e.message;
+        });
+      }, backoffMs);
+    }
+  });
+
+  // Every message this customer's number receives is routed through the
+  // SAME command handler as the main bot — same commands/*, no duplication.
+  sock.ev.on('messages.upsert', (m) => {
+    const msg = m.messages?.[0];
+    if (!msg?.message) return;
+    handler.handleMessage(sock, msg).catch(err => {
+      console.error(`[pairing:${phoneNumber}] handleMessage error:`, err.message);
+    });
+  });
+
+  // Only ever request a pairing code on the FIRST connection attempt, never
+  // on the automatic reconnects above — requesting a fresh code on every
+  // reconnect is what causes both "code sometimes doesn't show" and
+  // "reaches the closed limit" (WhatsApp treats repeated pairing-code
+  // requests as abuse and starts closing/blocking the socket).
+  if (!state.creds.registered && !isReconnect) {
+    try {
+      // Baileys needs the underlying WebSocket handshake with WhatsApp to
+      // fully settle before it will accept a pairing-code request. Asking
+      // immediately after makeWASocket() throws "Connection Closed" (428
+      // Precondition Required) — a well-known Baileys race condition.
+      const code = await new Promise((resolve, reject) => {
+        setTimeout(() => {
+          sock.requestPairingCode(phoneNumber, CUSTOM_PAIRING_CODE || undefined)
+            .then(resolve)
+            .catch(reject);
+        }, 3000);
+      });
+      record.pairingCode = code;
+      record.status = 'pairing';
+    } catch (e) {
+      record.status = 'error';
+      record.error = e.message;
+      throw e;
+    }
+  } else if (!state.creds.registered && isReconnect) {
+    // Mid-pairing reconnect (e.g. after the "restart required" close) —
+    // keep showing the SAME code the customer already has; just let this
+    // new socket continue the handshake in the background.
+    record.status = 'pairing';
+  } else {
+    // Already has valid creds from a previous run — just reconnecting.
+    record.status = 'connecting';
+  }
 }
 
 /**
@@ -136,77 +268,18 @@ async function createOrPairInstance(rawPhoneNumber) {
   const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
   if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder, { recursive: true });
 
-  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
-  const { version } = await fetchLatestBaileysVersion();
-
-  const sock = makeWASocket({
-    version,
-    logger: require('pino')({ level: 'silent' }),
-    printQRInTerminal: false,
-    browser: ['Ubuntu', 'Chrome', '20.0.04'],
-    auth: state,
-    syncFullHistory: false,
-    downloadHistory: false,
-    markOnlineOnConnect: false,
-  });
-
   const record = {
     phoneNumber,
-    sock,
+    sock: null,
     status: 'pairing',
     pairingCode: null,
     error: null,
     createdAt: Date.now(),
+    reconnectAttempts: 0,
   };
   instances.set(phoneNumber, record);
 
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
-    if (connection === 'open') {
-      record.status = 'connected';
-      record.pairingCode = null;
-      record.token = getOrCreateToken(phoneNumber);
-    } else if (connection === 'close') {
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
-      record.status = loggedOut ? 'disconnected' : 'error';
-      if (loggedOut) {
-        instances.delete(phoneNumber);
-      }
-    }
-  });
-
-  // Every message this customer's number receives is routed through the
-  // SAME command handler as the main bot — same commands/*, no duplication.
-  sock.ev.on('messages.upsert', (m) => {
-    const msg = m.messages?.[0];
-    if (!msg?.message) return;
-    handler.handleMessage(sock, msg).catch(err => {
-      console.error(`[pairing:${phoneNumber}] handleMessage error:`, err.message);
-    });
-  });
-
-  if (!state.creds.registered) {
-    try {
-      // Baileys needs the underlying WebSocket handshake with WhatsApp to
-      // fully settle before it will accept a pairing-code request. Asking
-      // immediately after makeWASocket() throws "Connection Closed" (428
-      // Precondition Required) — a well-known Baileys race condition.
-      // A short delay here avoids it.
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      const code = await sock.requestPairingCode(phoneNumber);
-      record.pairingCode = code;
-    } catch (e) {
-      record.status = 'error';
-      record.error = e.message;
-      throw e;
-    }
-  } else {
-    // Already has valid creds from a previous run — just reconnecting.
-    record.status = 'connecting';
-  }
+  await connectInstance(phoneNumber, sessionFolder, record, false);
 
   return { phoneNumber, status: record.status, pairingCode: record.pairingCode };
 }
