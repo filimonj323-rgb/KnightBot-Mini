@@ -18,6 +18,7 @@ const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
 
 const TOKENS_FILE = path.join(SESSIONS_ROOT, '_tokens.json');
+const SETTINGS_FILE = path.join(SESSIONS_ROOT, '_settings.json');
 
 // Optional custom pairing code. WhatsApp requires EXACTLY 8 uppercase
 // alphanumeric characters. Set CUSTOM_PAIRING_CODE on Railway (Settings ->
@@ -66,6 +67,43 @@ function getOrCreateToken(phoneNumber) {
 
 function getPhoneNumberByToken(token) {
   return tokenIndex.get(token) || null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Per-customer settings (prefix, bot display name) — BOTH OPTIONAL.
+//
+// config.js is a single shared file/module used by every customer instance
+// running in this same process (handler.js requires it once). Mutating it
+// directly (like commands/owner/setprefix.js does) changes the prefix for
+// EVERY customer at once, not just the one who set it — not safe for this
+// multi-tenant pairing server. Instead, each customer's override is kept
+// here, persisted to its own JSON file, and attached to that customer's
+// `sock` object (sock.instanceSettings) when their connection is opened.
+// handler.js reads sock.instanceSettings first and only falls back to the
+// shared config.js when a customer hasn't set a custom value — that's what
+// makes both fields optional.
+// ─────────────────────────────────────────────────────────────────────────
+const settingsIndex = new Map(); // phoneNumber -> { prefix?, botName? }
+
+function loadSettingsIndex() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+    Object.entries(raw).forEach(([phoneNumber, settings]) => settingsIndex.set(phoneNumber, settings));
+  } catch (e) {
+    // No settings file yet — fine on first run.
+  }
+}
+
+function persistSettingsIndex() {
+  const obj = {};
+  settingsIndex.forEach((settings, phoneNumber) => { obj[phoneNumber] = settings; });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2));
+}
+
+loadSettingsIndex();
+
+function getInstanceSettings(phoneNumber) {
+  return settingsIndex.get(phoneNumber) || {};
 }
 
 // Base URL used to build the dashboard link sent to customers over WhatsApp.
@@ -187,6 +225,10 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   });
 
   record.sock = sock;
+  // Attach this customer's optional overrides (prefix / bot name) so
+  // handler.js can prefer them over the shared config.js — see the
+  // settingsIndex comment above for why this can't just mutate config.js.
+  sock.instanceSettings = getInstanceSettings(phoneNumber);
 
   sock.ev.on('creds.update', saveCreds);
 
@@ -471,6 +513,63 @@ async function resolveMediaDownloadForToken(token, youtubeUrl, type) {
 }
 
 /**
+ * Dashboard "Settings" — reads a customer's current prefix/botName
+ * overrides (either may be unset, meaning "use the default"), plus the
+ * defaults themselves so the dashboard can show helpful placeholders.
+ */
+function getSettingsForToken(token) {
+  const phoneNumber = getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+  const defaults = require('../config');
+  const custom = getInstanceSettings(phoneNumber);
+  return {
+    prefix: custom.prefix || '',
+    botName: custom.botName || '',
+    defaultPrefix: defaults.prefix,
+    defaultBotName: defaults.botName,
+  };
+}
+
+/**
+ * Dashboard "Settings" — save a customer's optional prefix / bot name.
+ * Passing an empty string / omitting a field clears that override so the
+ * instance falls back to the shared default again. Applies immediately to
+ * a live connection (no restart needed) by updating sock.instanceSettings.
+ */
+function updateSettingsForToken(token, { prefix, botName }) {
+  const phoneNumber = getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+
+  const trimmedPrefix = typeof prefix === 'string' ? prefix.trim() : '';
+  if (trimmedPrefix && trimmedPrefix.length > 3) {
+    throw new Error('Prefix isiwe zaidi ya herufi 3.');
+  }
+  const trimmedName = typeof botName === 'string' ? botName.trim() : '';
+  if (trimmedName && trimmedName.length > 40) {
+    throw new Error('Jina la bot lisizidi herufi 40.');
+  }
+
+  const next = {};
+  if (trimmedPrefix) next.prefix = trimmedPrefix;
+  if (trimmedName) next.botName = trimmedName;
+
+  if (Object.keys(next).length === 0) {
+    settingsIndex.delete(phoneNumber);
+  } else {
+    settingsIndex.set(phoneNumber, next);
+  }
+  persistSettingsIndex();
+
+  // Live-update the running connection, if any, so the change is instant.
+  const inst = instances.get(phoneNumber);
+  if (inst?.sock) {
+    inst.sock.instanceSettings = next;
+  }
+
+  return getSettingsForToken(token);
+}
+
+/**
  * Re-sends the dashboard link to a customer who already connected but lost
  * (forgot) their link. Only works if the instance is still live in THIS
  * process (i.e. no redeploy happened since they connected) and connected.
@@ -500,5 +599,7 @@ module.exports = {
   sendMessageToGroups,
   previewMediaForToken,
   resolveMediaDownloadForToken,
+  getSettingsForToken,
+  updateSettingsForToken,
   resendDashboardLink,
 };

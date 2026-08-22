@@ -15,6 +15,7 @@
  */
 
 const yts = require('yt-search');
+const axios = require('axios');
 const APIs = require('../utils/api');
 
 function extractVideoId(input) {
@@ -78,10 +79,42 @@ async function previewMedia(rawInput) {
 }
 
 /**
+ * Quickly checks that a resolved download URL actually responds before we
+ * hand it to the browser — without downloading the whole file. Tries a
+ * HEAD request first; some CDNs block HEAD, so falls back to a tiny ranged
+ * GET (first 2 bytes only) if HEAD fails. This is what lets us safely
+ * 302-redirect the browser straight to the source (full download speed,
+ * original quality — no proxying through our own server) while still
+ * falling back to the next provider if a link turns out to be dead.
+ */
+async function verifyLink(url) {
+  const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
+  try {
+    const res = await axios.head(url, { timeout: 8000, headers, maxRedirects: 5, validateStatus: s => s >= 200 && s < 400 });
+    return res.status >= 200 && res.status < 400;
+  } catch (e) {
+    try {
+      const res = await axios.get(url, {
+        timeout: 8000,
+        headers: { ...headers, Range: 'bytes=0-1' },
+        maxRedirects: 5,
+        responseType: 'arraybuffer',
+        validateStatus: s => s >= 200 && s < 400,
+      });
+      return res.status >= 200 && res.status < 400;
+    } catch (e2) {
+      return false;
+    }
+  }
+}
+
+/**
  * Tries each free provider in turn until one returns a working direct
- * download URL. Same fallback philosophy as commands/media/song.js /
- * video.js, just returning the URL instead of buffering + sending via
- * WhatsApp — the dashboard streams it straight to the browser.
+ * download URL, VERIFYING each candidate link actually responds before
+ * returning it. Same fallback philosophy as commands/media/song.js /
+ * video.js, but returns a verified direct URL instead of buffering +
+ * sending via WhatsApp — pairing/server.js 302-redirects the browser
+ * straight to it for maximum download speed and unaltered quality.
  */
 async function resolveDownload(youtubeUrl, type) {
   if (!youtubeUrl) throw new Error('URL ya video haipo.');
@@ -104,7 +137,9 @@ async function resolveDownload(youtubeUrl, type) {
   for (const provider of providers) {
     try {
       const result = await provider();
-      if (result?.download) return result;
+      if (result?.download && await verifyLink(result.download)) {
+        return result;
+      }
     } catch (e) {
       lastErr = e;
     }
