@@ -552,6 +552,16 @@ const handleMessage = async (sock, msg) => {
     if (!msg.message) return;
     
     const from = msg.key.remoteJid;
+
+    // Per-customer overrides (prefix / bot name) set via the pairing
+    // dashboard, if any — falls back to the shared config.js when a
+    // customer hasn't set a custom value. See pairing/instanceManager.js
+    // for why this doesn't mutate config.js directly (config.js is a
+    // single shared module — mutating it would affect every customer
+    // instance running in this same process, not just this one).
+    const effectiveConfig = sock.instanceSettings
+      ? { ...config, ...sock.instanceSettings }
+      : config;
     
     // System message filter - ignore broadcast/status/newsletter messages
     if (isSystemJid(from)) {
@@ -858,7 +868,7 @@ const handleMessage = async (sock, msg) => {
         // Only process if it's an image or video (not documents)
         if (mediaMessage) {
           // Skip if message has a command prefix (let command handle it)
-          if (!body.startsWith(config.prefix)) {
+          if (!body.startsWith(effectiveConfig.prefix)) {
             try {
               // Import sticker command logic
               const stickerCmd = commands.get('sticker');
@@ -947,10 +957,10 @@ const handleMessage = async (sock, msg) => {
     
     
     // Check if message starts with prefix
-    if (!body.startsWith(config.prefix)) return;
+    if (!body.startsWith(effectiveConfig.prefix)) return;
     
     // Parse command
-    const args = body.slice(config.prefix.length).trim().split(/\s+/);
+    const args = body.slice(effectiveConfig.prefix.length).trim().split(/\s+/);
     const commandName = args.shift().toLowerCase();
     
     // Get command
@@ -1175,7 +1185,7 @@ const handleGroupUpdate = async (sock, update) => {
           });
           
           // Create formatted welcome message
-          const welcomeMsg = `╭╼━≪•𝙽𝙴𝚆 𝙼𝙴𝙼𝙱𝙴𝚁•≫━╾╮\n┃𝚆𝙴𝙻𝙲𝙾𝙼𝙴: @${displayName} 👋\n┃𝚃𝙸𝙼𝙴: ${timeString}⏰\n╰━━━━━━━━━━━━━━━╯\n\n*@${displayName}* Welcome to *${groupName}*! 🎉\n*Group 𝙳𝙴𝚂𝙲𝚁𝙸𝙿𝚃𝙸𝙾𝙽*\n${groupDesc}\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${config.botName}*`;
+          const welcomeMsg = `╭╼━≪•𝙽𝙴𝚆 𝙼𝙴𝙼𝙱𝙴𝚁•≫━╾╮\n┃𝚆𝙴𝙻𝙲𝙾𝙼𝙴: @${displayName} 👋\n┃𝚃𝙸𝙼𝙴: ${timeString}⏰\n╰━━━━━━━━━━━━━━━╯\n\n*@${displayName}* Welcome to *${groupName}*! 🎉\n*Group 𝙳𝙴𝚂𝙲𝚁𝙸𝙿𝚃𝙸𝙾𝙽*\n${groupDesc}\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${effectiveConfig.botName}*`;
           
           // Construct API URL for welcome image
           const apiUrl = `https://api.some-random-api.com/welcome/img/7/gaming4?type=join&textcolor=white&username=${encodeURIComponent(displayName)}&guildName=${encodeURIComponent(groupName)}&memberCount=${groupMetadata.participants.length}&avatar=${encodeURIComponent(profilePicUrl)}`;
@@ -1321,7 +1331,7 @@ const handleGroupUpdate = async (sock, update) => {
             const dmJid = phoneJid || participantJid;
             if (dmJid && dmJid.includes('@s.whatsapp.net')) {
               await sock.sendMessage(dmJid, {
-                text: `📋 *Umetoka kwenye ${groupName}*\n\nGroup hii ni chanzo cha taarifa muhimu za:\n• 🎓 Maombi ya mkopo HESLB\n• 🏫 Huduma za vyuo\n• 🖨️ Stationery na huduma nyingine\n\nTaarifa zinazotumwa hapa zinaweza kukusaidia wakati wowote — usijute baadaye kukosa taarifa muhimu.\n\nUkitaka kurudi, jiunge tena hapa 👇\nhttps://chat.whatsapp.com/LHMMYiaxQhdDLfIfOhF4CV\n\n📖 *"Maana yangu yote yatoka kwake; yeye ndiye mwamba wangu na wokovu wangu."*\n_— Zaburi 62:6_\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${config.botName}*`
+                text: `📋 *Umetoka kwenye ${groupName}*\n\nGroup hii ni chanzo cha taarifa muhimu za:\n• 🎓 Maombi ya mkopo HESLB\n• 🏫 Huduma za vyuo\n• 🖨️ Stationery na huduma nyingine\n\nTaarifa zinazotumwa hapa zinaweza kukusaidia wakati wowote — usijute baadaye kukosa taarifa muhimu.\n\nUkitaka kurudi, jiunge tena hapa 👇\nhttps://chat.whatsapp.com/LHMMYiaxQhdDLfIfOhF4CV\n\n📖 *"Maana yangu yote yatoka kwake; yeye ndiye mwamba wangu na wokovu wangu."*\n_— Zaburi 62:6_\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${effectiveConfig.botName}*`
               });
             }
           } catch (dmErr) {}
