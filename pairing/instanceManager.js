@@ -13,6 +13,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const mediaDownloader = require('./mediaDownloader');
+const userStore = require('./userStore');
+const cfg = require('./pairingConfig');
 
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
@@ -20,15 +22,15 @@ if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true
 const TOKENS_FILE = path.join(SESSIONS_ROOT, '_tokens.json');
 const SETTINGS_FILE = path.join(SESSIONS_ROOT, '_settings.json');
 
-// Optional custom pairing code. WhatsApp requires EXACTLY 8 uppercase
-// alphanumeric characters. Set CUSTOM_PAIRING_CODE on Railway (Settings ->
-// Variables) to override, e.g. "UMOJA4WA". Leave unset to let Baileys
-// generate a random code as normal.
-const RAW_CUSTOM_CODE = (process.env.CUSTOM_PAIRING_CODE || 'UMOJASTA').toUpperCase().replace(/[^A-Z0-9]/g, '');
+// Optional custom pairing code — edit CUSTOM_PAIRING_CODE in pairingConfig.js.
+// WhatsApp requires EXACTLY 8 uppercase alphanumeric characters, and often
+// rejects custom codes anyway (see earlier notes) — leave null to use
+// Baileys' normal random codes (recommended).
+const RAW_CUSTOM_CODE = (cfg.CUSTOM_PAIRING_CODE || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const CUSTOM_PAIRING_CODE = RAW_CUSTOM_CODE.length === 8 ? RAW_CUSTOM_CODE : null;
-if (RAW_CUSTOM_CODE && !CUSTOM_PAIRING_CODE) {
+if (cfg.CUSTOM_PAIRING_CODE && !CUSTOM_PAIRING_CODE) {
   console.warn(
-    `[pairing] CUSTOM_PAIRING_CODE ("${RAW_CUSTOM_CODE}") si sahihi — inahitajika herufi 8 hasa (A-Z, 0-9). ` +
+    `[pairing] CUSTOM_PAIRING_CODE ("${cfg.CUSTOM_PAIRING_CODE}") si sahihi — inahitajika herufi 8 hasa (A-Z, 0-9). ` +
     'Baileys itatengeneza code ya nasibu badala yake.'
   );
 }
@@ -107,11 +109,9 @@ function getInstanceSettings(phoneNumber) {
 }
 
 // Base URL used to build the dashboard link sent to customers over WhatsApp.
-// Set this on Railway (Settings -> Variables) to your public domain, e.g.
-// "https://your-app.up.railway.app". Falls back to a placeholder so the
-// message still makes sense if it hasn't been configured yet.
-const DEFAULT_BASE_URL = 'https://pairingpage.up.railway.app';
-const PUBLIC_BASE_URL = (process.env.PAIRING_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
+// Edit PAIRING_BASE_URL in pairing/pairingConfig.js to your public domain,
+// e.g. "https://your-app.up.railway.app".
+const PUBLIC_BASE_URL = (cfg.PAIRING_BASE_URL || 'https://pairingpage.up.railway.app').replace(/\/+$/, '');
 
 function dashboardUrl(token) {
   return `${PUBLIC_BASE_URL}/dashboard.html?token=${token}`;
@@ -244,6 +244,20 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       if (isFirstConnect) {
         sendDashboardLinkMessage(sock, phoneNumber, record.token);
       }
+
+      // If trial/subscription has already lapsed by the time they reconnect,
+      // let them know once (not on every reconnect) with a link to pay.
+      const access = userStore.getAccessStatus(phoneNumber);
+      if (!access.allowed && !access.user.expiryNotifiedAt) {
+        const selfJid = `${phoneNumber}@s.whatsapp.net`;
+        const reasonText = access.reason === 'blocked'
+          ? 'Akaunti yako imezuiwa na msimamizi.'
+          : 'Muda wako wa majaribio (trial) umeisha.';
+        sock.sendMessage(selfJid, {
+          text: `⏰ *${reasonText}*\n\nBot yako haitajibu ujumbe hadi ulipe.\n\n💳 Lipa kupitia dashboard yako:\n${dashboardUrl(record.token)}`,
+        }).catch(() => {});
+        userStore.markExpiryNotified(phoneNumber);
+      }
       return;
     }
 
@@ -281,9 +295,17 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
 
   // Every message this customer's number receives is routed through the
   // SAME command handler as the main bot — same commands/*, no duplication.
+  // BUT first check trial/payment access: once a customer's trial (or paid
+  // subscription) has lapsed and an admin hasn't blocked/unblocked them
+  // otherwise, the bot goes silent for their instance until they pay —
+  // this is the actual enforcement point for the whole trial/billing system.
   sock.ev.on('messages.upsert', (m) => {
     const msg = m.messages?.[0];
     if (!msg?.message) return;
+
+    const access = userStore.getAccessStatus(phoneNumber);
+    if (!access.allowed) return;
+
     handler.handleMessage(sock, msg).catch(err => {
       console.error(`[pairing:${phoneNumber}] handleMessage error:`, err.message);
     });
@@ -361,6 +383,7 @@ async function createOrPairInstance(rawPhoneNumber) {
     reconnectAttempts: 0,
   };
   instances.set(phoneNumber, record);
+  userStore.ensureUser(phoneNumber); // starts their trial clock now, if new
 
   await connectInstance(phoneNumber, sessionFolder, record, false);
 
@@ -588,6 +611,51 @@ async function resendDashboardLink(rawPhoneNumber) {
   return { phoneNumber, sent: true };
 }
 
+/**
+ * Admin dashboard — full list of customers, merging persisted trial/paid
+ * status (userStore) with live connection status (this process' instances
+ * map, if the process hasn't been redeployed since they connected).
+ */
+function adminListUsers() {
+  return userStore.getAllUsers().map((u) => {
+    const live = instances.get(u.phoneNumber);
+    return {
+      ...u,
+      liveStatus: live ? live.status : 'offline',
+      dashboardToken: live ? live.token : null,
+    };
+  }).sort((a, b) => b.pairedAt - a.pairedAt);
+}
+
+function adminMarkPaid(phoneNumber, days, meta) {
+  return userStore.markPaid(normalizePhoneNumber(phoneNumber), days, meta);
+}
+
+function adminExtendTrial(phoneNumber, days) {
+  return userStore.extendTrial(normalizePhoneNumber(phoneNumber), days);
+}
+
+function adminSetBlocked(phoneNumber, blocked) {
+  return userStore.setBlocked(normalizePhoneNumber(phoneNumber), blocked);
+}
+
+/**
+ * Dashboard "Billing" tab — a customer's own trial/paid status, used to
+ * show a countdown / pay button on their dashboard.html.
+ */
+function getBillingForToken(token) {
+  const phoneNumber = getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+  const access = userStore.getAccessStatus(phoneNumber);
+  return {
+    allowed: access.allowed,
+    reason: access.reason,
+    trialExpiresAt: access.user.trialExpiresAt,
+    isPaid: access.user.isPaid,
+    paidUntil: access.user.paidUntil,
+  };
+}
+
 module.exports = {
   createOrPairInstance,
   getInstanceStatus,
@@ -602,4 +670,9 @@ module.exports = {
   getSettingsForToken,
   updateSettingsForToken,
   resendDashboardLink,
+  adminListUsers,
+  adminMarkPaid,
+  adminExtendTrial,
+  adminSetBlocked,
+  getBillingForToken,
 };

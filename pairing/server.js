@@ -15,6 +15,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const {
   createOrPairInstance,
   getInstanceStatus,
@@ -26,7 +27,31 @@ const {
   getSettingsForToken,
   updateSettingsForToken,
   resendDashboardLink,
+  getPhoneNumberByToken,
+  adminListUsers,
+  adminMarkPaid,
+  adminExtendTrial,
+  adminSetBlocked,
+  getBillingForToken,
 } = require('./instanceManager');
+const adminAuth = require('./adminAuth');
+const clickpesa = require('./clickpesa');
+const cfg = require('./pairingConfig');
+
+// ── Pending payment orders ──────────────────────────────────────────────
+// orderReference -> { phoneNumber, days, amount, createdAt }
+// Persisted to disk so a webhook arriving after a redeploy can still be
+// matched back to the right customer.
+const PENDING_ORDERS_FILE = path.join(__dirname, 'sessions', '_pending_orders.json');
+let pendingOrders = {};
+try { pendingOrders = JSON.parse(fs.readFileSync(PENDING_ORDERS_FILE, 'utf8')); } catch (e) { pendingOrders = {}; }
+function savePendingOrders() {
+  fs.writeFileSync(PENDING_ORDERS_FILE, JSON.stringify(pendingOrders, null, 2));
+}
+
+// Price for a 30-day subscription, in TZS — edit PRICE_PER_30_DAYS in
+// pairing/pairingConfig.js to change.
+const PRICE_PER_30_DAYS = cfg.PRICE_PER_30_DAYS;
 
 const PORT = process.env.PORT || process.env.PAIRING_PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -189,6 +214,104 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const settings = updateSettingsForToken(token, body);
       return sendJson(res, 200, { ok: true, ...settings });
+    }
+
+    // ── Admin auth ─────────────────────────────────────────────────────
+    if (req.method === 'POST' && req.url === '/api/admin/login') {
+      const body = await readJsonBody(req);
+      const token = adminAuth.login(body.username, body.password);
+      if (!token) return sendJson(res, 401, { ok: false, error: 'Username au password si sahihi.' });
+      return sendJson(res, 200, { ok: true, token });
+    }
+
+    // Every other /api/admin/* route requires a valid admin session token
+    // in the Authorization header: "Authorization: Bearer <token>".
+    if (req.url.startsWith('/api/admin/') && req.url !== '/api/admin/login') {
+      const authHeader = req.headers['authorization'] || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (!adminAuth.verify(token)) {
+        return sendJson(res, 401, { ok: false, error: 'Session imeisha au si sahihi. Login tena.' });
+      }
+
+      if (req.method === 'GET' && req.url === '/api/admin/users') {
+        return sendJson(res, 200, { ok: true, users: adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
+      }
+
+      // /api/admin/users/<phone>/mark-paid | extend-trial | block
+      const match = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(mark-paid|extend-trial|block)$/);
+      if (req.method === 'POST' && match) {
+        const [, phone, action] = match;
+        const body = await readJsonBody(req);
+        let user;
+        if (action === 'mark-paid') {
+          user = adminMarkPaid(phone, Number(body.days) || 30, { method: 'manual', note: body.note || '' });
+        } else if (action === 'extend-trial') {
+          user = adminExtendTrial(phone, Number(body.days) || 1);
+        } else if (action === 'block') {
+          user = adminSetBlocked(phone, !!body.blocked);
+        }
+        return sendJson(res, 200, { ok: true, user });
+      }
+    }
+
+    // ── Customer billing (dashboard) ──────────────────────────────────
+    if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/billing')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/billing', ''));
+      const billing = getBillingForToken(token);
+      return sendJson(res, 200, { ok: true, ...billing, pricePer30Days: PRICE_PER_30_DAYS });
+    }
+
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/pay')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/pay', ''));
+      const phoneNumber = getPhoneNumberByToken(token);
+      if (!phoneNumber) return sendJson(res, 404, { ok: false, error: 'Dashboard link si sahihi.' });
+
+      const body = await readJsonBody(req);
+      const days = Number(body.days) || 30;
+      const amount = Math.round((days / 30) * PRICE_PER_30_DAYS);
+      const orderReference = `SUB-${phoneNumber}-${Date.now()}`;
+
+      pendingOrders[orderReference] = { phoneNumber, days, amount, createdAt: Date.now() };
+      savePendingOrders();
+
+      await clickpesa.initiateUssdPush({ amount, phoneNumber, orderReference });
+      return sendJson(res, 200, {
+        ok: true,
+        message: 'Angalia simu yako — utaombwa kuweka PIN ya M-Pesa/Tigo Pesa/Airtel Money kukamilisha malipo.',
+        orderReference,
+      });
+    }
+
+    // ── ClickPesa webhook — called by ClickPesa, not the browser ───────
+    if (req.method === 'POST' && req.url === '/api/payment/webhook') {
+      const body = await readJsonBody(req);
+
+      if (!clickpesa.verifyWebhookChecksum(body)) {
+        console.error('[payment/webhook] checksum haikuthibitika:', JSON.stringify(body));
+        return sendJson(res, 400, { ok: false, error: 'Invalid checksum' });
+      }
+
+      const orderReference = body.orderReference;
+      const order = pendingOrders[orderReference];
+      const status = String(body.status || '').toUpperCase();
+      const isSuccess = ['SUCCESS', 'COMPLETED', 'PAID'].includes(status);
+
+      if (order && isSuccess) {
+        adminMarkPaid(order.phoneNumber, order.days, {
+          method: 'clickpesa',
+          orderReference,
+          amount: order.amount,
+          paymentReference: body.paymentReference || null,
+        });
+        delete pendingOrders[orderReference];
+        savePendingOrders();
+      } else if (order && !isSuccess) {
+        console.log(`[payment/webhook] malipo ${orderReference} hayakufanikiwa: ${status}`);
+      } else {
+        console.warn(`[payment/webhook] orderReference isiyojulikana: ${orderReference}`);
+      }
+
+      return sendJson(res, 200, { ok: true });
     }
 
     if (req.method === 'GET') {
