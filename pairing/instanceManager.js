@@ -22,7 +22,7 @@ const TOKENS_FILE = path.join(SESSIONS_ROOT, '_tokens.json');
 // alphanumeric characters. Set CUSTOM_PAIRING_CODE on Railway (Settings ->
 // Variables) to override, e.g. "UMOJA4WA". Leave unset to let Baileys
 // generate a random code as normal.
-const RAW_CUSTOM_CODE = (process.env.CUSTOM_PAIRING_CODE || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const RAW_CUSTOM_CODE = (process.env.CUSTOM_PAIRING_CODE || 'UMOJASTA').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const CUSTOM_PAIRING_CODE = RAW_CUSTOM_CODE.length === 8 ? RAW_CUSTOM_CODE : null;
 if (RAW_CUSTOM_CODE && !CUSTOM_PAIRING_CODE) {
   console.warn(
@@ -65,6 +65,42 @@ function getOrCreateToken(phoneNumber) {
 
 function getPhoneNumberByToken(token) {
   return tokenIndex.get(token) || null;
+}
+
+// Base URL used to build the dashboard link sent to customers over WhatsApp.
+// Set this on Railway (Settings -> Variables) to your public domain, e.g.
+// "https://your-app.up.railway.app". Falls back to a placeholder so the
+// message still makes sense if it hasn't been configured yet.
+const DEFAULT_BASE_URL = 'https://pairingpage.up.railway.app';
+const PUBLIC_BASE_URL = (process.env.PAIRING_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
+
+function dashboardUrl(token) {
+  return `${PUBLIC_BASE_URL}/dashboard.html?token=${token}`;
+}
+
+function successMessageText(token) {
+  return (
+    '🎉 *Umefanikiwa kuunganisha Bot!*\n\n' +
+    'Bot yako sasa iko tayari kutumika na commands zote.\n\n' +
+    '📊 Link yako binafsi ya kudhibiti bot (kutuma group status, n.k.):\n' +
+    dashboardUrl(token) + '\n\n' +
+    '💡 Hifadhi (bookmark) link hii — ni yako binafsi, usiishiriki na wengine.\n' +
+    'Ukiisahau, rudi kwenye website ya pairing na tumia "Umesahau link?" kwa namba yako hii hii.'
+  );
+}
+
+/**
+ * Sends the customer their dashboard link over WhatsApp (to their own
+ * inbox, i.e. "Message Yourself"), with a success message. Called right
+ * after a successful connection, and also from resendDashboardLink().
+ */
+async function sendDashboardLinkMessage(sock, phoneNumber, token) {
+  try {
+    const selfJid = `${phoneNumber}@s.whatsapp.net`;
+    await sock.sendMessage(selfJid, { text: successMessageText(token) });
+  } catch (e) {
+    console.error(`[pairing:${phoneNumber}] imeshindwa kutuma dashboard link:`, e.message);
+  }
 }
 
 let baileysBridgeLoaded = false;
@@ -160,7 +196,11 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       record.status = 'connected';
       record.pairingCode = null;
       record.reconnectAttempts = 0;
+      const isFirstConnect = !record.token;
       record.token = getOrCreateToken(phoneNumber);
+      if (isFirstConnect) {
+        sendDashboardLinkMessage(sock, phoneNumber, record.token);
+      }
       return;
     }
 
@@ -357,6 +397,25 @@ async function postGroupStatusForToken(token, { groupId, text, caption, imageBas
   return { success, failed, total: targets.length };
 }
 
+/**
+ * Re-sends the dashboard link to a customer who already connected but lost
+ * (forgot) their link. Only works if the instance is still live in THIS
+ * process (i.e. no redeploy happened since they connected) and connected.
+ */
+async function resendDashboardLink(rawPhoneNumber) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const inst = instances.get(phoneNumber);
+
+  if (!inst || inst.status !== 'connected' || !inst.sock) {
+    throw new Error('Namba hii haijaunganishwa kwa sasa. Tumia "Pata Pairing Code" kuunganisha upya.');
+  }
+
+  const token = inst.token || getOrCreateToken(phoneNumber);
+  inst.token = token;
+  await sendDashboardLinkMessage(inst.sock, phoneNumber, token);
+  return { phoneNumber, sent: true };
+}
+
 module.exports = {
   createOrPairInstance,
   getInstanceStatus,
@@ -365,4 +424,5 @@ module.exports = {
   getInstanceByToken,
   listGroups,
   postGroupStatusForToken,
+  resendDashboardLink,
 };
