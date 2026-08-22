@@ -7,10 +7,13 @@
 <style>
   :root {
     --purple: #9C27B0;
+    --purple-dark: #6a1b7a;
     --bg: #0f1115;
     --card: #171a21;
+    --field: #10131a;
     --text: #f2f2f5;
     --muted: #9a9fae;
+    --border: #2a2e38;
   }
   * { box-sizing: border-box; }
   body {
@@ -20,7 +23,32 @@
     color: var(--text);
     padding: 20px;
   }
-  .wrap { max-width: 520px; margin: 0 auto; }
+  .wrap { max-width: 560px; margin: 0 auto; }
+
+  /* Top-level section switcher */
+  .section-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    background: var(--card);
+    padding: 6px;
+    border-radius: 14px;
+  }
+  .section-tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px 4px;
+    border-radius: 10px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .section-tab.active { background: var(--purple); color: white; }
+  .section { display: none; }
+  .section.active { display: block; }
+
   .card {
     background: var(--card);
     border-radius: 16px;
@@ -31,12 +59,12 @@
   h1 { font-size: 20px; margin: 0 0 4px; }
   p.sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-  select, textarea, input[type="file"] {
+  select, textarea, input[type="file"], input[type="text"] {
     width: 100%;
     padding: 12px;
     border-radius: 10px;
-    border: 1px solid #2a2e38;
-    background: #10131a;
+    border: 1px solid var(--border);
+    background: var(--field);
     color: var(--text);
     font-size: 14px;
     margin-bottom: 16px;
@@ -60,6 +88,12 @@
     font-weight: 600;
     cursor: pointer;
   }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--purple);
+    color: var(--purple);
+    margin-top: 10px;
+  }
   button:disabled { opacity: 0.6; cursor: not-allowed; }
   .msg {
     margin-top: 14px;
@@ -70,61 +104,221 @@
   }
   .msg.success { background: rgba(76,175,80,0.12); color: #4caf50; display: block; }
   .msg.error { background: rgba(224,85,85,0.12); color: #e05555; display: block; }
+
   .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
   .tab {
     flex: 1;
     text-align: center;
     padding: 10px;
     border-radius: 8px;
-    background: #10131a;
+    background: var(--field);
     color: var(--muted);
     cursor: pointer;
     font-size: 13px;
     font-weight: 600;
   }
   .tab.active { background: var(--purple); color: white; }
+
+  /* Multi-select group checklist */
+  .group-list {
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--field);
+    margin-bottom: 10px;
+  }
+  .group-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .group-row:last-child { border-bottom: none; }
+  .group-row input { width: 16px; height: 16px; accent-color: var(--purple); flex-shrink: 0; }
+  .group-row .g-name { flex: 1; }
+  .group-row .g-count { color: var(--muted); font-size: 11px; }
+  .group-list-actions {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--purple);
+    margin-bottom: 16px;
+  }
+  .group-list-actions span { cursor: pointer; }
+  .selected-count { font-size: 12px; color: var(--muted); margin: -10px 0 16px; }
+
+  /* Downloads section */
+  .dl-type-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .preview-card {
+    display: none;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    background: var(--field);
+  }
+  .preview-card img { width: 100%; display: block; max-height: 200px; object-fit: cover; }
+  .preview-info { padding: 12px 14px; }
+  .preview-info .p-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .preview-info .p-meta { font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="card">
-    <h1>📤 Tuma Group Status</h1>
-    <p class="sub">Chagua group, andika au ambatanisha picha/video, kisha tuma.</p>
 
-    <label for="groupSelect">Group</label>
-    <select id="groupSelect">
-      <option value="">Inapakia groups...</option>
-    </select>
-
-    <div class="tabs">
-      <div class="tab active" data-tab="text">📝 Text</div>
-      <div class="tab" data-tab="media">🖼️ Picha/Video</div>
-    </div>
-
-    <div id="textTab">
-      <label for="textInput">Maandishi</label>
-      <textarea id="textInput" placeholder="Andika status yako hapa..."></textarea>
-    </div>
-
-    <div id="mediaTab" style="display:none;">
-      <label for="mediaInput">Chagua picha au video</label>
-      <input type="file" id="mediaInput" accept="image/*,video/*" />
-      <div class="file-preview" id="filePreview"></div>
-      <label for="captionInput">Caption (hiari)</label>
-      <textarea id="captionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
-    </div>
-
-    <button id="postBtn">Tuma Status</button>
-    <div class="msg" id="msgBox"></div>
+  <div class="section-tabs">
+    <div class="section-tab active" data-section="status">📤<br>Group Status</div>
+    <div class="section-tab" data-section="broadcast">📢<br>Tuma kwa Groups</div>
+    <div class="section-tab" data-section="downloads">⬇️<br>Downloads</div>
   </div>
+
+  <!-- ============ SECTION 1: Existing group status ============ -->
+  <div class="section active" id="section-status">
+    <div class="card">
+      <h1>📤 Tuma Group Status</h1>
+      <p class="sub">Chagua group, andika au ambatanisha picha/video, kisha tuma.</p>
+
+      <label for="groupSelect">Group</label>
+      <select id="groupSelect">
+        <option value="">Inapakia groups...</option>
+      </select>
+
+      <div class="tabs">
+        <div class="tab active" data-tab="text" data-group="status">📝 Text</div>
+        <div class="tab" data-tab="media" data-group="status">🖼️ Picha/Video</div>
+      </div>
+
+      <div id="textTab">
+        <label for="textInput">Maandishi</label>
+        <textarea id="textInput" placeholder="Andika status yako hapa..."></textarea>
+      </div>
+
+      <div id="mediaTab" style="display:none;">
+        <label for="mediaInput">Chagua picha au video</label>
+        <input type="file" id="mediaInput" accept="image/*,video/*" />
+        <div class="file-preview" id="filePreview"></div>
+        <label for="captionInput">Caption (hiari)</label>
+        <textarea id="captionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
+      </div>
+
+      <button id="postBtn">Tuma Status</button>
+      <div class="msg" id="msgBox"></div>
+    </div>
+  </div>
+
+  <!-- ============ SECTION 2: Broadcast to multiple groups ============ -->
+  <div class="section" id="section-broadcast">
+    <div class="card">
+      <h1>📢 Tuma Ujumbe kwa Groups</h1>
+      <p class="sub">Chagua groups moja au zaidi, kisha tuma maandishi, picha au video.</p>
+
+      <label>Chagua Groups</label>
+      <div class="group-list" id="bGroupList">
+        <div class="group-row" style="justify-content:center;color:var(--muted);">Inapakia groups...</div>
+      </div>
+      <div class="group-list-actions">
+        <span id="bSelectAll">☑️ Chagua Zote</span>
+        <span id="bSelectNone">⬜ Ondoa Zote</span>
+      </div>
+      <div class="selected-count" id="bSelectedCount">Umechagua groups: 0</div>
+
+      <div class="tabs">
+        <div class="tab active" data-tab="text" data-group="broadcast">📝 Text</div>
+        <div class="tab" data-tab="media" data-group="broadcast">🖼️ Picha/Video</div>
+      </div>
+
+      <div id="bTextTab">
+        <label for="bTextInput">Maandishi</label>
+        <textarea id="bTextInput" placeholder="Andika ujumbe wako hapa..."></textarea>
+      </div>
+
+      <div id="bMediaTab" style="display:none;">
+        <label for="bMediaInput">Chagua picha au video</label>
+        <input type="file" id="bMediaInput" accept="image/*,video/*" />
+        <div class="file-preview" id="bFilePreview"></div>
+        <label for="bCaptionInput">Caption (hiari)</label>
+        <textarea id="bCaptionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
+      </div>
+
+      <button id="bSendBtn">Tuma kwa Groups Nilizochagua</button>
+      <div class="msg" id="bMsgBox"></div>
+    </div>
+  </div>
+
+  <!-- ============ SECTION 3: Downloads (MP3/MP4) ============ -->
+  <div class="section" id="section-downloads">
+    <div class="card">
+      <h1>⬇️ Pakua Muziki / Video</h1>
+      <p class="sub">Andika jina la wimbo/video au bandika link ya YouTube, kisha angalia preview kabla ya kupakua.</p>
+
+      <div class="dl-type-tabs">
+        <div class="tab active" data-dltype="mp3">🎵 MP3</div>
+        <div class="tab" data-dltype="mp4">🎬 MP4</div>
+      </div>
+
+      <label for="dlInput">Jina la wimbo/video au link</label>
+      <input type="text" id="dlInput" placeholder="Mfano: Marioo Pombe, au https://youtube.com/..." />
+
+      <button id="dlSearchBtn">🔍 Tafuta / Preview</button>
+
+      <div class="preview-card" id="dlPreview">
+        <img id="dlThumb" src="" alt="thumbnail" />
+        <div class="preview-info">
+          <div class="p-title" id="dlTitle"></div>
+          <div class="p-meta" id="dlMeta"></div>
+        </div>
+      </div>
+
+      <button class="secondary" id="dlDownloadBtn" style="display:none;">⬇️ Pakua Sasa</button>
+
+      <div class="msg" id="dlMsgBox"></div>
+    </div>
+  </div>
+
 </div>
 
 <script>
   const params = new URLSearchParams(window.location.search);
   const token = params.get('token');
 
+  // ---------- Top-level section switching ----------
+  document.querySelectorAll('.section-tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.section-tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById('section-' + t.dataset.section).classList.add('active');
+    });
+  });
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  if (!token) {
+    ['msgBox', 'bMsgBox', 'dlMsgBox'].forEach(id => {
+      const el = document.getElementById(id);
+      el.className = 'msg error';
+      el.textContent = '❌ Link hii haina token. Tumia link uliyopewa baada ya kuunganisha.';
+    });
+    document.getElementById('postBtn').disabled = true;
+    document.getElementById('bSendBtn').disabled = true;
+    document.getElementById('dlSearchBtn').disabled = true;
+  }
+
+  /* =========================================================
+     SECTION 1 — Group Status (existing behaviour, unchanged)
+     ========================================================= */
   const groupSelect = document.getElementById('groupSelect');
-  const tabs = document.querySelectorAll('.tab');
   const textTab = document.getElementById('textTab');
   const mediaTab = document.getElementById('mediaTab');
   const textInput = document.getElementById('textInput');
@@ -133,18 +327,11 @@
   const filePreview = document.getElementById('filePreview');
   const postBtn = document.getElementById('postBtn');
   const msgBox = document.getElementById('msgBox');
-
   let activeTab = 'text';
 
-  if (!token) {
-    msgBox.className = 'msg error';
-    msgBox.textContent = '❌ Link hii haina token. Tumia link uliyopewa baada ya kuunganisha.';
-    postBtn.disabled = true;
-  }
-
-  tabs.forEach(tab => {
+  document.querySelectorAll('.tab[data-group="status"]').forEach(tab => {
     tab.addEventListener('click', () => {
-      tabs.forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab[data-group="status"]').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       activeTab = tab.dataset.tab;
       textTab.style.display = activeTab === 'text' ? 'block' : 'none';
@@ -162,33 +349,26 @@
     }
   });
 
+  let allGroups = [];
+
   async function loadGroups() {
     try {
       const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groups');
       const data = await res.json();
       if (!data.ok) {
         groupSelect.innerHTML = '<option value="">Imeshindwa kupakia groups</option>';
+        renderBroadcastGroups([]);
         return;
       }
+      allGroups = data.groups || [];
       groupSelect.innerHTML =
-        '<option value="all">🌍 Groups Zote (' + data.groups.length + ')</option>' +
-        data.groups.map(g => `<option value="${g.id}">${g.subject} (${g.participants} members)</option>`).join('');
+        '<option value="all">🌍 Groups Zote (' + allGroups.length + ')</option>' +
+        allGroups.map(g => `<option value="${g.id}">${g.subject} (${g.participants} members)</option>`).join('');
+      renderBroadcastGroups(allGroups);
     } catch (e) {
       groupSelect.innerHTML = '<option value="">Hitilafu — jaribu kupakua upya ukurasa</option>';
+      renderBroadcastGroups([]);
     }
-  }
-
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result; // data:<mime>;base64,<data>
-        const base64 = result.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
   }
 
   postBtn.addEventListener('click', async () => {
@@ -220,11 +400,8 @@
         return;
       }
       const base64 = await fileToBase64(file);
-      if (file.type.startsWith('video/')) {
-        payload.videoBase64 = base64;
-      } else {
-        payload.imageBase64 = base64;
-      }
+      if (file.type.startsWith('video/')) payload.videoBase64 = base64;
+      else payload.imageBase64 = base64;
       payload.caption = captionInput.value.trim();
     }
 
@@ -257,6 +434,228 @@
       postBtn.disabled = false;
       postBtn.textContent = 'Tuma Status';
     }
+  });
+
+  /* =========================================================
+     SECTION 2 — Broadcast to multiple selected groups
+     ========================================================= */
+  const bGroupList = document.getElementById('bGroupList');
+  const bSelectAll = document.getElementById('bSelectAll');
+  const bSelectNone = document.getElementById('bSelectNone');
+  const bSelectedCount = document.getElementById('bSelectedCount');
+  const bTextTab = document.getElementById('bTextTab');
+  const bMediaTab = document.getElementById('bMediaTab');
+  const bTextInput = document.getElementById('bTextInput');
+  const bMediaInput = document.getElementById('bMediaInput');
+  const bCaptionInput = document.getElementById('bCaptionInput');
+  const bFilePreview = document.getElementById('bFilePreview');
+  const bSendBtn = document.getElementById('bSendBtn');
+  const bMsgBox = document.getElementById('bMsgBox');
+  let bActiveTab = 'text';
+
+  document.querySelectorAll('.tab[data-group="broadcast"]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab[data-group="broadcast"]').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      bActiveTab = tab.dataset.tab;
+      bTextTab.style.display = bActiveTab === 'text' ? 'block' : 'none';
+      bMediaTab.style.display = bActiveTab === 'media' ? 'block' : 'none';
+    });
+  });
+
+  bMediaInput.addEventListener('change', () => {
+    const file = bMediaInput.files[0];
+    if (file) {
+      bFilePreview.style.display = 'block';
+      bFilePreview.textContent = `📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+    } else {
+      bFilePreview.style.display = 'none';
+    }
+  });
+
+  function updateSelectedCount() {
+    const checked = bGroupList.querySelectorAll('input[type="checkbox"]:checked').length;
+    bSelectedCount.textContent = 'Umechagua groups: ' + checked;
+  }
+
+  function renderBroadcastGroups(groups) {
+    if (!groups.length) {
+      bGroupList.innerHTML = '<div class="group-row" style="justify-content:center;color:var(--muted);">Hakuna groups zilizopatikana</div>';
+      updateSelectedCount();
+      return;
+    }
+    bGroupList.innerHTML = groups.map(g => `
+      <label class="group-row">
+        <input type="checkbox" value="${g.id}" />
+        <span class="g-name">${g.subject}</span>
+        <span class="g-count">${g.participants} members</span>
+      </label>
+    `).join('');
+    bGroupList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', updateSelectedCount);
+    });
+    updateSelectedCount();
+  }
+
+  bSelectAll.addEventListener('click', () => {
+    bGroupList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    updateSelectedCount();
+  });
+  bSelectNone.addEventListener('click', () => {
+    bGroupList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    updateSelectedCount();
+  });
+
+  bSendBtn.addEventListener('click', async () => {
+    bMsgBox.className = 'msg';
+    bMsgBox.style.display = 'none';
+
+    const groupIds = Array.from(bGroupList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+    if (!groupIds.length) {
+      bMsgBox.className = 'msg error';
+      bMsgBox.textContent = '❌ Chagua angalau group moja.';
+      return;
+    }
+
+    const payload = { groupIds };
+
+    if (bActiveTab === 'text') {
+      const text = bTextInput.value.trim();
+      if (!text) {
+        bMsgBox.className = 'msg error';
+        bMsgBox.textContent = '❌ Andika maandishi kwanza.';
+        return;
+      }
+      payload.text = text;
+    } else {
+      const file = bMediaInput.files[0];
+      if (!file) {
+        bMsgBox.className = 'msg error';
+        bMsgBox.textContent = '❌ Chagua picha au video kwanza.';
+        return;
+      }
+      const base64 = await fileToBase64(file);
+      if (file.type.startsWith('video/')) payload.videoBase64 = base64;
+      else payload.imageBase64 = base64;
+      payload.caption = bCaptionInput.value.trim();
+    }
+
+    bSendBtn.disabled = true;
+    bSendBtn.textContent = 'Inatuma...';
+
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!data.ok) {
+        bMsgBox.className = 'msg error';
+        bMsgBox.textContent = '❌ ' + (data.error || 'Hitilafu imetokea.');
+      } else {
+        bMsgBox.className = 'msg success';
+        bMsgBox.textContent = `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total} groups`;
+        bTextInput.value = '';
+        bMediaInput.value = '';
+        bCaptionInput.value = '';
+        bFilePreview.style.display = 'none';
+      }
+    } catch (e) {
+      bMsgBox.className = 'msg error';
+      bMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+    } finally {
+      bSendBtn.disabled = false;
+      bSendBtn.textContent = 'Tuma kwa Groups Nilizochagua';
+    }
+  });
+
+  /* =========================================================
+     SECTION 3 — Downloads (MP3/MP4) with preview
+     ========================================================= */
+  const dlInput = document.getElementById('dlInput');
+  const dlSearchBtn = document.getElementById('dlSearchBtn');
+  const dlPreview = document.getElementById('dlPreview');
+  const dlThumb = document.getElementById('dlThumb');
+  const dlTitle = document.getElementById('dlTitle');
+  const dlMeta = document.getElementById('dlMeta');
+  const dlDownloadBtn = document.getElementById('dlDownloadBtn');
+  const dlMsgBox = document.getElementById('dlMsgBox');
+  let dlType = 'mp3';
+  let currentPreview = null;
+
+  document.querySelectorAll('.tab[data-dltype]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab[data-dltype]').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      dlType = tab.dataset.dltype;
+      // Selecting a different format invalidates the current preview.
+      dlPreview.style.display = 'none';
+      dlDownloadBtn.style.display = 'none';
+      currentPreview = null;
+    });
+  });
+
+  dlSearchBtn.addEventListener('click', async () => {
+    dlMsgBox.className = 'msg';
+    dlMsgBox.style.display = 'none';
+    dlPreview.style.display = 'none';
+    dlDownloadBtn.style.display = 'none';
+    currentPreview = null;
+
+    const input = dlInput.value.trim();
+    if (!input) {
+      dlMsgBox.className = 'msg error';
+      dlMsgBox.textContent = '❌ Andika jina la wimbo/video au bandika link kwanza.';
+      return;
+    }
+
+    dlSearchBtn.disabled = true;
+    dlSearchBtn.textContent = 'Inatafuta...';
+
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/media-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input }),
+      });
+      const data = await res.json();
+
+      if (!data.ok) {
+        dlMsgBox.className = 'msg error';
+        dlMsgBox.textContent = '❌ ' + (data.error || 'Haikupatikana.');
+        return;
+      }
+
+      currentPreview = data;
+      dlThumb.src = data.thumbnail || '';
+      dlTitle.textContent = data.title || 'Bila jina';
+      dlMeta.textContent = (data.duration ? '⏱ ' + data.duration + '  •  ' : '') + (data.author || '');
+      dlPreview.style.display = 'block';
+      dlDownloadBtn.style.display = 'block';
+    } catch (e) {
+      dlMsgBox.className = 'msg error';
+      dlMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+    } finally {
+      dlSearchBtn.disabled = false;
+      dlSearchBtn.textContent = '🔍 Tafuta / Preview';
+    }
+  });
+
+  dlDownloadBtn.addEventListener('click', () => {
+    if (!currentPreview) return;
+    dlMsgBox.className = 'msg success';
+    dlMsgBox.textContent = '⬇️ Kupakua kunaanza... subiri kidogo, itategemea ukubwa wa faili.';
+
+    const url = '/api/dashboard/' + encodeURIComponent(token) + '/media-download'
+      + '?type=' + encodeURIComponent(dlType)
+      + '&url=' + encodeURIComponent(currentPreview.url)
+      + '&title=' + encodeURIComponent(currentPreview.title || 'download');
+
+    // Navigating triggers the browser's normal file-download flow because
+    // the server responds with Content-Disposition: attachment.
+    window.location.href = url;
   });
 
   if (token) loadGroups();
