@@ -36,5 +36,5 @@ module.exports = {
   // NOTE: WhatsApp often rejects custom codes even when correctly
   // formatted — see the earlier conversation. Leave as null to use
   // Baileys' normal random codes (recommended).
-  CUSTOM_PAIRING_CODE: null,
+  CUSTOM_PAIRING_CODE: 'UMOJASTA',
 };
