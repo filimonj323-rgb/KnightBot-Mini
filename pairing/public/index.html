@@ -150,6 +150,19 @@
       </div>
       <div class="status pairing" id="statusText">⏳ Inasubiri uunganishe...</div>
     </div>
+
+    <div style="text-align:center; margin-top:18px;">
+      <a href="#" id="resendToggle" style="color:#9a9fae; font-size:13px; text-decoration:underline;">
+        Umesahau dashboard link yako?
+      </a>
+    </div>
+
+    <div id="resendBox" style="display:none; margin-top:14px;">
+      <label for="resendPhone">Namba uliyotumia kuunganisha</label>
+      <input type="tel" id="resendPhone" placeholder="255712345678" inputmode="numeric" />
+      <button id="resendBtn" style="background:#2a2e38;">Tutumie Link Tena WhatsApp</button>
+      <div class="msg-inline" id="resendMsg" style="display:none; margin-top:10px; font-size:13px;"></div>
+    </div>
   </div>
 
 <script>
@@ -196,8 +209,7 @@
     }
   }
 
-  function showDashboardLink(token) {
-    const url = window.location.origin + '/dashboard.html?token=' + token;
+  function showDashboardLink(token) {    const url = window.location.origin + '/dashboard.html?token=' + token;
     let box = document.getElementById('dashboardBox');
     if (!box) {
       box = document.createElement('div');
@@ -259,6 +271,57 @@
     } finally {
       pairBtn.disabled = false;
       pairBtn.textContent = 'Pata Pairing Code';
+    }
+  });
+
+  // "Umesahau dashboard link yako?" — resend it to their WhatsApp inbox.
+  const resendToggle = document.getElementById('resendToggle');
+  const resendBox = document.getElementById('resendBox');
+  const resendPhone = document.getElementById('resendPhone');
+  const resendBtn = document.getElementById('resendBtn');
+  const resendMsg = document.getElementById('resendMsg');
+
+  resendToggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    resendBox.style.display = resendBox.style.display === 'none' ? 'block' : 'none';
+  });
+
+  resendBtn.addEventListener('click', async () => {
+    resendMsg.style.display = 'none';
+    const phoneNumber = resendPhone.value.trim();
+    if (!phoneNumber || phoneNumber.length < 9) {
+      resendMsg.style.display = 'block';
+      resendMsg.style.color = '#e05555';
+      resendMsg.textContent = '❌ Weka namba sahihi.';
+      return;
+    }
+
+    resendBtn.disabled = true;
+    resendBtn.textContent = 'Inatuma...';
+
+    try {
+      const res = await fetch('/api/resend-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber }),
+      });
+      const data = await res.json();
+
+      resendMsg.style.display = 'block';
+      if (data.ok) {
+        resendMsg.style.color = '#4caf50';
+        resendMsg.textContent = '✅ Tumekutumia link kwenye WhatsApp yako.';
+      } else {
+        resendMsg.style.color = '#e05555';
+        resendMsg.textContent = '❌ ' + (data.error || 'Imeshindwa. Jaribu tena.');
+      }
+    } catch (e) {
+      resendMsg.style.display = 'block';
+      resendMsg.style.color = '#e05555';
+      resendMsg.textContent = '❌ Imeshindwa kuwasiliana na server.';
+    } finally {
+      resendBtn.disabled = false;
+      resendBtn.textContent = 'Tutumie Link Tena WhatsApp';
     }
   });
 </script>
