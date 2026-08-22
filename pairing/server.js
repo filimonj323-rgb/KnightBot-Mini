@@ -13,7 +13,6 @@
  */
 
 const http = require('http');
-const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -24,6 +23,8 @@ const {
   sendMessageToGroups,
   previewMediaForToken,
   resolveMediaDownloadForToken,
+  getSettingsForToken,
+  updateSettingsForToken,
   resendDashboardLink,
 } = require('./instanceManager');
 
@@ -156,38 +157,38 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Downloads step 2: the customer confirmed the preview and pressed
-    // "Pakua" — resolve a real direct link, then stream the file straight
-    // through to the browser as an attachment (mp3 or mp4).
+    // "Pakua" — resolve a real, VERIFIED direct link, then 302-redirect the
+    // browser straight to it. This is deliberately NOT proxied through our
+    // own server: proxying means every byte travels source -> Railway ->
+    // browser (double the network hop, capped by our server's bandwidth,
+    // which is what caused the slow "stuck in Chrome downloads" behaviour).
+    // A redirect lets Chrome fetch directly from the source at full speed,
+    // with the original, unaltered quality.
     if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.includes('/media-download')) {
       const [tokenPart, queryPart] = req.url.split('/media-download');
       const token = decodeURIComponent(tokenPart.split('/api/dashboard/')[1]);
       const query = new URLSearchParams(queryPart || '');
       const youtubeUrl = query.get('url');
       const type = query.get('type') === 'mp4' ? 'mp4' : 'mp3';
-      const requestedTitle = query.get('title') || 'download';
 
       const resolved = await resolveMediaDownloadForToken(token, youtubeUrl, type);
-      const safeTitle = String(resolved.title || requestedTitle)
-        .replace(/[^\w\s.-]/g, '')
-        .trim()
-        .slice(0, 80) || 'download';
-      const ext = type === 'mp4' ? 'mp4' : 'mp3';
-      const mimetype = type === 'mp4' ? 'video/mp4' : 'audio/mpeg';
+      res.writeHead(302, { Location: resolved.download });
+      return res.end();
+    }
 
-      const upstream = await axios.get(resolved.download, {
-        responseType: 'stream',
-        timeout: 120000,
-        maxRedirects: 5,
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      });
+    // Settings: read a customer's current (optional) prefix/bot name.
+    if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
+      const settings = getSettingsForToken(token);
+      return sendJson(res, 200, { ok: true, ...settings });
+    }
 
-      res.writeHead(200, {
-        'Content-Type': mimetype,
-        'Content-Disposition': `attachment; filename="${safeTitle}.${ext}"`,
-      });
-      upstream.data.on('error', () => res.destroy());
-      upstream.data.pipe(res);
-      return;
+    // Settings: save a customer's optional prefix/bot name (blank clears it).
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
+      const body = await readJsonBody(req);
+      const settings = updateSettingsForToken(token, body);
+      return sendJson(res, 200, { ok: true, ...settings });
     }
 
     if (req.method === 'GET') {
