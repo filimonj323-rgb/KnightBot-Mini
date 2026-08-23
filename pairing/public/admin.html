@@ -64,6 +64,7 @@
     <span class="muted" id="trialInfo"></span>
   </div>
   <button style="margin-bottom:14px;" onclick="downloadBackup()">⬇️ Pakua Backup Kamili (.tar.gz)</button>
+  <button style="margin-bottom:14px;" class="danger" onclick="resetSessions()">🗑️ Futa Sessions Chakavu (Pairing Zote)</button>
   <table>
     <thead>
       <tr><th>Namba</th><th>Hali</th><th>Muda</th><th>Vitendo</th></tr>
@@ -177,6 +178,16 @@
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('❌ ' + e.message);
+    }
+  }
+
+  async function resetSessions() {
+    if (!confirm('Hii itafuta session ZOTE za pairing (namba zote zitalazimika ku-pair upya). Endelea?')) return;
+    try {
+      const data = await api('/api/admin/reset-sessions', { method: 'POST' });
+      alert(`✅ Session ${data.removed} zimefutwa. Sasa jaribu "Pata Pairing Code" upya.`);
     } catch (e) {
       alert('❌ ' + e.message);
     }
