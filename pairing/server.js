@@ -38,16 +38,23 @@ const {
 const adminAuth = require('./adminAuth');
 const clickpesa = require('./clickpesa');
 const cfg = require('./pairingConfig');
+const db = require('./db');
 
-// ── Pending payment orders ──────────────────────────────────────────────
-// orderReference -> { phoneNumber, days, amount, createdAt }
-// Persisted to disk so a webhook arriving after a redeploy can still be
-// matched back to the right customer.
-const PENDING_ORDERS_FILE = path.join(__dirname, 'sessions', '_pending_orders.json');
-let pendingOrders = {};
-try { pendingOrders = JSON.parse(fs.readFileSync(PENDING_ORDERS_FILE, 'utf8')); } catch (e) { pendingOrders = {}; }
-function savePendingOrders() {
-  fs.writeFileSync(PENDING_ORDERS_FILE, JSON.stringify(pendingOrders, null, 2));
+// ── Pending payment orders (SQLite — survives redeploys via the Volume) ──
+// ── Pending payment orders (Turso — outside Railway, survives webhook
+// arriving after a redeploy or host migration) ──────────────────────────
+async function insertPendingOrder(orderReference, phoneNumber, days, amount) {
+  await db.query(
+    'INSERT INTO pending_orders (orderReference, phoneNumber, days, amount, createdAt) VALUES (?, ?, ?, ?, ?)',
+    [orderReference, phoneNumber, days, amount, Date.now()]
+  );
+}
+async function getPendingOrder(orderReference) {
+  const res = await db.query('SELECT * FROM pending_orders WHERE orderReference = ?', [orderReference]);
+  return res.rows[0] || null;
+}
+async function removePendingOrder(orderReference) {
+  await db.query('DELETE FROM pending_orders WHERE orderReference = ?', [orderReference]);
 }
 
 const PORT = process.env.PORT || process.env.PAIRING_PORT || 3000;
@@ -213,6 +220,35 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, ...settings });
     }
 
+    // ── Admin: full backup download (sessions + SQLite db as one .tar.gz) ──
+    // Use this before migrating to a new Railway account / host: download
+    // this file, then on the new host extract it into pairing/ so it
+    // recreates pairing/sessions/* (all customer WhatsApp sessions +
+    // pairing.db) before starting the app there.
+    if (req.method === 'GET' && req.url === '/api/admin/backup') {
+      const authHeader = req.headers['authorization'] || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (!adminAuth.verify(token)) {
+        return sendJson(res, 401, { ok: false, error: 'Session imeisha au si sahihi. Login tena.' });
+      }
+
+      const { spawn } = require('child_process');
+      const filename = `pairing-backup-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+      res.writeHead(200, {
+        'Content-Type': 'application/gzip',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      });
+
+      const tar = spawn('tar', ['-czf', '-', '-C', __dirname, 'sessions']);
+      tar.stdout.pipe(res);
+      tar.stderr.on('data', (d) => console.error('[backup] tar:', d.toString()));
+      tar.on('error', (e) => {
+        console.error('[backup] tar imeshindwa kuanza:', e.message);
+        if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Backup imeshindikana: ' + e.message });
+      });
+      return;
+    }
+
     // ── Admin auth ─────────────────────────────────────────────────────
     if (req.method === 'POST' && req.url === '/api/admin/login') {
       const body = await readJsonBody(req);
@@ -231,7 +267,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       if (req.method === 'GET' && req.url === '/api/admin/users') {
-        return sendJson(res, 200, { ok: true, users: adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
+        return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
       }
 
       // /api/admin/users/<phone>/mark-paid | extend-trial | block
@@ -241,11 +277,11 @@ const server = http.createServer(async (req, res) => {
         const body = await readJsonBody(req);
         let user;
         if (action === 'mark-paid') {
-          user = adminMarkPaid(phone, Number(body.days) || 30, { method: 'manual', note: body.note || '' });
+          user = await adminMarkPaid(phone, Number(body.days) || 30, { method: 'manual', note: body.note || '' });
         } else if (action === 'extend-trial') {
-          user = adminExtendTrial(phone, Number(body.days) || 1);
+          user = await adminExtendTrial(phone, Number(body.days) || 1);
         } else if (action === 'block') {
-          user = adminSetBlocked(phone, !!body.blocked);
+          user = await adminSetBlocked(phone, !!body.blocked);
         }
         return sendJson(res, 200, { ok: true, user });
       }
@@ -254,13 +290,13 @@ const server = http.createServer(async (req, res) => {
     // ── Customer billing (dashboard) ──────────────────────────────────
     if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/billing')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/billing', ''));
-      const billing = getBillingForToken(token);
+      const billing = await getBillingForToken(token);
       return sendJson(res, 200, { ok: true, ...billing, plans: cfg.PLANS });
     }
 
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/pay')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/pay', ''));
-      const phoneNumber = getPhoneNumberByToken(token);
+      const phoneNumber = await getPhoneNumberByToken(token);
       if (!phoneNumber) return sendJson(res, 404, { ok: false, error: 'Dashboard link si sahihi.' });
 
       const body = await readJsonBody(req);
@@ -268,8 +304,7 @@ const server = http.createServer(async (req, res) => {
       if (!plan) return sendJson(res, 400, { ok: false, error: 'Package hii haipo.' });
 
       const orderReference = `SUB-${phoneNumber}-${Date.now()}`;
-      pendingOrders[orderReference] = { phoneNumber, days: plan.days, amount: plan.price, createdAt: Date.now() };
-      savePendingOrders();
+      await insertPendingOrder(orderReference, phoneNumber, plan.days, plan.price);
 
       await clickpesa.initiateUssdPush({ amount: plan.price, phoneNumber, orderReference });
       return sendJson(res, 200, {
@@ -289,19 +324,18 @@ const server = http.createServer(async (req, res) => {
       }
 
       const orderReference = body.orderReference;
-      const order = pendingOrders[orderReference];
+      const order = await getPendingOrder(orderReference);
       const status = String(body.status || '').toUpperCase();
       const isSuccess = ['SUCCESS', 'COMPLETED', 'PAID'].includes(status);
 
       if (order && isSuccess) {
-        adminMarkPaid(order.phoneNumber, order.days, {
+        await adminMarkPaid(order.phoneNumber, order.days, {
           method: 'clickpesa',
           orderReference,
           amount: order.amount,
           paymentReference: body.paymentReference || null,
         });
-        delete pendingOrders[orderReference];
-        savePendingOrders();
+        await removePendingOrder(orderReference);
       } else if (order && !isSuccess) {
         console.log(`[payment/webhook] malipo ${orderReference} hayakufanikiwa: ${status}`);
       } else {
@@ -323,7 +357,15 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`🌐 Pairing website inaendesha kwenye port ${PORT}`);
-  startReminderScheduler();
+async function start() {
+  await db.initSchema(); // must finish before we accept any requests
+  server.listen(PORT, () => {
+    console.log(`🌐 Pairing website inaendesha kwenye port ${PORT}`);
+    startReminderScheduler();
+  });
+}
+
+start().catch((err) => {
+  console.error('❌ Imeshindwa kuanzisha server (angalia Turso credentials kwenye pairingConfig.js):', err.message);
+  process.exit(1);
 });

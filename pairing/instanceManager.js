@@ -15,12 +15,10 @@ const crypto = require('crypto');
 const mediaDownloader = require('./mediaDownloader');
 const userStore = require('./userStore');
 const cfg = require('./pairingConfig');
+const db = require('./db');
 
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
-
-const TOKENS_FILE = path.join(SESSIONS_ROOT, '_tokens.json');
-const SETTINGS_FILE = path.join(SESSIONS_ROOT, '_settings.json');
 
 // Optional custom pairing code — edit CUSTOM_PAIRING_CODE in pairingConfig.js.
 // WhatsApp requires EXACTLY 8 uppercase alphanumeric characters, and often
@@ -37,38 +35,20 @@ if (cfg.CUSTOM_PAIRING_CODE && !CUSTOM_PAIRING_CODE) {
 
 // phoneNumber -> { sock, status, pairingCode, createdAt, phoneNumber, token, reconnectAttempts }
 const instances = new Map();
-// token -> phoneNumber
-const tokenIndex = new Map();
 
-function loadTokenIndex() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf8'));
-    Object.entries(raw).forEach(([token, phoneNumber]) => tokenIndex.set(token, phoneNumber));
-  } catch (e) {
-    // No token file yet — fine on first run.
-  }
-}
-
-function persistTokenIndex() {
-  const obj = {};
-  tokenIndex.forEach((phoneNumber, token) => { obj[token] = phoneNumber; });
-  fs.writeFileSync(TOKENS_FILE, JSON.stringify(obj, null, 2));
-}
-
-loadTokenIndex();
-
-function getOrCreateToken(phoneNumber) {
-  for (const [token, num] of tokenIndex.entries()) {
-    if (num === phoneNumber) return token;
-  }
+// ── Dashboard tokens (Turso — lives outside Railway, survives redeploys
+// AND account/host changes) ────────────────────────────────────────────
+async function getOrCreateToken(phoneNumber) {
+  const existing = await db.query('SELECT token FROM tokens WHERE phoneNumber = ?', [phoneNumber]);
+  if (existing.rows.length) return existing.rows[0].token;
   const token = crypto.randomBytes(24).toString('hex');
-  tokenIndex.set(token, phoneNumber);
-  persistTokenIndex();
+  await db.query('INSERT INTO tokens (token, phoneNumber) VALUES (?, ?)', [token, phoneNumber]);
   return token;
 }
 
-function getPhoneNumberByToken(token) {
-  return tokenIndex.get(token) || null;
+async function getPhoneNumberByToken(token) {
+  const res = await db.query('SELECT phoneNumber FROM tokens WHERE token = ?', [token]);
+  return res.rows.length ? res.rows[0].phoneNumber : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -85,27 +65,9 @@ function getPhoneNumberByToken(token) {
 // shared config.js when a customer hasn't set a custom value — that's what
 // makes both fields optional.
 // ─────────────────────────────────────────────────────────────────────────
-const settingsIndex = new Map(); // phoneNumber -> { prefix?, botName? }
-
-function loadSettingsIndex() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-    Object.entries(raw).forEach(([phoneNumber, settings]) => settingsIndex.set(phoneNumber, settings));
-  } catch (e) {
-    // No settings file yet — fine on first run.
-  }
-}
-
-function persistSettingsIndex() {
-  const obj = {};
-  settingsIndex.forEach((settings, phoneNumber) => { obj[phoneNumber] = settings; });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2));
-}
-
-loadSettingsIndex();
-
-function getInstanceSettings(phoneNumber) {
-  return settingsIndex.get(phoneNumber) || {};
+async function getInstanceSettings(phoneNumber) {
+  const res = await db.query('SELECT prefix, botName FROM settings WHERE phoneNumber = ?', [phoneNumber]);
+  return res.rows[0] || {};
 }
 
 // Base URL used to build the dashboard link sent to customers over WhatsApp.
@@ -228,11 +190,11 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   // Attach this customer's optional overrides (prefix / bot name) so
   // handler.js can prefer them over the shared config.js — see the
   // settingsIndex comment above for why this can't just mutate config.js.
-  sock.instanceSettings = getInstanceSettings(phoneNumber);
+  sock.instanceSettings = await getInstanceSettings(phoneNumber);
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === 'open') {
@@ -240,14 +202,14 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       record.pairingCode = null;
       record.reconnectAttempts = 0;
       const isFirstConnect = !record.token;
-      record.token = getOrCreateToken(phoneNumber);
+      record.token = await getOrCreateToken(phoneNumber);
       if (isFirstConnect) {
         sendDashboardLinkMessage(sock, phoneNumber, record.token);
       }
 
       // If trial/subscription has already lapsed by the time they reconnect,
       // let them know once (not on every reconnect) with a link to pay.
-      const access = userStore.getAccessStatus(phoneNumber);
+      const access = await userStore.getAccessStatus(phoneNumber);
       if (!access.allowed && !access.user.expiryNotifiedAt) {
         const selfJid = `${phoneNumber}@s.whatsapp.net`;
         const reasonText = access.reason === 'blocked'
@@ -256,7 +218,7 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         sock.sendMessage(selfJid, {
           text: `⏰ *${reasonText}*\n\nBot yako haitajibu ujumbe hadi ulipe.\n\n💳 Lipa kupitia dashboard yako:\n${dashboardUrl(record.token)}`,
         }).catch(() => {});
-        userStore.markExpiryNotified(phoneNumber);
+        await userStore.markExpiryNotified(phoneNumber);
       }
       return;
     }
@@ -299,11 +261,11 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   // subscription) has lapsed and an admin hasn't blocked/unblocked them
   // otherwise, the bot goes silent for their instance until they pay —
   // this is the actual enforcement point for the whole trial/billing system.
-  sock.ev.on('messages.upsert', (m) => {
+  sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages?.[0];
     if (!msg?.message) return;
 
-    const access = userStore.getAccessStatus(phoneNumber);
+    const access = await userStore.getAccessStatus(phoneNumber);
     if (!access.allowed) return;
 
     handler.handleMessage(sock, msg).catch(err => {
@@ -383,7 +345,7 @@ async function createOrPairInstance(rawPhoneNumber) {
     reconnectAttempts: 0,
   };
   instances.set(phoneNumber, record);
-  userStore.ensureUser(phoneNumber); // starts their trial clock now, if new
+  await userStore.ensureUser(phoneNumber); // starts their trial clock now, if new
 
   await connectInstance(phoneNumber, sessionFolder, record, false);
 
@@ -396,8 +358,8 @@ async function createOrPairInstance(rawPhoneNumber) {
  * after a redeploy — the customer would need to re-pair; see the storage
  * caveat in pairing/server.js).
  */
-function getInstanceByToken(token) {
-  const phoneNumber = getPhoneNumberByToken(token);
+async function getInstanceByToken(token) {
+  const phoneNumber = await getPhoneNumberByToken(token);
   if (!phoneNumber) return null;
   return instances.get(phoneNumber) || null;
 }
@@ -407,7 +369,7 @@ function getInstanceByToken(token) {
  * used by the dashboard to populate a "post status to" picker.
  */
 async function listGroups(token) {
-  const inst = getInstanceByToken(token);
+  const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
 
@@ -426,7 +388,7 @@ async function listGroups(token) {
  * already use.
  */
 async function postGroupStatusForToken(token, { groupId, text, caption, imageBase64, videoBase64 }) {
-  const inst = getInstanceByToken(token);
+  const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
   if (!groupId) throw new Error('Chagua group ya kutuma status.');
@@ -471,7 +433,7 @@ async function postGroupStatusForToken(token, { groupId, text, caption, imageBas
  * ids so the customer can broadcast to several groups in one go.
  */
 async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64, videoBase64 }) {
-  const inst = getInstanceByToken(token);
+  const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
   if (!Array.isArray(groupIds) || groupIds.length === 0) {
@@ -516,7 +478,7 @@ async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64
  * socket to be connected — this doesn't touch WhatsApp at all).
  */
 async function previewMediaForToken(token, input) {
-  if (!getPhoneNumberByToken(token)) {
+  if (!(await getPhoneNumberByToken(token))) {
     throw new Error('Dashboard link si sahihi. Tumia link uliyopewa baada ya kuunganisha.');
   }
   return mediaDownloader.previewMedia(input);
@@ -529,7 +491,7 @@ async function previewMediaForToken(token, input) {
  * straight to the browser.
  */
 async function resolveMediaDownloadForToken(token, youtubeUrl, type) {
-  if (!getPhoneNumberByToken(token)) {
+  if (!(await getPhoneNumberByToken(token))) {
     throw new Error('Dashboard link si sahihi. Tumia link uliyopewa baada ya kuunganisha.');
   }
   return mediaDownloader.resolveDownload(youtubeUrl, type);
@@ -540,11 +502,11 @@ async function resolveMediaDownloadForToken(token, youtubeUrl, type) {
  * overrides (either may be unset, meaning "use the default"), plus the
  * defaults themselves so the dashboard can show helpful placeholders.
  */
-function getSettingsForToken(token) {
-  const phoneNumber = getPhoneNumberByToken(token);
+async function getSettingsForToken(token) {
+  const phoneNumber = await getPhoneNumberByToken(token);
   if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
   const defaults = require('../config');
-  const custom = getInstanceSettings(phoneNumber);
+  const custom = await getInstanceSettings(phoneNumber);
   return {
     prefix: custom.prefix || '',
     botName: custom.botName || '',
@@ -559,8 +521,8 @@ function getSettingsForToken(token) {
  * instance falls back to the shared default again. Applies immediately to
  * a live connection (no restart needed) by updating sock.instanceSettings.
  */
-function updateSettingsForToken(token, { prefix, botName }) {
-  const phoneNumber = getPhoneNumberByToken(token);
+async function updateSettingsForToken(token, { prefix, botName }) {
+  const phoneNumber = await getPhoneNumberByToken(token);
   if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
 
   const trimmedPrefix = typeof prefix === 'string' ? prefix.trim() : '';
@@ -576,12 +538,11 @@ function updateSettingsForToken(token, { prefix, botName }) {
   if (trimmedPrefix) next.prefix = trimmedPrefix;
   if (trimmedName) next.botName = trimmedName;
 
-  if (Object.keys(next).length === 0) {
-    settingsIndex.delete(phoneNumber);
-  } else {
-    settingsIndex.set(phoneNumber, next);
-  }
-  persistSettingsIndex();
+  await db.query(
+    `INSERT INTO settings (phoneNumber, prefix, botName) VALUES (?, ?, ?)
+     ON CONFLICT(phoneNumber) DO UPDATE SET prefix = excluded.prefix, botName = excluded.botName`,
+    [phoneNumber, next.prefix || null, next.botName || null]
+  );
 
   // Live-update the running connection, if any, so the change is instant.
   const inst = instances.get(phoneNumber);
@@ -605,7 +566,7 @@ async function resendDashboardLink(rawPhoneNumber) {
     throw new Error('Namba hii haijaunganishwa kwa sasa. Tumia "Pata Pairing Code" kuunganisha upya.');
   }
 
-  const token = inst.token || getOrCreateToken(phoneNumber);
+  const token = inst.token || await getOrCreateToken(phoneNumber);
   inst.token = token;
   await sendDashboardLinkMessage(inst.sock, phoneNumber, token);
   return { phoneNumber, sent: true };
@@ -616,8 +577,9 @@ async function resendDashboardLink(rawPhoneNumber) {
  * status (userStore) with live connection status (this process' instances
  * map, if the process hasn't been redeployed since they connected).
  */
-function adminListUsers() {
-  return userStore.getAllUsers().map((u) => {
+async function adminListUsers() {
+  const all = await userStore.getAllUsers();
+  return all.map((u) => {
     const live = instances.get(u.phoneNumber);
     return {
       ...u,
@@ -627,15 +589,15 @@ function adminListUsers() {
   }).sort((a, b) => b.pairedAt - a.pairedAt);
 }
 
-function adminMarkPaid(phoneNumber, days, meta) {
+async function adminMarkPaid(phoneNumber, days, meta) {
   return userStore.markPaid(normalizePhoneNumber(phoneNumber), days, meta);
 }
 
-function adminExtendTrial(phoneNumber, days) {
+async function adminExtendTrial(phoneNumber, days) {
   return userStore.extendTrial(normalizePhoneNumber(phoneNumber), days);
 }
 
-function adminSetBlocked(phoneNumber, blocked) {
+async function adminSetBlocked(phoneNumber, blocked) {
   return userStore.setBlocked(normalizePhoneNumber(phoneNumber), blocked);
 }
 
@@ -643,10 +605,10 @@ function adminSetBlocked(phoneNumber, blocked) {
  * Dashboard "Billing" tab — a customer's own trial/paid status, used to
  * show a countdown / pay button on their dashboard.html.
  */
-function getBillingForToken(token) {
-  const phoneNumber = getPhoneNumberByToken(token);
+async function getBillingForToken(token) {
+  const phoneNumber = await getPhoneNumberByToken(token);
   if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
-  const access = userStore.getAccessStatus(phoneNumber);
+  const access = await userStore.getAccessStatus(phoneNumber);
   return {
     allowed: access.allowed,
     reason: access.reason,
@@ -667,23 +629,20 @@ function getBillingForToken(token) {
  * this in-memory instance model.
  */
 function startReminderScheduler() {
-  const intervalMs = (cfg.REMINDER_INTERVAL_HOURS || 24) * 60 * 60 * 1000;
-  setInterval(() => {
+  setInterval(async () => {
     for (const [phoneNumber, record] of instances.entries()) {
       if (record.status !== 'connected' || !record.sock || !record.token) continue;
-      if (!userStore.isReminderDue(phoneNumber, cfg.REMINDER_INTERVAL_HOURS || 24)) continue;
+      const due = await userStore.isReminderDue(phoneNumber, cfg.REMINDER_INTERVAL_HOURS || 24);
+      if (!due) continue;
 
       const selfJid = `${phoneNumber}@s.whatsapp.net`;
       const link = dashboardUrl(record.token);
       record.sock.sendMessage(selfJid, {
         text: `⏰ *Kumbusho la Malipo*\n\nBot yako haijibu ujumbe kwa sasa kwa sababu muda umeisha.\n\n💳 Lipa hapa kuendelea kutumia:\n${link}`,
       }).catch(() => {});
-      userStore.markReminderSent(phoneNumber);
+      await userStore.markReminderSent(phoneNumber);
     }
-  }, Math.min(intervalMs, 60 * 60 * 1000) > 0 ? 60 * 60 * 1000 : intervalMs);
-  // ^ the scheduler itself ticks every hour and checks per-user due-time,
-  // so REMINDER_INTERVAL_HOURS can be set to any value (even < 1h) without
-  // changing this tick rate.
+  }, 60 * 60 * 1000); // checks every hour; REMINDER_INTERVAL_HOURS controls per-user due-time above
 }
 
 module.exports = {
