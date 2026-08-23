@@ -182,7 +182,7 @@
   <div class="section active" id="section-status">
     <div class="card">
       <h1>📤 Tuma Group Status</h1>
-      <p class="sub">Chagua group, andika au ambatanisha picha/video, kisha tuma.</p>
+      <p class="sub">Chagua group, andika au ambatanisha picha/video/wimbo, kisha tuma.</p>
 
       <label for="groupSelect">Group</label>
       <select id="groupSelect">
@@ -191,7 +191,8 @@
 
       <div class="tabs">
         <div class="tab active" data-tab="text" data-group="status">📝 Text</div>
-        <div class="tab" data-tab="media" data-group="status">🖼️ Picha/Video</div>
+        <div class="tab" data-tab="media" data-group="status">🖼️🎬🎵 Picha/Video/Wimbo</div>
+        <div class="tab" data-tab="combo" data-group="status">🖼️+🎵 Combined</div>
       </div>
 
       <div id="textTab">
@@ -200,11 +201,23 @@
       </div>
 
       <div id="mediaTab" style="display:none;">
-        <label for="mediaInput">Chagua picha au video</label>
-        <input type="file" id="mediaInput" accept="image/*,video/*" />
+        <label for="mediaInput">Chagua picha, video au wimbo (kutoka storage yako)</label>
+        <input type="file" id="mediaInput" accept="image/*,video/*,audio/*" />
         <div class="file-preview" id="filePreview"></div>
         <label for="captionInput">Caption (hiari)</label>
         <textarea id="captionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
+      </div>
+
+      <div id="comboTab" style="display:none;">
+        <p class="sub" style="margin:-8px 0 14px;">Chagua picha MOJA na wimbo MOJA — vitaunganishwa kuwa status moja (video) yenye picha ikicheza na wimbo huo.</p>
+        <label for="comboImageInput">Picha</label>
+        <input type="file" id="comboImageInput" accept="image/*" />
+        <div class="file-preview" id="comboImagePreview"></div>
+        <label for="comboAudioInput">Wimbo / Audio</label>
+        <input type="file" id="comboAudioInput" accept="audio/*" />
+        <div class="file-preview" id="comboAudioPreview"></div>
+        <label for="comboCaptionInput">Caption (hiari)</label>
+        <textarea id="comboCaptionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
       </div>
 
       <button id="postBtn">Tuma Status</button>
@@ -216,7 +229,7 @@
   <div class="section" id="section-broadcast">
     <div class="card">
       <h1>📢 Tuma Ujumbe kwa Groups</h1>
-      <p class="sub">Chagua groups moja au zaidi, kisha tuma maandishi, picha au video.</p>
+      <p class="sub">Chagua groups moja au zaidi, kisha tuma maandishi, picha, video au wimbo.</p>
 
       <label>Chagua Groups</label>
       <div class="group-list" id="bGroupList">
@@ -230,7 +243,7 @@
 
       <div class="tabs">
         <div class="tab active" data-tab="text" data-group="broadcast">📝 Text</div>
-        <div class="tab" data-tab="media" data-group="broadcast">🖼️ Picha/Video</div>
+        <div class="tab" data-tab="media" data-group="broadcast">🖼️🎬🎵 Picha/Video/Wimbo</div>
       </div>
 
       <div id="bTextTab">
@@ -239,8 +252,8 @@
       </div>
 
       <div id="bMediaTab" style="display:none;">
-        <label for="bMediaInput">Chagua picha au video</label>
-        <input type="file" id="bMediaInput" accept="image/*,video/*" />
+        <label for="bMediaInput">Chagua picha, video au wimbo (kutoka storage yako)</label>
+        <input type="file" id="bMediaInput" accept="image/*,video/*,audio/*" />
         <div class="file-preview" id="bFilePreview"></div>
         <label for="bCaptionInput">Caption (hiari)</label>
         <textarea id="bCaptionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
@@ -359,10 +372,16 @@
   const groupSelect = document.getElementById('groupSelect');
   const textTab = document.getElementById('textTab');
   const mediaTab = document.getElementById('mediaTab');
+  const comboTab = document.getElementById('comboTab');
   const textInput = document.getElementById('textInput');
   const mediaInput = document.getElementById('mediaInput');
   const captionInput = document.getElementById('captionInput');
   const filePreview = document.getElementById('filePreview');
+  const comboImageInput = document.getElementById('comboImageInput');
+  const comboAudioInput = document.getElementById('comboAudioInput');
+  const comboImagePreview = document.getElementById('comboImagePreview');
+  const comboAudioPreview = document.getElementById('comboAudioPreview');
+  const comboCaptionInput = document.getElementById('comboCaptionInput');
   const postBtn = document.getElementById('postBtn');
   const msgBox = document.getElementById('msgBox');
   let activeTab = 'text';
@@ -374,6 +393,7 @@
       activeTab = tab.dataset.tab;
       textTab.style.display = activeTab === 'text' ? 'block' : 'none';
       mediaTab.style.display = activeTab === 'media' ? 'block' : 'none';
+      comboTab.style.display = activeTab === 'combo' ? 'block' : 'none';
     });
   });
 
@@ -384,6 +404,26 @@
       filePreview.textContent = `📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
     } else {
       filePreview.style.display = 'none';
+    }
+  });
+
+  comboImageInput.addEventListener('change', () => {
+    const file = comboImageInput.files[0];
+    if (file) {
+      comboImagePreview.style.display = 'block';
+      comboImagePreview.textContent = `🖼️ ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+    } else {
+      comboImagePreview.style.display = 'none';
+    }
+  });
+
+  comboAudioInput.addEventListener('change', () => {
+    const file = comboAudioInput.files[0];
+    if (file) {
+      comboAudioPreview.style.display = 'block';
+      comboAudioPreview.textContent = `🎵 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+    } else {
+      comboAudioPreview.style.display = 'none';
     }
   });
 
@@ -430,21 +470,39 @@
         return;
       }
       payload.text = text;
+    } else if (activeTab === 'combo') {
+      const imgFile = comboImageInput.files[0];
+      const audFile = comboAudioInput.files[0];
+      if (!imgFile || !audFile) {
+        msgBox.className = 'msg error';
+        msgBox.textContent = '❌ Chagua PICHA na WIMBO — vyote viwili vinahitajika kwa "Combined".';
+        return;
+      }
+      payload.imageBase64 = await fileToBase64(imgFile);
+      payload.audioBase64 = await fileToBase64(audFile);
+      payload.caption = comboCaptionInput.value.trim();
     } else {
       const file = mediaInput.files[0];
       if (!file) {
         msgBox.className = 'msg error';
-        msgBox.textContent = '❌ Chagua picha au video kwanza.';
+        msgBox.textContent = '❌ Chagua picha, video au wimbo kwanza.';
         return;
       }
       const base64 = await fileToBase64(file);
-      if (file.type.startsWith('video/')) payload.videoBase64 = base64;
-      else payload.imageBase64 = base64;
-      payload.caption = captionInput.value.trim();
+      if (file.type.startsWith('video/')) {
+        payload.videoBase64 = base64;
+        payload.caption = captionInput.value.trim();
+      } else if (file.type.startsWith('audio/')) {
+        payload.audioBase64 = base64;
+        payload.audioMimetype = file.type || 'audio/mpeg';
+      } else {
+        payload.imageBase64 = base64;
+        payload.caption = captionInput.value.trim();
+      }
     }
 
     postBtn.disabled = true;
-    postBtn.textContent = 'Inatuma...';
+    postBtn.textContent = activeTab === 'combo' ? 'Inaunganisha na kutuma...' : 'Inatuma...';
 
     try {
       const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groupstatus', {
@@ -464,6 +522,11 @@
         mediaInput.value = '';
         captionInput.value = '';
         filePreview.style.display = 'none';
+        comboImageInput.value = '';
+        comboAudioInput.value = '';
+        comboCaptionInput.value = '';
+        comboImagePreview.style.display = 'none';
+        comboAudioPreview.style.display = 'none';
       }
     } catch (e) {
       msgBox.className = 'msg error';
@@ -569,13 +632,20 @@
       const file = bMediaInput.files[0];
       if (!file) {
         bMsgBox.className = 'msg error';
-        bMsgBox.textContent = '❌ Chagua picha au video kwanza.';
+        bMsgBox.textContent = '❌ Chagua picha, video au wimbo kwanza.';
         return;
       }
       const base64 = await fileToBase64(file);
-      if (file.type.startsWith('video/')) payload.videoBase64 = base64;
-      else payload.imageBase64 = base64;
-      payload.caption = bCaptionInput.value.trim();
+      if (file.type.startsWith('video/')) {
+        payload.videoBase64 = base64;
+        payload.caption = bCaptionInput.value.trim();
+      } else if (file.type.startsWith('audio/')) {
+        payload.audioBase64 = base64;
+        payload.audioMimetype = file.type || 'audio/mpeg';
+      } else {
+        payload.imageBase64 = base64;
+        payload.caption = bCaptionInput.value.trim();
+      }
     }
 
     bSendBtn.disabled = true;
