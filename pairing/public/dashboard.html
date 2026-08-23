@@ -306,21 +306,10 @@
       <h1>💳 Malipo</h1>
       <p class="sub" id="billingStatusText">Inaangalia hali yako...</p>
 
-      <div id="plansGrid" style="display:flex;flex-direction:column;gap:10px;"></div>
+      <label for="payPhoneInput">Namba ya Kulipia (Mobile Money)</label>
+      <input type="text" id="payPhoneInput" placeholder="255XXXXXXXXX" inputmode="numeric" />
 
-      <div id="paymentPhoneBox" style="display:none; margin-top:16px;">
-        <label for="paymentPhoneInput" style="display:block;font-size:13px;color:#9a9fae;margin-bottom:6px;">
-          Namba ya kulipia (M-Pesa / Tigo Pesa / Airtel Money / HaloPesa)
-        </label>
-        <input type="tel" id="paymentPhoneInput" inputmode="numeric" placeholder="255712345678"
-          style="width:100%;padding:12px;border-radius:10px;border:1px solid #2a2e38;background:#10131a;color:#f2f2f5;font-size:14px;margin-bottom:10px;" />
-        <div style="font-size:12px;color:#9a9fae;margin-bottom:12px;">
-          Kwa default ni namba uliyounganisha bot nayo — badilisha kama unataka kulipia na namba nyingine.
-        </div>
-        <button id="confirmPayBtn" style="width:100%;padding:14px;border-radius:10px;border:none;background:#9C27B0;color:white;font-size:15px;font-weight:600;">
-          Thibitisha na Lipa
-        </button>
-      </div>
+      <div id="plansGrid" style="display:flex;flex-direction:column;gap:10px;"></div>
 
       <div class="msg" id="billingMsgBox"></div>
     </div>
@@ -771,11 +760,7 @@
   const billingStatusText = document.getElementById('billingStatusText');
   const plansGrid = document.getElementById('plansGrid');
   const billingMsgBox = document.getElementById('billingMsgBox');
-  const paymentPhoneBox = document.getElementById('paymentPhoneBox');
-  const paymentPhoneInput = document.getElementById('paymentPhoneInput');
-  const confirmPayBtn = document.getElementById('confirmPayBtn');
-  let selectedPlanDays = null;
-  let connectedPhoneNumber = '';
+  const payPhoneInput = document.getElementById('payPhoneInput');
 
   function fmtTZS(n) {
     return n.toLocaleString('sw-TZ') + '/=';
@@ -795,8 +780,6 @@
         return;
       }
 
-      connectedPhoneNumber = data.phoneNumber || '';
-
       if (data.allowed && data.reason === 'paid') {
         billingStatusText.textContent = '✅ Umeshalipa — bot inafanya kazi hadi ' + fmtDateSw(data.paidUntil) + '. Unaweza kuongeza siku zaidi wakati wowote.';
       } else if (data.allowed && data.reason === 'trial') {
@@ -804,6 +787,12 @@
       } else {
         billingStatusText.textContent = '⛔ Muda wako umeisha — bot haitajibu ujumbe hadi ulipe. Chagua package hapa chini:';
       }
+
+      // Namba ya kupokea USSD-push — default ni namba ile ile uliyounganisha
+      // bot nayo, lakini unaweza kubadilisha (mfano kulipia kwa namba ya
+      // ndugu/rafiki). Akaunti inayoongezewa siku ni yako daima.
+      if (!payPhoneInput.value) payPhoneInput.value = data.phoneNumber || '';
+      payPhoneInput.placeholder = data.phoneNumber || '';
 
       plansGrid.innerHTML = data.plans.map(p => `
         <button class="secondary planBtn" data-days="${p.days}" style="text-align:left;display:flex;justify-content:space-between;align-items:center;">
@@ -813,49 +802,38 @@
       `).join('');
 
       document.querySelectorAll('.planBtn').forEach(btn => {
-        btn.addEventListener('click', () => selectPlan(Number(btn.dataset.days)));
+        btn.addEventListener('click', () => payForPlan(Number(btn.dataset.days), btn));
       });
     } catch (e) {
       billingStatusText.textContent = '❌ Imeshindwa kuwasiliana na server.';
     }
   }
 
-  function selectPlan(days) {
-    selectedPlanDays = days;
-    paymentPhoneInput.value = connectedPhoneNumber;
-    paymentPhoneBox.style.display = 'block';
-    billingMsgBox.className = 'msg';
-    billingMsgBox.textContent = '';
-    paymentPhoneBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-
-  confirmPayBtn.addEventListener('click', () => payForPlan(selectedPlanDays));
-
-  async function payForPlan(days) {
-    if (!days) return;
+  async function payForPlan(days, btnEl) {
     billingMsgBox.className = 'msg';
     billingMsgBox.textContent = '';
     document.querySelectorAll('.planBtn').forEach(b => b.disabled = true);
-    confirmPayBtn.disabled = true;
-    confirmPayBtn.textContent = 'Inatuma ombi...';
     try {
       const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days, paymentPhoneNumber: paymentPhoneInput.value.trim() }),
+        body: JSON.stringify({ days, paymentPhoneNumber: payPhoneInput.value.trim() }),
       });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error);
+      if (!data.ok) {
+        // Onyesha ujumbe HALISI kutoka ClickPesa moja kwa moja hapa —
+        // hakuna haja ya kuangalia Railway logs.
+        const detailText = data.details ? '\n\n' + JSON.stringify(data.details) : '';
+        throw new Error((data.error || 'Hitilafu haijulikani.') + detailText);
+      }
       billingMsgBox.className = 'msg success';
       billingMsgBox.textContent = '✅ ' + data.message;
-      paymentPhoneBox.style.display = 'none';
     } catch (e) {
       billingMsgBox.className = 'msg error';
+      billingMsgBox.style.whiteSpace = 'pre-wrap';
       billingMsgBox.textContent = '❌ ' + e.message;
     } finally {
       document.querySelectorAll('.planBtn').forEach(b => b.disabled = false);
-      confirmPayBtn.disabled = false;
-      confirmPayBtn.textContent = 'Thibitisha na Lipa';
     }
   }
 

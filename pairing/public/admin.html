@@ -1,80 +1,320 @@
 <!DOCTYPE html>
 <html lang="sw">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Dashboard</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KnightBot — Ops Console</title>
 <style>
+  :root {
+    --bg: #05100a;
+    --panel: #0b1b12;
+    --panel-2: #0f2318;
+    --border: #1d3a28;
+    --text: #d8ffe6;
+    --muted: #5f9678;
+    --accent: #39ff88;
+    --accent-dim: #1f7a48;
+    --amber: #ffb84d;
+    --red: #ff5566;
+    --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
-    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-    background: #0d0d14; color: #e8e8ec; padding: 20px;
+    margin: 0;
+    font-family: var(--mono);
+    background:
+      radial-gradient(ellipse at top, rgba(57,255,136,0.05), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px),
+      var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
   }
-  h1 { font-size: 20px; margin: 0 0 16px; }
-  .card {
-    background: #16161f; border: 1px solid #26263a; border-radius: 14px;
-    padding: 20px; max-width: 420px; margin: 40px auto;
+  ::selection { background: var(--accent-dim); color: #fff; }
+
+  /* ── Login ── */
+  #loginCard {
+    max-width: 340px;
+    margin: 14vh auto 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 28px 24px;
+    box-shadow: 0 0 0 1px rgba(57,255,136,0.05), 0 20px 60px rgba(0,0,0,0.5);
   }
-  input {
-    width: 100%; padding: 12px; margin-top: 6px; margin-bottom: 14px;
-    background: #0d0d14; border: 1px solid #33334a; border-radius: 10px;
-    color: #e8e8ec; font-size: 15px;
+  #loginCard .eyebrow { color: var(--accent); font-size: 11px; letter-spacing: 0.14em; margin-bottom: 6px; }
+  #loginCard h1 { font-size: 16px; margin: 0 0 20px; font-weight: 600; }
+  label { display: block; font-size: 11px; color: var(--muted); margin: 0 0 5px; letter-spacing: 0.03em; }
+  input, textarea, select {
+    width: 100%;
+    padding: 10px 11px;
+    background: #071009;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    margin-bottom: 14px;
   }
-  label { font-size: 13px; color: #9a9ab0; }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent-dim);
+    box-shadow: 0 0 0 2px rgba(57,255,136,0.15);
+  }
   button {
-    width: 100%; padding: 13px; border: none; border-radius: 10px;
-    background: #a020c0; background: linear-gradient(135deg,#a020c0,#7b1fa2);
-    color: #fff; font-weight: 600; font-size: 15px; cursor: pointer;
+    font-family: var(--mono);
+    cursor: pointer;
+    border-radius: 3px;
+    border: 1px solid var(--accent-dim);
+    background: rgba(57,255,136,0.08);
+    color: var(--accent);
+    padding: 9px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    transition: background .12s;
   }
-  button:active { opacity: 0.85; }
-  .error { color: #ff6b6b; font-size: 13px; margin-top: 8px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
-  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #22222f; }
-  th { color: #9a9ab0; font-weight: 600; }
-  .badge { padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-  .badge.trial { background: #2b2410; color: #f5c542; }
-  .badge.paid { background: #10281c; color: #4ade80; }
-  .badge.expired { background: #2b1414; color: #ff6b6b; }
-  .badge.blocked { background: #3a1a1a; color: #ff8787; }
-  .row-actions button {
-    width: auto; padding: 6px 10px; font-size: 12px; margin-right: 4px; margin-bottom: 4px;
-    background: #26263a;
+  button:hover { background: rgba(57,255,136,0.16); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #041008; border-color: var(--accent); width: 100%; padding: 11px; }
+  button.primary:hover { background: #55ffa0; }
+  button.danger { border-color: rgba(255,85,102,0.5); background: rgba(255,85,102,0.08); color: var(--red); }
+  button.danger:hover { background: rgba(255,85,102,0.18); }
+  button.ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+  button.ghost:hover { color: var(--text); border-color: var(--muted); }
+  .error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 14px; }
+
+  /* ── App shell ── */
+  #app { display: none; min-height: 100vh; }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(11,27,18,0.7);
+    backdrop-filter: blur(6px);
+    position: sticky;
+    top: 0;
+    z-index: 20;
   }
-  .row-actions button.danger { background: #4a1a1a; }
-  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-  .muted { color: #9a9ab0; font-size: 12px; }
-  #app { display: none; max-width: 900px; margin: 0 auto; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  .brand strong { font-size: 13px; letter-spacing: 0.03em; }
+  .brand span.sub { color: var(--muted); font-size: 11px; margin-left: 8px; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  .content { padding: 18px 20px 60px; max-width: 1080px; margin: 0 auto; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; }
+  .stat .n { font-size: 20px; font-weight: 700; }
+  .stat .l { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+  .stat.accent .n { color: var(--accent); }
+  .stat.amber .n { color: var(--amber); }
+  .stat.red .n { color: var(--red); }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
+  .toolbar input[type="text"] { flex: 1; min-width: 160px; margin-bottom: 0; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    padding: 7px 11px; border: 1px solid var(--border); border-radius: 20px;
+    font-size: 11px; color: var(--muted); cursor: pointer; white-space: nowrap;
+  }
+  .chip.active { border-color: var(--accent-dim); color: var(--accent); background: rgba(57,255,136,0.08); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  thead th { text-align: left; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  tbody td { padding: 11px 12px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { cursor: pointer; transition: background .1s; }
+  tbody tr:hover { background: rgba(57,255,136,0.04); }
+  .phone { font-weight: 600; }
+  .liveline { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .status-dot.connected { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 1.8s infinite; }
+  .status-dot.pairing, .status-dot.connecting { background: var(--amber); animation: pulse 1s infinite; }
+  .status-dot.offline, .status-dot.error, .status-dot.disconnected { background: #3a4a3f; }
+
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 10px; font-weight: 700; letter-spacing: 0.03em; }
+  .badge.paid { background: rgba(57,255,136,0.12); color: var(--accent); }
+  .badge.trial { background: rgba(255,184,77,0.12); color: var(--amber); }
+  .badge.expired { background: rgba(255,85,102,0.12); color: var(--red); }
+  .badge.blocked { background: rgba(255,85,102,0.2); color: var(--red); }
+
+  /* ── Detail slide-over ── */
+  #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 30; }
+  #detail {
+    display: none; position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw);
+    background: var(--panel); border-left: 1px solid var(--border); z-index: 31;
+    overflow-y: auto; padding: 18px 18px 40px;
+  }
+  #detail .dhead { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+  #detail h2 { font-size: 16px; margin: 0; }
+  #detail .closeBtn { background: transparent; border: none; color: var(--muted); font-size: 18px; padding: 2px 6px; }
+  .dtabs { display: flex; gap: 4px; margin: 14px 0 16px; background: var(--panel-2); padding: 4px; border-radius: 4px; }
+  .dtab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 3px; color: var(--muted); font-size: 11px; cursor: pointer; }
+  .dtab.active { background: var(--accent-dim); color: #fff; }
+  .dpane { display: none; }
+  .dpane.active { display: block; }
+  .kv { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { text-align: right; word-break: break-all; }
+  .linkbox { display: flex; gap: 6px; margin: 10px 0; }
+  .linkbox input { flex: 1; margin-bottom: 0; font-size: 11px; }
+  .actrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .actrow button { flex: 1; min-width: 120px; }
+  .group-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; background: #071009; margin-bottom: 10px; }
+  .group-row { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .group-row:last-child { border-bottom: none; }
+  .group-row input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+  .group-row .gn { flex: 1; }
+  .group-row .gc { color: var(--muted); font-size: 10px; }
+  .toast { margin-top: 12px; padding: 10px 12px; border-radius: 3px; font-size: 12px; display: none; white-space: pre-wrap; }
+  .toast.success { display: block; background: rgba(57,255,136,0.1); color: var(--accent); }
+  .toast.error { display: block; background: rgba(255,85,102,0.1); color: var(--red); }
+  .section-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
+  .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 12px; }
+
+  @media (max-width: 640px) {
+    #detail { width: 100vw; }
+    .content { padding: 14px 12px 60px; }
+  }
 </style>
 </head>
 <body>
 
-<div class="card" id="loginCard">
-  <h1>🔐 Admin Login</h1>
+<div id="loginCard">
+  <div class="eyebrow">// KNIGHTBOT PAIRING</div>
+  <h1>Ops Console — Ingia</h1>
   <label>Username</label>
-  <input id="username" autocomplete="username">
+  <input id="username" type="text" autocomplete="username" />
   <label>Password</label>
-  <input id="password" type="password" autocomplete="current-password">
-  <button onclick="doLogin()">Ingia</button>
+  <input id="password" type="password" autocomplete="current-password" />
+  <button class="primary" onclick="doLogin()">Ingia</button>
   <div class="error" id="loginError"></div>
 </div>
 
 <div id="app">
-  <div class="toolbar">
-    <h1>👥 Wateja (<span id="userCount">0</span>)</h1>
-    <span class="muted" id="trialInfo"></span>
+  <div class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <strong>KNIGHTBOT · OPS CONSOLE</strong>
+      <span class="sub" id="clock"></span>
+    </div>
+    <button class="ghost" onclick="logout()">Toka</button>
   </div>
-  <button style="margin-bottom:14px;" onclick="downloadBackup()">⬇️ Pakua Backup Kamili (.tar.gz)</button>
-  <button style="margin-bottom:14px;" class="danger" onclick="resetSessions()">🗑️ Futa Sessions Chakavu (Pairing Zote)</button>
-  <table>
-    <thead>
-      <tr><th>Namba</th><th>Hali</th><th>Muda</th><th>Vitendo</th></tr>
-    </thead>
-    <tbody id="userRows"></tbody>
-  </table>
+
+  <div class="content">
+    <div class="stats" id="statsRow"></div>
+
+    <div class="toolbar">
+      <input type="text" id="searchInput" placeholder="Tafuta namba ya simu..." />
+      <div class="chips" id="filterChips">
+        <div class="chip active" data-filter="all">Zote</div>
+        <div class="chip" data-filter="connected">Live</div>
+        <div class="chip" data-filter="trial">Trial</div>
+        <div class="chip" data-filter="paid">Amelipa</div>
+        <div class="chip" data-filter="expired">Muda Umeisha</div>
+        <div class="chip" data-filter="blocked">Blocked</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <button class="ghost" onclick="downloadBackup()">⬇️ Backup Kamili</button>
+      <button class="danger" onclick="resetAllSessions()">🗑️ Futa Sessions Zote Chakavu</button>
+      <button class="ghost" onclick="loadUsers()">↻ Refresh</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Namba</th><th>Hali</th><th>Muda</th><th></th></tr>
+      </thead>
+      <tbody id="userRows"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="overlay" onclick="closeDetail()"></div>
+<div id="detail">
+  <div class="dhead">
+    <div>
+      <h2 id="dPhone">—</h2>
+      <div class="liveline"><span class="status-dot" id="dStatusDot"></span><span id="dStatusText">—</span></div>
+    </div>
+    <button class="closeBtn" onclick="closeDetail()">✕</button>
+  </div>
+
+  <div class="dtabs">
+    <div class="dtab active" data-dtab="overview">Muhtasari</div>
+    <div class="dtab" data-dtab="groups">Groups</div>
+    <div class="dtab" data-dtab="settings">Mipangilio</div>
+    <div class="dtab" data-dtab="billing">Malipo</div>
+  </div>
+
+  <!-- Overview -->
+  <div class="dpane active" id="dpane-overview">
+    <div class="section-label">Dashboard Link</div>
+    <div class="linkbox">
+      <input type="text" id="dDashLink" readonly />
+      <button class="ghost" onclick="copyDashLink()">Copy</button>
+    </div>
+    <div class="actrow">
+      <button onclick="resendLink()">📤 Tuma Link Upya</button>
+      <button class="danger" onclick="resetUserSession()">🔌 Futa Session (Force Re-pair)</button>
+    </div>
+    <div class="toast" id="dOverviewMsg"></div>
+  </div>
+
+  <!-- Groups & messaging -->
+  <div class="dpane" id="dpane-groups">
+    <div class="section-label">Groups za Bot Hii</div>
+    <div class="group-list" id="dGroupList"><div class="empty">Inapakia...</div></div>
+    <div class="actrow" style="margin-bottom:10px;">
+      <button class="ghost" onclick="dSelectAllGroups()">☑️ Zote</button>
+      <button class="ghost" onclick="dSelectNoneGroups()">⬜ Ondoa</button>
+    </div>
+    <label>Ujumbe (Maandishi)</label>
+    <textarea id="dMsgText" rows="3" placeholder="Andika ujumbe..."></textarea>
+    <button onclick="dSendMessage()">📢 Tuma kwa Groups Nilizochagua</button>
+    <div class="toast" id="dGroupsMsg"></div>
+  </div>
+
+  <!-- Settings -->
+  <div class="dpane" id="dpane-settings">
+    <label>Prefix (herufi 1-3)</label>
+    <input type="text" id="dPrefix" placeholder="!" />
+    <label>Jina la Bot</label>
+    <input type="text" id="dBotName" placeholder="KnightBot" />
+    <div class="actrow">
+      <button onclick="dSaveSettings()">💾 Hifadhi</button>
+      <button class="ghost" onclick="dClearSettings()">Rudisha Default</button>
+    </div>
+    <div class="toast" id="dSettingsMsg"></div>
+  </div>
+
+  <!-- Billing -->
+  <div class="dpane" id="dpane-billing">
+    <div class="kv"><span class="k">Hali</span><span class="v" id="dBillingStatus">—</span></div>
+    <div class="kv"><span class="k">Muda</span><span class="v" id="dBillingTime">—</span></div>
+    <div class="actrow">
+      <button onclick="dMarkPaid()">✅ Weka Amelipa</button>
+      <button class="ghost" onclick="dExtendTrial()">+ Trial</button>
+    </div>
+    <div class="actrow">
+      <button class="danger" id="dBlockBtn" onclick="dToggleBlock()">Zuia Mtumiaji</button>
+    </div>
+    <div class="toast" id="dBillingMsg"></div>
+  </div>
 </div>
 
 <script>
   let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
+  let ALL_USERS = [];
+  let CURRENT_FILTER = 'all';
+  let CURRENT_PHONE = null;
+  let CURRENT_DETAIL = null;
 
   async function api(path, opts = {}) {
     const res = await fetch(path, {
@@ -86,7 +326,10 @@
       },
     });
     const data = await res.json();
-    if (!res.ok || data.ok === false) throw new Error(data.error || 'Hitilafu');
+    if (!res.ok || data.ok === false) {
+      const detailText = data.details ? '\n' + JSON.stringify(data.details) : '';
+      throw new Error((data.error || 'Hitilafu') + detailText);
+    }
     return data;
   }
 
@@ -104,17 +347,28 @@
     }
   }
 
+  function logout() {
+    sessionStorage.removeItem('adminToken');
+    location.reload();
+  }
+
   function fmtDate(ms) {
     if (!ms) return '—';
     return new Date(ms).toLocaleString('sw-TZ', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
 
-  function statusBadge(u) {
+  function userState(u) {
     const now = Date.now();
-    if (u.blocked) return '<span class="badge blocked">Blocked</span>';
-    if (u.isPaid && u.paidUntil > now) return '<span class="badge paid">Amelipa</span>';
-    if (!u.isPaid && u.trialExpiresAt > now) return '<span class="badge trial">Trial</span>';
-    return '<span class="badge expired">Muda umeisha</span>';
+    if (u.blocked) return 'blocked';
+    if (u.isPaid && u.paidUntil > now) return 'paid';
+    if (!u.isPaid && u.trialExpiresAt > now) return 'trial';
+    return 'expired';
+  }
+
+  function statusBadge(u) {
+    const s = userState(u);
+    const label = { paid: 'Amelipa', trial: 'Trial', expired: 'Muda Umeisha', blocked: 'Blocked' }[s];
+    return `<span class="badge ${s}">${label}</span>`;
   }
 
   function timeLeft(u) {
@@ -124,47 +378,68 @@
     return '—';
   }
 
-  async function loadUsers() {
-    const data = await api('/api/admin/users');
-    document.getElementById('userCount').textContent = data.users.length;
-    document.getElementById('trialInfo').textContent = `Trial: siku ${data.trialDays}`;
-    const rows = data.users.map((u) => `
-      <tr>
-        <td>${u.phoneNumber}<br><span class="muted">${u.liveStatus}</span></td>
+  function renderStats() {
+    const total = ALL_USERS.length;
+    const live = ALL_USERS.filter(u => u.liveStatus === 'connected').length;
+    const trial = ALL_USERS.filter(u => userState(u) === 'trial').length;
+    const paid = ALL_USERS.filter(u => userState(u) === 'paid').length;
+    const expired = ALL_USERS.filter(u => userState(u) === 'expired').length;
+    const blocked = ALL_USERS.filter(u => userState(u) === 'blocked').length;
+    document.getElementById('statsRow').innerHTML = `
+      <div class="stat"><div class="n">${total}</div><div class="l">Wateja</div></div>
+      <div class="stat accent"><div class="n">${live}</div><div class="l">Live Sasa</div></div>
+      <div class="stat amber"><div class="n">${trial}</div><div class="l">Trial</div></div>
+      <div class="stat accent"><div class="n">${paid}</div><div class="l">Amelipa</div></div>
+      <div class="stat red"><div class="n">${expired}</div><div class="l">Muda Umeisha</div></div>
+      <div class="stat red"><div class="n">${blocked}</div><div class="l">Blocked</div></div>
+    `;
+  }
+
+  function renderRows() {
+    const q = document.getElementById('searchInput').value.trim();
+    let list = ALL_USERS;
+    if (q) list = list.filter(u => u.phoneNumber.includes(q));
+    if (CURRENT_FILTER === 'connected') list = list.filter(u => u.liveStatus === 'connected');
+    else if (CURRENT_FILTER !== 'all') list = list.filter(u => userState(u) === CURRENT_FILTER);
+
+    if (!list.length) {
+      document.getElementById('userRows').innerHTML = `<tr><td colspan="4"><div class="empty">Hakuna wateja wanaolingana.</div></td></tr>`;
+      return;
+    }
+
+    document.getElementById('userRows').innerHTML = list.map(u => `
+      <tr onclick="openDetail('${u.phoneNumber}')">
+        <td>
+          <div class="phone">${u.phoneNumber}</div>
+          <div class="liveline"><span class="status-dot ${u.liveStatus}"></span>${u.liveStatus}</div>
+        </td>
         <td>${statusBadge(u)}</td>
         <td>${timeLeft(u)}</td>
-        <td class="row-actions">
-          <button onclick="markPaid('${u.phoneNumber}')">Weka Amelipa (30d)</button>
-          <button onclick="extendTrial('${u.phoneNumber}')">+1 siku Trial</button>
-          <button class="danger" onclick="toggleBlock('${u.phoneNumber}', ${!u.blocked})">${u.blocked ? 'Fungua' : 'Zuia'}</button>
-        </td>
+        <td>›</td>
       </tr>
     `).join('');
-    document.getElementById('userRows').innerHTML = rows;
   }
 
-  async function markPaid(phone) {
-    const days = prompt('Siku ngapi za malipo?', '30');
-    if (!days) return;
-    await api(`/api/admin/users/${phone}/mark-paid`, { method: 'POST', body: JSON.stringify({ days: Number(days) }) });
-    loadUsers();
+  async function loadUsers() {
+    const data = await api('/api/admin/users');
+    ALL_USERS = data.users.sort((a, b) => b.pairedAt - a.pairedAt);
+    renderStats();
+    renderRows();
   }
 
-  async function extendTrial(phone) {
-    await api(`/api/admin/users/${phone}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: 1 }) });
-    loadUsers();
-  }
-
-  async function toggleBlock(phone, blocked) {
-    await api(`/api/admin/users/${phone}/block`, { method: 'POST', body: JSON.stringify({ blocked }) });
-    loadUsers();
-  }
+  document.getElementById('searchInput').addEventListener('input', renderRows);
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      CURRENT_FILTER = chip.dataset.filter;
+      renderRows();
+    });
+  });
 
   async function downloadBackup() {
     try {
-      const res = await fetch('/api/admin/backup', {
-        headers: { Authorization: 'Bearer ' + ADMIN_TOKEN },
-      });
+      const res = await fetch('/api/admin/backup', { headers: { Authorization: 'Bearer ' + ADMIN_TOKEN } });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Backup imeshindwa.');
@@ -183,13 +458,193 @@
     }
   }
 
-  async function resetSessions() {
+  async function resetAllSessions() {
     if (!confirm('Hii itafuta session ZOTE za pairing (namba zote zitalazimika ku-pair upya). Endelea?')) return;
     try {
       const data = await api('/api/admin/reset-sessions', { method: 'POST' });
-      alert(`✅ Session ${data.removed} zimefutwa. Sasa jaribu "Pata Pairing Code" upya.`);
+      alert(`✅ Session ${data.removed} zimefutwa.`);
+      loadUsers();
     } catch (e) {
       alert('❌ ' + e.message);
+    }
+  }
+
+  /* ============ Detail panel ============ */
+  function showToast(id, ok, text) {
+    const el = document.getElementById(id);
+    el.className = 'toast ' + (ok ? 'success' : 'error');
+    el.textContent = (ok ? '✅ ' : '❌ ') + text;
+  }
+
+  document.querySelectorAll('.dtab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.dtab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.dpane').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('dpane-' + tab.dataset.dtab).classList.add('active');
+    });
+  });
+
+  async function openDetail(phone) {
+    CURRENT_PHONE = phone;
+    document.getElementById('dPhone').textContent = phone;
+    document.getElementById('overlay').style.display = 'block';
+    document.getElementById('detail').style.display = 'block';
+    document.querySelectorAll('.dtab')[0].click();
+    ['dOverviewMsg','dGroupsMsg','dSettingsMsg','dBillingMsg'].forEach(id => {
+      document.getElementById(id).className = 'toast';
+      document.getElementById(id).textContent = '';
+    });
+    await refreshDetail();
+    refreshBillingPane();
+  }
+
+  function closeDetail() {
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('detail').style.display = 'none';
+    CURRENT_PHONE = null;
+    CURRENT_DETAIL = null;
+  }
+
+  async function refreshDetail() {
+    try {
+      const data = await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/detail`);
+      CURRENT_DETAIL = data;
+      document.getElementById('dStatusDot').className = 'status-dot ' + data.liveStatus;
+      document.getElementById('dStatusText').textContent = data.liveStatus + (data.pairingCode ? ' · code: ' + data.pairingCode : '') + (data.error ? ' · ' + data.error : '');
+      document.getElementById('dDashLink').value = data.dashboardUrl || '(bado hajaunganishwa)';
+
+      const groupList = document.getElementById('dGroupList');
+      if (data.liveStatus !== 'connected') {
+        groupList.innerHTML = `<div class="empty">Bot haipo "live" kwa sasa — groups hazipatikani.</div>`;
+      } else if (data.groupsError) {
+        groupList.innerHTML = `<div class="empty">❌ ${data.groupsError}</div>`;
+      } else if (!data.groups.length) {
+        groupList.innerHTML = `<div class="empty">Bot haipo kwenye group yoyote.</div>`;
+      } else {
+        groupList.innerHTML = data.groups.map(g => `
+          <label class="group-row">
+            <input type="checkbox" class="dGroupCb" value="${g.id}" />
+            <span class="gn">${g.subject}</span>
+            <span class="gc">${g.participants}</span>
+          </label>
+        `).join('');
+      }
+
+      document.getElementById('dPrefix').value = data.settings.prefix || '';
+      document.getElementById('dPrefix').placeholder = 'Default: ' + data.settings.defaultPrefix;
+      document.getElementById('dBotName').value = data.settings.botName || '';
+      document.getElementById('dBotName').placeholder = 'Default: ' + data.settings.defaultBotName;
+    } catch (e) {
+      showToast('dOverviewMsg', false, e.message);
+    }
+  }
+
+  function refreshBillingPane() {
+    const u = ALL_USERS.find(x => x.phoneNumber === CURRENT_PHONE);
+    if (!u) return;
+    document.getElementById('dBillingStatus').innerHTML = statusBadge(u);
+    document.getElementById('dBillingTime').textContent = timeLeft(u);
+    document.getElementById('dBlockBtn').textContent = u.blocked ? '🔓 Fungua Mtumiaji' : '🚫 Zuia Mtumiaji';
+  }
+
+  function copyDashLink() {
+    const input = document.getElementById('dDashLink');
+    input.select();
+    document.execCommand('copy');
+    showToast('dOverviewMsg', true, 'Link imenakiliwa.');
+  }
+
+  async function resendLink() {
+    try {
+      await api('/api/resend-link', { method: 'POST', body: JSON.stringify({ phoneNumber: CURRENT_PHONE }) });
+      showToast('dOverviewMsg', true, 'Link imetumwa WhatsApp yake.');
+    } catch (e) {
+      showToast('dOverviewMsg', false, e.message);
+    }
+  }
+
+  async function resetUserSession() {
+    if (!confirm(`Futa session ya ${CURRENT_PHONE}? Atalazimika ku-pair upya.`)) return;
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/reset-session`, { method: 'POST' });
+      showToast('dOverviewMsg', true, 'Session imefutwa.');
+      refreshDetail();
+      loadUsers();
+    } catch (e) {
+      showToast('dOverviewMsg', false, e.message);
+    }
+  }
+
+  function dSelectAllGroups() { document.querySelectorAll('.dGroupCb').forEach(cb => cb.checked = true); }
+  function dSelectNoneGroups() { document.querySelectorAll('.dGroupCb').forEach(cb => cb.checked = false); }
+
+  async function dSendMessage() {
+    const groupIds = Array.from(document.querySelectorAll('.dGroupCb:checked')).map(cb => cb.value);
+    const text = document.getElementById('dMsgText').value.trim();
+    if (!groupIds.length) return showToast('dGroupsMsg', false, 'Chagua angalau group moja.');
+    if (!text) return showToast('dGroupsMsg', false, 'Andika ujumbe kwanza.');
+    try {
+      const data = await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/message`, {
+        method: 'POST', body: JSON.stringify({ groupIds, text }),
+      });
+      showToast('dGroupsMsg', true, `Imetumwa: ${data.success} zimefanikiwa, ${data.failed} zimeshindwa.`);
+    } catch (e) {
+      showToast('dGroupsMsg', false, e.message);
+    }
+  }
+
+  async function dSaveSettings() {
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/settings`, {
+        method: 'POST',
+        body: JSON.stringify({ prefix: document.getElementById('dPrefix').value.trim(), botName: document.getElementById('dBotName').value.trim() }),
+      });
+      showToast('dSettingsMsg', true, 'Mipangilio imehifadhiwa.');
+    } catch (e) {
+      showToast('dSettingsMsg', false, e.message);
+    }
+  }
+
+  function dClearSettings() {
+    document.getElementById('dPrefix').value = '';
+    document.getElementById('dBotName').value = '';
+    dSaveSettings();
+  }
+
+  async function dMarkPaid() {
+    const days = prompt('Siku ngapi za malipo?', '30');
+    if (!days) return;
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/mark-paid`, { method: 'POST', body: JSON.stringify({ days: Number(days) }) });
+      showToast('dBillingMsg', true, 'Amewekwa amelipa.');
+      await loadUsers();
+      refreshBillingPane();
+    } catch (e) {
+      showToast('dBillingMsg', false, e.message);
+    }
+  }
+
+  async function dExtendTrial() {
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/extend-trial`, { method: 'POST', body: JSON.stringify({ days: 1 }) });
+      showToast('dBillingMsg', true, 'Trial imeongezwa siku 1.');
+      await loadUsers();
+      refreshBillingPane();
+    } catch (e) {
+      showToast('dBillingMsg', false, e.message);
+    }
+  }
+
+  async function dToggleBlock() {
+    const u = ALL_USERS.find(x => x.phoneNumber === CURRENT_PHONE);
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/block`, { method: 'POST', body: JSON.stringify({ blocked: !u.blocked }) });
+      showToast('dBillingMsg', true, u.blocked ? 'Amefunguliwa.' : 'Amezuiwa.');
+      await loadUsers();
+      refreshBillingPane();
+    } catch (e) {
+      showToast('dBillingMsg', false, e.message);
     }
   }
 
@@ -198,12 +653,12 @@
     document.getElementById('app').style.display = 'block';
     loadUsers();
     setInterval(loadUsers, 15000);
+    setInterval(() => {
+      document.getElementById('clock').textContent = new Date().toLocaleTimeString('sw-TZ');
+    }, 1000);
   }
 
-  if (ADMIN_TOKEN) {
-    api('/api/admin/users').then(showApp).catch(() => { sessionStorage.removeItem('adminToken'); ADMIN_TOKEN = ''; });
-  }
+  if (ADMIN_TOKEN) showApp();
 </script>
-
 </body>
 </html>
