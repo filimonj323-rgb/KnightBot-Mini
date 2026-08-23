@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const mediaDownloader = require('./mediaDownloader');
 const userStore = require('./userStore');
@@ -77,6 +78,54 @@ const PUBLIC_BASE_URL = (cfg.PAIRING_BASE_URL || 'https://pairingpage.up.railway
 
 function dashboardUrl(token) {
   return `${PUBLIC_BASE_URL}/dashboard.html?token=${token}`;
+}
+
+/**
+ * Merges a still image + an audio file into ONE mp4 (image as the frame for
+ * the whole clip, audio as the soundtrack, trimmed to the audio's length) —
+ * this is the only way WhatsApp can show "picha + wimbo" as a SINGLE status,
+ * since its status types are text / image / video / audio, never a
+ * combination; a video with a static frame is what every "photo with music"
+ * status tool actually sends under the hood. Same fluent-ffmpeg + ffmpeg-
+ * static pattern already used by groupstatus.js / sticker.js in this repo.
+ */
+async function combineImageAudioToVideo(imageBuffer, audioBuffer) {
+  const ffmpeg = require('fluent-ffmpeg');
+  const ffmpegStaticPath = require('ffmpeg-static');
+  if (ffmpegStaticPath) ffmpeg.setFfmpegPath(ffmpegStaticPath);
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-combo-'));
+  const imgPath = path.join(tmpDir, 'in.img');
+  const audPath = path.join(tmpDir, 'in.audio');
+  const outPath = path.join(tmpDir, 'out.mp4');
+
+  try {
+    fs.writeFileSync(imgPath, imageBuffer);
+    fs.writeFileSync(audPath, audioBuffer);
+
+    await new Promise((resolve, reject) => {
+      ffmpeg()
+        .input(imgPath)
+        .inputOptions(['-loop 1'])
+        .input(audPath)
+        .outputOptions([
+          '-c:v libx264',
+          '-tune stillimage',
+          '-c:a aac',
+          '-b:a 192k',
+          '-pix_fmt yuv420p',
+          '-shortest',
+          '-movflags +faststart',
+        ])
+        .on('error', reject)
+        .on('end', resolve)
+        .save(outPath);
+    });
+
+    return fs.readFileSync(outPath);
+  } finally {
+    fs.rm(tmpDir, { recursive: true, force: true }, () => {});
+  }
 }
 
 function successMessageText(token) {
@@ -398,21 +447,31 @@ async function listGroups(token) {
  * commands (commands/admin/groupstatus.js, commands/owner/groupmanager.js)
  * already use.
  */
-async function postGroupStatusForToken(token, { groupId, text, caption, imageBase64, videoBase64 }) {
+async function postGroupStatusForToken(token, { groupId, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
   const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
   if (!groupId) throw new Error('Chagua group ya kutuma status.');
 
   let payload;
-  if (imageBase64) {
+  if (imageBase64 && audioBase64) {
+    // Combined "picha + wimbo" — merge into one mp4 first, see
+    // combineImageAudioToVideo()'s comment for why this is the only way.
+    const videoBuf = await combineImageAudioToVideo(
+      Buffer.from(imageBase64, 'base64'),
+      Buffer.from(audioBase64, 'base64')
+    );
+    payload = { video: videoBuf, caption: caption || '' };
+  } else if (imageBase64) {
     payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
   } else if (videoBase64) {
     payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
+  } else if (audioBase64) {
+    payload = { audio: Buffer.from(audioBase64, 'base64'), mimetype: audioMimetype || 'audio/mpeg', ptt: false };
   } else if (text) {
     payload = { text, backgroundColor: '#9C27B0' };
   } else {
-    throw new Error('Weka maandishi au chagua picha/video.');
+    throw new Error('Weka maandishi, au chagua picha/video/wimbo.');
   }
 
   payload.groupStatus = true;
@@ -443,7 +502,7 @@ async function postGroupStatusForToken(token, { groupId, text, caption, imageBas
  * group message (no groupStatus:true flag), and accepts an array of group
  * ids so the customer can broadcast to several groups in one go.
  */
-async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64, videoBase64 }) {
+async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
   const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
@@ -452,14 +511,22 @@ async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64
   }
 
   let payload;
-  if (imageBase64) {
+  if (imageBase64 && audioBase64) {
+    const videoBuf = await combineImageAudioToVideo(
+      Buffer.from(imageBase64, 'base64'),
+      Buffer.from(audioBase64, 'base64')
+    );
+    payload = { video: videoBuf, caption: caption || '' };
+  } else if (imageBase64) {
     payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
   } else if (videoBase64) {
     payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
+  } else if (audioBase64) {
+    payload = { audio: Buffer.from(audioBase64, 'base64'), mimetype: audioMimetype || 'audio/mpeg', ptt: false };
   } else if (text) {
     payload = { text };
   } else {
-    throw new Error('Weka maandishi au chagua picha/video.');
+    throw new Error('Weka maandishi, au chagua picha/video/wimbo.');
   }
 
   const targets = groupIds.includes('all')
@@ -764,11 +831,23 @@ async function adminSendToGroups(rawPhoneNumber, { groupIds, text, caption, imag
   if (!Array.isArray(groupIds) || groupIds.length === 0) throw new Error('Chagua angalau group moja.');
 
   let payload;
-  if (imageBase64) payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
-  else if (videoBase64) payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
-  else if (audioBase64) payload = { audio: Buffer.from(audioBase64, 'base64'), mimetype: audioMimetype || 'audio/mpeg', ptt: false };
-  else if (text) payload = { text };
-  else throw new Error('Weka maandishi, au chagua picha/video/wimbo.');
+  if (imageBase64 && audioBase64) {
+    const videoBuf = await combineImageAudioToVideo(
+      Buffer.from(imageBase64, 'base64'),
+      Buffer.from(audioBase64, 'base64')
+    );
+    payload = { video: videoBuf, caption: caption || '' };
+  } else if (imageBase64) {
+    payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
+  } else if (videoBase64) {
+    payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
+  } else if (audioBase64) {
+    payload = { audio: Buffer.from(audioBase64, 'base64'), mimetype: audioMimetype || 'audio/mpeg', ptt: false };
+  } else if (text) {
+    payload = { text };
+  } else {
+    throw new Error('Weka maandishi, au chagua picha/video/wimbo.');
+  }
 
   const targets = groupIds.includes('all')
     ? Object.keys(await inst.sock.groupFetchAllParticipating())
