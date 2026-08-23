@@ -776,6 +776,85 @@ async function adminResetUserSession(rawPhoneNumber) {
   return { phoneNumber, reset: true };
 }
 
+/**
+ * Auto-reconnects every previously-paired customer on server startup — this
+ * is what makes bots come back online BY THEMSELVES after a redeploy,
+ * instead of everyone needing to open the pairing page and re-scan.
+ *
+ * IMPORTANT CAVEAT: this only has anything to restore if the folders under
+ * pairing/sessions/ actually SURVIVED the redeploy. On Railway, the
+ * filesystem is wiped on every deploy UNLESS pairing/sessions is a
+ * persistent Volume — see the setup note in README/pairingConfig. Without
+ * that Volume, this function will simply find zero folders and do nothing
+ * (customers still have to re-pair), which is the exact behaviour being
+ * reported.
+ */
+async function restoreAllInstances() {
+  await ensureBaileysBridge();
+
+  let folders;
+  try {
+    folders = fs.readdirSync(SESSIONS_ROOT, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch (e) {
+    console.error('[pairing] imeshindwa kusoma sessions folder kwa ajili ya auto-reconnect:', e.message);
+    return;
+  }
+
+  if (!folders.length) {
+    console.log('[pairing] hakuna session zilizohifadhiwa — hakuna cha ku-auto-reconnect (ni kawaida ukiwa huna Volume, angalia pairingConfig.js).');
+    return;
+  }
+
+  console.log(`[pairing] inajaribu ku-auto-reconnect namba ${folders.length}...`);
+
+  let restored = 0;
+  for (const folder of folders) {
+    const phoneNumber = normalizePhoneNumber(folder);
+    if (!phoneNumber) continue;
+    const sessionFolder = path.join(SESSIONS_ROOT, folder);
+
+    try {
+      // Peek at the saved creds WITHOUT opening a socket yet, so we skip
+      // folders that never finished pairing (no point reconnecting those —
+      // and doing so with isReconnect=true would silently sit in "pairing"
+      // status forever with no code shown).
+      const { state } = await useMultiFileAuthState(sessionFolder);
+      if (!state.creds.registered) continue;
+
+      const record = {
+        phoneNumber,
+        sock: null,
+        status: 'connecting',
+        pairingCode: null,
+        error: null,
+        createdAt: Date.now(),
+        reconnectAttempts: 0,
+      };
+      instances.set(phoneNumber, record);
+
+      // isReconnect=true so this NEVER requests a fresh pairing code — it
+      // just resumes the existing linked session, exactly like Baileys'
+      // own reconnect-after-close path does.
+      connectInstance(phoneNumber, sessionFolder, record, true).catch((e) => {
+        record.status = 'error';
+        record.error = e.message;
+        console.error(`[pairing:${phoneNumber}] auto-reconnect imeshindwa:`, e.message);
+      });
+
+      restored++;
+      // Stagger connections so we don't open a burst of sockets to
+      // WhatsApp all at once (looks like abuse and can trigger rate limits).
+      await new Promise((r) => setTimeout(r, 1500));
+    } catch (e) {
+      console.error(`[pairing:${phoneNumber}] auto-reconnect: imeshindwa kusoma session:`, e.message);
+    }
+  }
+
+  console.log(`[pairing] auto-reconnect: ${restored}/${folders.length} zimeanzishwa.`);
+}
+
 module.exports = {
   createOrPairInstance,
   getInstanceStatus,
@@ -800,4 +879,5 @@ module.exports = {
   adminUpdateInstanceSettings,
   adminSendToGroups,
   adminResetUserSession,
+  restoreAllInstances,
 };

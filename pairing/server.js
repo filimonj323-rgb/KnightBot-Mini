@@ -39,6 +39,7 @@ const {
   adminUpdateInstanceSettings,
   adminSendToGroups,
   adminResetUserSession,
+  restoreAllInstances,
 } = require('./instanceManager');
 const adminAuth = require('./adminAuth');
 const clickpesa = require('./clickpesa');
@@ -436,6 +437,9 @@ async function start() {
   server.listen(PORT, () => {
     console.log(`🌐 Pairing website inaendesha kwenye port ${PORT}`);
     startReminderScheduler();
+    // Bring back every previously-paired customer's bot automatically —
+    // see the Volume requirement noted in restoreAllInstances()'s comment.
+    restoreAllInstances();
   });
 }
 
