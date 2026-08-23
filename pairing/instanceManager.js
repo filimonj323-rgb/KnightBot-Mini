@@ -241,11 +241,6 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         record.status = 'error';
         record.error = 'Imeshindwa kuunganisha baada ya majaribio kadhaa. Bofya "Pata Pairing Code" tena baada ya dakika chache.';
         instances.delete(phoneNumber);
-        // Futa auth-state chakavu ya jaribio hili lililoshindwa — bila hii,
-        // jaribio LIJALO linarithi creds mbovu na kuendelea kupata
-        // "connection closed" hata baada ya kubadilisha CUSTOM_PAIRING_CODE
-        // au kusubiri. Jaribio jipya lazima lianze na session tupu.
-        fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
         return;
       }
 
@@ -301,10 +296,6 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     } catch (e) {
       record.status = 'error';
       record.error = e.message;
-      // Futa session hii mara moja pia — usisubiri hadi reconnectAttempts
-      // ifike 6 kama request ya kwanza kabisa ya pairing code ndiyo
-      // iliyoshindwa (mfano "Connection Closed" kabla ya code kutolewa).
-      fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
       throw e;
     }
   } else if (!state.creds.registered && isReconnect) {
@@ -619,6 +610,7 @@ async function getBillingForToken(token) {
   if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
   const access = await userStore.getAccessStatus(phoneNumber);
   return {
+    phoneNumber,
     allowed: access.allowed,
     reason: access.reason,
     trialExpiresAt: access.user.trialExpiresAt,

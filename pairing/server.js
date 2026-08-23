@@ -28,6 +28,7 @@ const {
   updateSettingsForToken,
   resendDashboardLink,
   getPhoneNumberByToken,
+  normalizePhoneNumber,
   adminListUsers,
   adminMarkPaid,
   adminExtendTrial,
@@ -208,7 +209,7 @@ const server = http.createServer(async (req, res) => {
     // Settings: read a customer's current (optional) prefix/bot name.
     if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
-      const settings = await getSettingsForToken(token);
+      const settings = getSettingsForToken(token);
       return sendJson(res, 200, { ok: true, ...settings });
     }
 
@@ -216,7 +217,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
       const body = await readJsonBody(req);
-      const settings = await updateSettingsForToken(token, body);
+      const settings = updateSettingsForToken(token, body);
       return sendJson(res, 200, { ok: true, ...settings });
     }
 
@@ -247,26 +248,6 @@ const server = http.createServer(async (req, res) => {
         if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Backup imeshindikana: ' + e.message });
       });
       return;
-    }
-
-    // ── Admin: futa session zote chakavu (pairing/sessions/*) ──────────
-    // Tumia hii mara moja baada ya majaribio ya pairing yaliyoshindwa
-    // kuacha auth-state chakavu nyuma yake (ndiyo chanzo cha "connection
-    // closed" kuendelea kutokea hata baada ya kubadilisha config). Haigusi
-    // .gitkeep. Baada ya kuitumia, kila namba italazimika ku-pair upya.
-    if (req.method === 'POST' && req.url === '/api/admin/reset-sessions') {
-      const authHeader = req.headers['authorization'] || '';
-      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-      if (!adminAuth.verify(token)) {
-        return sendJson(res, 401, { ok: false, error: 'Session imeisha au si sahihi. Login tena.' });
-      }
-
-      const sessionsDir = path.join(__dirname, 'sessions');
-      const entries = fs.readdirSync(sessionsDir).filter((f) => f !== '.gitkeep');
-      for (const entry of entries) {
-        fs.rmSync(path.join(sessionsDir, entry), { recursive: true, force: true });
-      }
-      return sendJson(res, 200, { ok: true, removed: entries.length });
     }
 
     // ── Admin auth ─────────────────────────────────────────────────────
@@ -323,10 +304,28 @@ const server = http.createServer(async (req, res) => {
       const plan = cfg.PLANS.find(p => p.days === Number(body.days));
       if (!plan) return sendJson(res, 400, { ok: false, error: 'Package hii haipo.' });
 
+      // Payment mobile money number can differ from the WhatsApp number the
+      // bot is connected on (e.g. paying via a relative's line) — defaults
+      // to the connected number when the customer leaves it unchanged.
+      const rawPaymentPhone = (body.paymentPhoneNumber || '').trim();
+      const paymentPhoneNumber = rawPaymentPhone ? normalizePhoneNumber(rawPaymentPhone) : phoneNumber;
+      if (!paymentPhoneNumber || paymentPhoneNumber.length < 9) {
+        return sendJson(res, 400, { ok: false, error: 'Namba ya malipo si sahihi.' });
+      }
+
       const orderReference = `SUB-${phoneNumber}-${Date.now()}`;
       await insertPendingOrder(orderReference, phoneNumber, plan.days, plan.price);
 
-      await clickpesa.initiateUssdPush({ amount: plan.price, phoneNumber, orderReference });
+      try {
+        await clickpesa.initiateUssdPush({ amount: plan.price, phoneNumber: paymentPhoneNumber, orderReference });
+      } catch (e) {
+        // Order stays pending in the DB — safe to retry ("jaribu tena")
+        // without double-charging, since the webhook only credits on an
+        // orderReference it can find (and this attempt's push never sent).
+        console.error(`[pay] initiateUssdPush error for ${orderReference}:`, e.message);
+        return sendJson(res, 502, { ok: false, error: e.message });
+      }
+
       return sendJson(res, 200, {
         ok: true,
         message: 'Angalia simu yako — utaombwa kuweka PIN ya M-Pesa/Tigo Pesa/Airtel Money kukamilisha malipo.',

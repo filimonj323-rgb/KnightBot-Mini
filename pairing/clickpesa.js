@@ -79,12 +79,19 @@ async function getAuthToken() {
     },
   });
 
-  const data = await res.json().catch(() => ({}));
+  const rawText = await res.text();
+  let data = {};
+  try { data = JSON.parse(rawText); } catch (e) { /* leave as {} */ }
+
   if (!res.ok) {
-    throw new Error(`ClickPesa auth imeshindwa (${res.status}): ${data.message || JSON.stringify(data)}`);
+    console.error(`[clickpesa] AUTH imeshindwa (${res.status}):`, rawText);
+    throw new Error(`ClickPesa AUTH imeshindwa (${res.status}): ${data.message || rawText || 'hakuna maelezo'}`);
   }
   const token = data.token || data.accessToken || (data.data && data.data.token);
-  if (!token) throw new Error('ClickPesa haikurudisha token — angalia CLICKPESA_CLIENT_ID / CLICKPESA_API_KEY.');
+  if (!token) {
+    console.error('[clickpesa] AUTH ilirudisha 200 lakini bila token:', rawText);
+    throw new Error('ClickPesa haikurudisha token — angalia CLICKPESA_CLIENT_ID / CLICKPESA_API_KEY ndani ya pairingConfig.js.');
+  }
 
   cachedToken = token;
   // Refresh well before typical short-lived-JWT expiry.
@@ -117,8 +124,15 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
     body: JSON.stringify(payload),
   });
 
-  const data = await res.json().catch(() => ({}));
+  const rawText = await res.text();
+  let data = {};
+  try { data = JSON.parse(rawText); } catch (e) { /* leave as {} */ }
+
   if (!res.ok) {
+    // Full raw response goes to server logs (Railway) so the real reason
+    // ("invalid phone number", "channel unavailable", bad checksum, etc.)
+    // is visible even though the customer only sees a short message.
+    console.error(`[clickpesa] PUSH imekataliwa (${res.status}) kwa orderReference=${orderReference}:`, rawText);
     throw new Error(data.message || `ClickPesa imekataa ombi la malipo (${res.status}).`);
   }
   return data;
