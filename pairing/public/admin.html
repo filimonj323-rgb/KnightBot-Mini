@@ -156,6 +156,8 @@
   .dtabs { display: flex; gap: 4px; margin: 14px 0 16px; background: var(--panel-2); padding: 4px; border-radius: 4px; }
   .dtab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 3px; color: var(--muted); font-size: 11px; cursor: pointer; }
   .dtab.active { background: var(--accent-dim); color: #fff; }
+  .mtab { flex: 1; text-align: center; padding: 8px 4px; border-radius: 3px; color: var(--muted); font-size: 11px; cursor: pointer; }
+  .mtab.active { background: var(--accent-dim); color: #fff; }
   .dpane { display: none; }
   .dpane.active { display: block; }
   .kv { display: flex; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -176,6 +178,11 @@
   .toast.error { display: block; background: rgba(255,85,102,0.1); color: var(--red); }
   .section-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 16px 0 8px; }
   .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 12px; }
+  .usage-row { display: flex; align-items: center; gap: 8px; font-size: 11px; margin-bottom: 6px; }
+  .usage-row .ud { width: 56px; color: var(--muted); flex-shrink: 0; }
+  .usage-row .ub-track { flex: 1; background: #071009; border: 1px solid var(--border); border-radius: 3px; height: 14px; overflow: hidden; }
+  .usage-row .ub-fill { height: 100%; background: var(--accent-dim); }
+  .usage-row .un { width: 28px; text-align: right; color: var(--text); flex-shrink: 0; }
 
   @media (max-width: 640px) {
     #detail { width: 100vw; }
@@ -251,6 +258,7 @@
     <div class="dtab" data-dtab="groups">Groups</div>
     <div class="dtab" data-dtab="settings">Mipangilio</div>
     <div class="dtab" data-dtab="billing">Malipo</div>
+    <div class="dtab" data-dtab="usage">Matumizi</div>
   </div>
 
   <!-- Overview -->
@@ -275,9 +283,36 @@
       <button class="ghost" onclick="dSelectAllGroups()">☑️ Zote</button>
       <button class="ghost" onclick="dSelectNoneGroups()">⬜ Ondoa</button>
     </div>
-    <label>Ujumbe (Maandishi)</label>
-    <textarea id="dMsgText" rows="3" placeholder="Andika ujumbe..."></textarea>
-    <button onclick="dSendMessage()">📢 Tuma kwa Groups Nilizochagua</button>
+
+    <div class="dtabs" style="margin:0 0 12px;">
+      <div class="mtab active" data-mtype="text">📝 Text</div>
+      <div class="mtab" data-mtype="image">🖼️ Picha</div>
+      <div class="mtab" data-mtype="video">🎬 Video</div>
+      <div class="mtab" data-mtype="audio">🎵 Wimbo</div>
+    </div>
+
+    <div id="mpane-text">
+      <label>Ujumbe (Maandishi)</label>
+      <textarea id="dMsgText" rows="3" placeholder="Andika ujumbe..."></textarea>
+    </div>
+    <div id="mpane-image" style="display:none;">
+      <label>Chagua Picha (kutoka storage)</label>
+      <input type="file" id="dImageFile" accept="image/*" />
+      <label>Caption (hiari)</label>
+      <textarea id="dImageCaption" rows="2" placeholder="Maelezo mafupi..."></textarea>
+    </div>
+    <div id="mpane-video" style="display:none;">
+      <label>Chagua Video (kutoka storage)</label>
+      <input type="file" id="dVideoFile" accept="video/*" />
+      <label>Caption (hiari)</label>
+      <textarea id="dVideoCaption" rows="2" placeholder="Maelezo mafupi..."></textarea>
+    </div>
+    <div id="mpane-audio" style="display:none;">
+      <label>Chagua Wimbo/Audio (kutoka storage)</label>
+      <input type="file" id="dAudioFile" accept="audio/*" />
+    </div>
+
+    <button onclick="dSendMessage(this)">📢 Tuma kwa Groups Nilizochagua</button>
     <div class="toast" id="dGroupsMsg"></div>
   </div>
 
@@ -297,15 +332,30 @@
   <!-- Billing -->
   <div class="dpane" id="dpane-billing">
     <div class="kv"><span class="k">Hali</span><span class="v" id="dBillingStatus">—</span></div>
+    <div class="kv"><span class="k">Kifurushi</span><span class="v" id="dBillingPackage">—</span></div>
     <div class="kv"><span class="k">Muda</span><span class="v" id="dBillingTime">—</span></div>
+    <div class="kv"><span class="k">Malipo ya mwisho</span><span class="v" id="dBillingLastPayment">—</span></div>
+
+    <div class="section-label">Badilisha Muda (Ongeza au Punguza)</div>
+    <div class="linkbox">
+      <input type="number" id="dAdjustDays" placeholder="mfano 3 au -3" style="margin-bottom:0;" />
+      <button onclick="dAdjustDays()">Weka</button>
+    </div>
+
     <div class="actrow">
-      <button onclick="dMarkPaid()">✅ Weka Amelipa</button>
-      <button class="ghost" onclick="dExtendTrial()">+ Trial</button>
+      <button onclick="dMarkPaid()">✅ Weka Amelipa (Kifurushi)</button>
+      <button class="ghost" onclick="dExtendTrial()">+ Trial siku 1</button>
     </div>
     <div class="actrow">
       <button class="danger" id="dBlockBtn" onclick="dToggleBlock()">Zuia Mtumiaji</button>
     </div>
     <div class="toast" id="dBillingMsg"></div>
+  </div>
+
+  <!-- Usage -->
+  <div class="dpane" id="dpane-usage">
+    <div class="section-label">Matumizi — Ujumbe Ulioshughulikiwa (Siku 14 za Mwisho)</div>
+    <div id="dUsageChart"></div>
   </div>
 </div>
 
@@ -485,6 +535,27 @@
     });
   });
 
+  let CURRENT_MTYPE = 'text';
+  document.querySelectorAll('.mtab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.mtab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      CURRENT_MTYPE = tab.dataset.mtype;
+      ['text','image','video','audio'].forEach(t => {
+        document.getElementById('mpane-' + t).style.display = (t === CURRENT_MTYPE) ? 'block' : 'none';
+      });
+    });
+  });
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(',')[1]);
+      r.onerror = () => reject(new Error('Imeshindwa kusoma faili.'));
+      r.readAsDataURL(file);
+    });
+  }
+
   async function openDetail(phone) {
     CURRENT_PHONE = phone;
     document.getElementById('dPhone').textContent = phone;
@@ -495,6 +566,15 @@
       document.getElementById(id).className = 'toast';
       document.getElementById(id).textContent = '';
     });
+    // Reset the compose form so a file/text picked for a PREVIOUS customer
+    // never accidentally gets sent to this one.
+    document.getElementById('dMsgText').value = '';
+    document.getElementById('dImageFile').value = '';
+    document.getElementById('dImageCaption').value = '';
+    document.getElementById('dVideoFile').value = '';
+    document.getElementById('dVideoCaption').value = '';
+    document.getElementById('dAudioFile').value = '';
+    document.querySelectorAll('.mtab')[0].click();
     await refreshDetail();
     refreshBillingPane();
   }
@@ -535,6 +615,22 @@
       document.getElementById('dPrefix').placeholder = 'Default: ' + data.settings.defaultPrefix;
       document.getElementById('dBotName').value = data.settings.botName || '';
       document.getElementById('dBotName').placeholder = 'Default: ' + data.settings.defaultBotName;
+
+      // Billing pane — package + last payment (server-computed, not from ALL_USERS)
+      document.getElementById('dBillingPackage').textContent = data.billing.packageLabel;
+      document.getElementById('dBillingLastPayment').textContent = data.billing.lastPayment
+        ? `Siku ${data.billing.lastPayment.days} · TZS ${Number(data.billing.lastPayment.amount || 0).toLocaleString('sw-TZ')} · ${fmtDate(data.billing.lastPayment.at)}`
+        : 'Hakuna bado';
+
+      // Usage chart
+      const maxCount = Math.max(1, ...data.usage.map(u => u.messageCount));
+      document.getElementById('dUsageChart').innerHTML = data.usage.map(u => `
+        <div class="usage-row">
+          <span class="ud">${u.date.slice(5)}</span>
+          <span class="ub-track"><span class="ub-fill" style="width:${Math.round((u.messageCount / maxCount) * 100)}%"></span></span>
+          <span class="un">${u.messageCount}</span>
+        </div>
+      `).join('');
     } catch (e) {
       showToast('dOverviewMsg', false, e.message);
     }
@@ -546,6 +642,22 @@
     document.getElementById('dBillingStatus').innerHTML = statusBadge(u);
     document.getElementById('dBillingTime').textContent = timeLeft(u);
     document.getElementById('dBlockBtn').textContent = u.blocked ? '🔓 Fungua Mtumiaji' : '🚫 Zuia Mtumiaji';
+  }
+
+  async function dAdjustDays() {
+    const raw = document.getElementById('dAdjustDays').value.trim();
+    const days = Number(raw);
+    if (!raw || Number.isNaN(days) || days === 0) return showToast('dBillingMsg', false, 'Weka namba ya siku (mfano 3 au -3).');
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/adjust-days`, { method: 'POST', body: JSON.stringify({ days }) });
+      showToast('dBillingMsg', true, (days > 0 ? `Umeongeza siku ${days}.` : `Umepunguza siku ${Math.abs(days)}.`));
+      document.getElementById('dAdjustDays').value = '';
+      await loadUsers();
+      refreshBillingPane();
+      refreshDetail();
+    } catch (e) {
+      showToast('dBillingMsg', false, e.message);
+    }
   }
 
   function copyDashLink() {
@@ -579,18 +691,47 @@
   function dSelectAllGroups() { document.querySelectorAll('.dGroupCb').forEach(cb => cb.checked = true); }
   function dSelectNoneGroups() { document.querySelectorAll('.dGroupCb').forEach(cb => cb.checked = false); }
 
-  async function dSendMessage() {
+  async function dSendMessage(btn) {
     const groupIds = Array.from(document.querySelectorAll('.dGroupCb:checked')).map(cb => cb.value);
-    const text = document.getElementById('dMsgText').value.trim();
     if (!groupIds.length) return showToast('dGroupsMsg', false, 'Chagua angalau group moja.');
-    if (!text) return showToast('dGroupsMsg', false, 'Andika ujumbe kwanza.');
+
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Inatuma...';
+
     try {
+      let body = { groupIds };
+
+      if (CURRENT_MTYPE === 'text') {
+        const text = document.getElementById('dMsgText').value.trim();
+        if (!text) throw new Error('Andika ujumbe kwanza.');
+        body.text = text;
+      } else if (CURRENT_MTYPE === 'image') {
+        const file = document.getElementById('dImageFile').files[0];
+        if (!file) throw new Error('Chagua picha kwanza.');
+        body.imageBase64 = await fileToBase64(file);
+        body.caption = document.getElementById('dImageCaption').value.trim();
+      } else if (CURRENT_MTYPE === 'video') {
+        const file = document.getElementById('dVideoFile').files[0];
+        if (!file) throw new Error('Chagua video kwanza.');
+        body.videoBase64 = await fileToBase64(file);
+        body.caption = document.getElementById('dVideoCaption').value.trim();
+      } else if (CURRENT_MTYPE === 'audio') {
+        const file = document.getElementById('dAudioFile').files[0];
+        if (!file) throw new Error('Chagua wimbo/audio kwanza.');
+        body.audioBase64 = await fileToBase64(file);
+        body.audioMimetype = file.type || 'audio/mpeg';
+      }
+
       const data = await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/message`, {
-        method: 'POST', body: JSON.stringify({ groupIds, text }),
+        method: 'POST', body: JSON.stringify(body),
       });
       showToast('dGroupsMsg', true, `Imetumwa: ${data.success} zimefanikiwa, ${data.failed} zimeshindwa.`);
     } catch (e) {
       showToast('dGroupsMsg', false, e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
     }
   }
 
