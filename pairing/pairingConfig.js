@@ -44,8 +44,8 @@ module.exports = {
   REMINDER_INTERVAL_HOURS: 24,
 
   // ── ClickPesa (Dashboard -> Settings -> Developers -> Create Application) ──
-  CLICKPESA_CLIENT_ID: 'WEKA_CLIENT_ID_YAKO_HAPA',
-  CLICKPESA_API_KEY: 'WEKA_API_KEY_YAKO_HAPA',
+  CLICKPESA_CLIENT_ID: 'IDPgI1bfQhHvfU0RqnXLYN97E43819qY',
+  CLICKPESA_API_KEY: 'SKZgIII1S74LTKShFfBAiP09seYy03600Z8bHrAqnD',
   CLICKPESA_BASE_URL: 'https://api.clickpesa.com',
 
   // ── Pairing website base URL (used in WhatsApp dashboard-link messages) ──
