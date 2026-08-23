@@ -208,7 +208,7 @@ const server = http.createServer(async (req, res) => {
     // Settings: read a customer's current (optional) prefix/bot name.
     if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
-      const settings = getSettingsForToken(token);
+      const settings = await getSettingsForToken(token);
       return sendJson(res, 200, { ok: true, ...settings });
     }
 
@@ -216,7 +216,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
       const body = await readJsonBody(req);
-      const settings = updateSettingsForToken(token, body);
+      const settings = await updateSettingsForToken(token, body);
       return sendJson(res, 200, { ok: true, ...settings });
     }
 
@@ -247,6 +247,26 @@ const server = http.createServer(async (req, res) => {
         if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Backup imeshindikana: ' + e.message });
       });
       return;
+    }
+
+    // ── Admin: futa session zote chakavu (pairing/sessions/*) ──────────
+    // Tumia hii mara moja baada ya majaribio ya pairing yaliyoshindwa
+    // kuacha auth-state chakavu nyuma yake (ndiyo chanzo cha "connection
+    // closed" kuendelea kutokea hata baada ya kubadilisha config). Haigusi
+    // .gitkeep. Baada ya kuitumia, kila namba italazimika ku-pair upya.
+    if (req.method === 'POST' && req.url === '/api/admin/reset-sessions') {
+      const authHeader = req.headers['authorization'] || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (!adminAuth.verify(token)) {
+        return sendJson(res, 401, { ok: false, error: 'Session imeisha au si sahihi. Login tena.' });
+      }
+
+      const sessionsDir = path.join(__dirname, 'sessions');
+      const entries = fs.readdirSync(sessionsDir).filter((f) => f !== '.gitkeep');
+      for (const entry of entries) {
+        fs.rmSync(path.join(sessionsDir, entry), { recursive: true, force: true });
+      }
+      return sendJson(res, 200, { ok: true, removed: entries.length });
     }
 
     // ── Admin auth ─────────────────────────────────────────────────────

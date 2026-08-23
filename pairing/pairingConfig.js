@@ -53,8 +53,9 @@ module.exports = {
 
   // ── Optional custom pairing code (must be EXACTLY 8 uppercase A-Z0-9) ──
   // NOTE: WhatsApp often rejects custom codes even when correctly
-  // formatted — see the earlier conversation. If pairing keeps failing
-  // with this set, change it back to null to use Baileys' normal random
-  // codes (recommended, and known to work reliably).
-  CUSTOM_PAIRING_CODE: 'UMOJASTA',
+  // formatted, ambayo ndiyo iliyokuwa inasababisha "couldn't connect" na
+  // "connection closed" mara kwa mara. Imewekwa null kutumia random codes
+  // za Baileys ambazo ni za uhakika zaidi. Usiweke thamani hapa tena
+  // isipokuwa lazima kabisa.
+  CUSTOM_PAIRING_CODE: null,
 };
