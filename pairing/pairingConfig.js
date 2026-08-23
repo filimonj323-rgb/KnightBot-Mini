@@ -46,7 +46,7 @@ module.exports = {
   // ── ClickPesa (Dashboard -> Settings -> Developers -> Create Application) ──
   CLICKPESA_CLIENT_ID: 'IDTPsNf0dXCBQBUUbDm2YIJFPPSxc0dH',
   CLICKPESA_API_KEY: 'SKoeaaJhZu5B0ojot8fO5j1s2kjv30LWCpUUMqW4Lb',
-  CLICKPESA_BASE_URL: 'https://api.clickpesa.com',
+  CLICKPESA_BASE_URL: 'https://api.clickpesa.com/third-parties',
 
   // ── Pairing website base URL (used in WhatsApp dashboard-link messages) ──
   PAIRING_BASE_URL: 'https://pairingpage.up.railway.app', // badilisha kama domain yako ni tofauti
