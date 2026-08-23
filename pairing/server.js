@@ -40,6 +40,7 @@ const {
   adminSendToGroups,
   adminResetUserSession,
   restoreAllInstances,
+  adminAdjustDays,
 } = require('./instanceManager');
 const adminAuth = require('./adminAuth');
 const clickpesa = require('./clickpesa');
@@ -315,7 +316,7 @@ const server = http.createServer(async (req, res) => {
       // Full-access bot control (per-customer) — status, groups, settings,
       // messaging, force session reset. All still behind the same admin
       // Authorization check above.
-      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|reset-session)$/);
+      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|reset-session|adjust-days)$/);
       if (phoneMatch) {
         const [, phone, action] = phoneMatch;
 
@@ -331,7 +332,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (action === 'message' && req.method === 'POST') {
-          // 30MB cap for base64 image/video, same as the customer dashboard route.
+          // 30MB cap for base64 image/video/audio, same as the customer dashboard route.
           const body = await readJsonBody(req, 30 * 1e6);
           const result = await adminSendToGroups(phone, body);
           return sendJson(res, 200, { ok: true, ...result });
@@ -340,6 +341,12 @@ const server = http.createServer(async (req, res) => {
         if (action === 'reset-session' && req.method === 'POST') {
           const result = await adminResetUserSession(phone);
           return sendJson(res, 200, { ok: true, ...result });
+        }
+
+        if (action === 'adjust-days' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const user = await adminAdjustDays(phone, body.days);
+          return sendJson(res, 200, { ok: true, user });
         }
       }
     }

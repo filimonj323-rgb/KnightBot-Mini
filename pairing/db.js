@@ -84,6 +84,12 @@ async function initSchema() {
       amount         INTEGER NOT NULL,
       createdAt      INTEGER NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS usage_daily (
+      phoneNumber  TEXT NOT NULL,
+      date         TEXT NOT NULL,
+      messageCount INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (phoneNumber, date)
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
   ], 'write');
 

@@ -273,6 +273,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     const access = await userStore.getAccessStatus(phoneNumber);
     if (!access.allowed) return;
 
+    userStore.incrementUsage(phoneNumber).catch(() => {}); // fire-and-forget — powers the admin "Matumizi" tab
+
     handler.handleMessage(sock, msg).catch(err => {
       console.error(`[pairing:${phoneNumber}] handleMessage error:`, err.message);
     });
@@ -610,6 +612,11 @@ async function adminSetBlocked(phoneNumber, blocked) {
   return userStore.setBlocked(normalizePhoneNumber(phoneNumber), blocked);
 }
 
+/** Admin "badilisha muda" — deltaDays may be negative (punguza) or positive (ongeza). */
+async function adminAdjustDays(phoneNumber, deltaDays) {
+  return userStore.adjustActiveDays(normalizePhoneNumber(phoneNumber), Number(deltaDays) || 0);
+}
+
 /**
  * Dashboard "Billing" tab — a customer's own trial/paid status, used to
  * show a countdown / pay button on their dashboard.html.
@@ -681,6 +688,17 @@ async function adminGetInstanceDetail(rawPhoneNumber) {
     }
   }
 
+  const [user, paymentHistory, usage] = await Promise.all([
+    userStore.getUser(phoneNumber),
+    userStore.getPaymentHistory(phoneNumber),
+    userStore.getUsage(phoneNumber, 14),
+  ]);
+  const lastPayment = paymentHistory[0] || null;
+  // "Package" the customer is on — matched against the price list in
+  // pairingConfig.js by the day-count of their most recent payment, so the
+  // admin sees a human label ("Mwezi 1") instead of just a raw day count.
+  const matchedPlan = lastPayment ? cfg.PLANS.find(p => p.days === lastPayment.days) : null;
+
   return {
     phoneNumber,
     liveStatus: inst ? inst.status : 'offline',
@@ -696,6 +714,17 @@ async function adminGetInstanceDetail(rawPhoneNumber) {
       defaultPrefix: defaults.prefix,
       defaultBotName: defaults.botName,
     },
+    billing: {
+      isPaid: user?.isPaid || false,
+      paidUntil: user?.paidUntil || null,
+      trialExpiresAt: user?.trialExpiresAt || null,
+      blocked: user?.blocked || false,
+      packageLabel: matchedPlan
+        ? (matchedPlan.days === 1 ? 'Siku 1' : matchedPlan.days === 30 ? 'Mwezi 1 (siku 30)' : `Siku ${matchedPlan.days}`)
+        : (user?.isPaid ? `Siku ${lastPayment?.days ?? '—'} (custom)` : 'Trial'),
+      lastPayment,
+    },
+    usage,
   };
 }
 
@@ -727,7 +756,7 @@ async function adminUpdateInstanceSettings(rawPhoneNumber, { prefix, botName }) 
  * Admin-triggered send — same payload shape as sendMessageToGroups() but
  * addressed by phone number directly, no customer token required.
  */
-async function adminSendToGroups(rawPhoneNumber, { groupIds, text, caption, imageBase64, videoBase64 }) {
+async function adminSendToGroups(rawPhoneNumber, { groupIds, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
   const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
   const inst = instances.get(phoneNumber);
   if (!inst) throw new Error('Bot ya namba hii haipo "live" kwenye process hii kwa sasa (labda haijaunganishwa, au kuna redeploy tangu iunganishwe).');
@@ -737,8 +766,9 @@ async function adminSendToGroups(rawPhoneNumber, { groupIds, text, caption, imag
   let payload;
   if (imageBase64) payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
   else if (videoBase64) payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
+  else if (audioBase64) payload = { audio: Buffer.from(audioBase64, 'base64'), mimetype: audioMimetype || 'audio/mpeg', ptt: false };
   else if (text) payload = { text };
-  else throw new Error('Weka maandishi au chagua picha/video.');
+  else throw new Error('Weka maandishi, au chagua picha/video/wimbo.');
 
   const targets = groupIds.includes('all')
     ? Object.keys(await inst.sock.groupFetchAllParticipating())
@@ -880,4 +910,5 @@ module.exports = {
   adminSendToGroups,
   adminResetUserSession,
   restoreAllInstances,
+  adminAdjustDays,
 };

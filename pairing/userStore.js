@@ -121,6 +121,29 @@ async function extendTrial(phoneNumber, days) {
   return u;
 }
 
+/**
+ * Admin "badilisha muda" — days can be POSITIVE (ongeza) or NEGATIVE
+ * (punguza), unlike markPaid/extendTrial which only ever add. Adjusts
+ * whichever bucket the customer is actually on: paidUntil if they've ever
+ * paid (even if currently lapsed — so a negative admin adjustment on an
+ * active paid customer can push them into expired, and a positive one can
+ * revive a lapsed paid customer), otherwise trialExpiresAt.
+ */
+async function adjustActiveDays(phoneNumber, deltaDays) {
+  const u = await ensureUser(phoneNumber);
+  const now = Date.now();
+
+  if (u.isPaid) {
+    const base = u.paidUntil || now;
+    u.paidUntil = base + deltaDays * DAY_MS;
+  } else {
+    u.trialExpiresAt = u.trialExpiresAt + deltaDays * DAY_MS;
+  }
+  u.expiryNotifiedAt = null;
+  await saveUser(u);
+  return u;
+}
+
 async function setBlocked(phoneNumber, blocked) {
   const u = await ensureUser(phoneNumber);
   u.blocked = !!blocked;
@@ -151,6 +174,39 @@ async function markReminderSent(phoneNumber) {
   await saveUser(u);
 }
 
+/**
+ * Usage tracking — one row per (phoneNumber, date), incremented once per
+ * inbound message the bot actually handled that day. Powers the "Matumizi"
+ * tab on the admin dashboard.
+ */
+function todayKey() {
+  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+}
+
+async function incrementUsage(phoneNumber) {
+  await db.query(
+    `INSERT INTO usage_daily (phoneNumber, date, messageCount) VALUES (?, ?, 1)
+     ON CONFLICT(phoneNumber, date) DO UPDATE SET messageCount = messageCount + 1`,
+    [phoneNumber, todayKey()]
+  );
+}
+
+/** Returns the last `days` days of usage, oldest first, zero-filled for days with no activity. */
+async function getUsage(phoneNumber, days = 14) {
+  const since = new Date(Date.now() - (days - 1) * DAY_MS).toISOString().slice(0, 10);
+  const res = await db.query(
+    'SELECT date, messageCount FROM usage_daily WHERE phoneNumber = ? AND date >= ? ORDER BY date ASC',
+    [phoneNumber, since]
+  );
+  const byDate = new Map(res.rows.map((r) => [r.date, r.messageCount]));
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * DAY_MS).toISOString().slice(0, 10);
+    out.push({ date: d, messageCount: byDate.get(d) || 0 });
+  }
+  return out;
+}
+
 module.exports = {
   TRIAL_DAYS,
   ensureUser,
@@ -159,9 +215,12 @@ module.exports = {
   getAccessStatus,
   markPaid,
   extendTrial,
+  adjustActiveDays,
   setBlocked,
   markExpiryNotified,
   isReminderDue,
   markReminderSent,
   getPaymentHistory,
+  incrementUsage,
+  getUsage,
 };
