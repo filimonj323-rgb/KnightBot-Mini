@@ -241,6 +241,11 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         record.status = 'error';
         record.error = 'Imeshindwa kuunganisha baada ya majaribio kadhaa. Bofya "Pata Pairing Code" tena baada ya dakika chache.';
         instances.delete(phoneNumber);
+        // Futa auth-state chakavu ya jaribio hili lililoshindwa — bila hii,
+        // jaribio LIJALO linarithi creds mbovu na kuendelea kupata
+        // "connection closed" hata baada ya kubadilisha CUSTOM_PAIRING_CODE
+        // au kusubiri. Jaribio jipya lazima lianze na session tupu.
+        fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
         return;
       }
 
@@ -296,6 +301,10 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     } catch (e) {
       record.status = 'error';
       record.error = e.message;
+      // Futa session hii mara moja pia — usisubiri hadi reconnectAttempts
+      // ifike 6 kama request ya kwanza kabisa ya pairing code ndiyo
+      // iliyoshindwa (mfano "Connection Closed" kabla ya code kutolewa).
+      fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
       throw e;
     }
   } else if (!state.creds.registered && isReconnect) {
@@ -646,6 +655,127 @@ function startReminderScheduler() {
   }, 60 * 60 * 1000); // checks every hour; REMINDER_INTERVAL_HOURS controls per-user due-time above
 }
 
+/**
+ * ── Admin "full access" helpers ─────────────────────────────────────────
+ * Everything below lets the admin dashboard act on a customer's bot
+ * DIRECTLY by phone number (no dashboard token needed) — groups list,
+ * sending messages/status to groups, reading/editing prefix+botName, and
+ * force-resetting one customer's session. Only reaches an instance that is
+ * live in THIS process (same limitation as the rest of the in-memory model
+ * — see the comment on resendDashboardLink above).
+ */
+async function adminGetInstanceDetail(rawPhoneNumber) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const inst = instances.get(phoneNumber);
+  const settingsRow = await getInstanceSettings(phoneNumber);
+  const defaults = require('../config');
+
+  let groups = [];
+  let groupsError = null;
+  if (inst && inst.status === 'connected' && inst.sock) {
+    try {
+      const chats = await inst.sock.groupFetchAllParticipating();
+      groups = Object.values(chats).map(g => ({ id: g.id, subject: g.subject, participants: g.participants.length }));
+    } catch (e) {
+      groupsError = e.message;
+    }
+  }
+
+  return {
+    phoneNumber,
+    liveStatus: inst ? inst.status : 'offline',
+    pairingCode: inst ? inst.pairingCode : null,
+    error: inst ? inst.error : null,
+    dashboardToken: inst ? inst.token : null,
+    dashboardUrl: inst && inst.token ? dashboardUrl(inst.token) : null,
+    groups,
+    groupsError,
+    settings: {
+      prefix: settingsRow.prefix || '',
+      botName: settingsRow.botName || '',
+      defaultPrefix: defaults.prefix,
+      defaultBotName: defaults.botName,
+    },
+  };
+}
+
+async function adminUpdateInstanceSettings(rawPhoneNumber, { prefix, botName }) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+
+  const trimmedPrefix = typeof prefix === 'string' ? prefix.trim() : '';
+  if (trimmedPrefix && trimmedPrefix.length > 3) throw new Error('Prefix isiwe zaidi ya herufi 3.');
+  const trimmedName = typeof botName === 'string' ? botName.trim() : '';
+  if (trimmedName && trimmedName.length > 40) throw new Error('Jina la bot lisizidi herufi 40.');
+
+  const next = {};
+  if (trimmedPrefix) next.prefix = trimmedPrefix;
+  if (trimmedName) next.botName = trimmedName;
+
+  await db.query(
+    `INSERT INTO settings (phoneNumber, prefix, botName) VALUES (?, ?, ?)
+     ON CONFLICT(phoneNumber) DO UPDATE SET prefix = excluded.prefix, botName = excluded.botName`,
+    [phoneNumber, next.prefix || null, next.botName || null]
+  );
+
+  const inst = instances.get(phoneNumber);
+  if (inst?.sock) inst.sock.instanceSettings = next;
+
+  return adminGetInstanceDetail(phoneNumber);
+}
+
+/**
+ * Admin-triggered send — same payload shape as sendMessageToGroups() but
+ * addressed by phone number directly, no customer token required.
+ */
+async function adminSendToGroups(rawPhoneNumber, { groupIds, text, caption, imageBase64, videoBase64 }) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const inst = instances.get(phoneNumber);
+  if (!inst) throw new Error('Bot ya namba hii haipo "live" kwenye process hii kwa sasa (labda haijaunganishwa, au kuna redeploy tangu iunganishwe).');
+  if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
+  if (!Array.isArray(groupIds) || groupIds.length === 0) throw new Error('Chagua angalau group moja.');
+
+  let payload;
+  if (imageBase64) payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
+  else if (videoBase64) payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
+  else if (text) payload = { text };
+  else throw new Error('Weka maandishi au chagua picha/video.');
+
+  const targets = groupIds.includes('all')
+    ? Object.keys(await inst.sock.groupFetchAllParticipating())
+    : groupIds;
+
+  let success = 0;
+  let failed = 0;
+  for (const gid of targets) {
+    try {
+      await inst.sock.sendMessage(gid, payload);
+      success++;
+      if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
+    } catch (e) {
+      failed++;
+    }
+  }
+  return { success, failed, total: targets.length };
+}
+
+/**
+ * Force-resets ONE customer's session (disconnects the live socket if any,
+ * then deletes their pairing/sessions/<phone> folder) — the per-user
+ * version of the bulk "Futa Sessions Chakavu" admin action. Customer will
+ * need to press "Pata Pairing Code" again afterwards.
+ */
+async function adminResetUserSession(rawPhoneNumber) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const inst = instances.get(phoneNumber);
+  if (inst?.sock) {
+    try { inst.sock.end(undefined); } catch (e) { /* already closed — fine */ }
+  }
+  instances.delete(phoneNumber);
+  const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
+  fs.rmSync(sessionFolder, { recursive: true, force: true });
+  return { phoneNumber, reset: true };
+}
+
 module.exports = {
   createOrPairInstance,
   getInstanceStatus,
@@ -666,4 +796,8 @@ module.exports = {
   adminSetBlocked,
   getBillingForToken,
   startReminderScheduler,
+  adminGetInstanceDetail,
+  adminUpdateInstanceSettings,
+  adminSendToGroups,
+  adminResetUserSession,
 };

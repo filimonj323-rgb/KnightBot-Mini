@@ -35,6 +35,10 @@ const {
   adminSetBlocked,
   getBillingForToken,
   startReminderScheduler,
+  adminGetInstanceDetail,
+  adminUpdateInstanceSettings,
+  adminSendToGroups,
+  adminResetUserSession,
 } = require('./instanceManager');
 const adminAuth = require('./adminAuth');
 const clickpesa = require('./clickpesa');
@@ -209,7 +213,7 @@ const server = http.createServer(async (req, res) => {
     // Settings: read a customer's current (optional) prefix/bot name.
     if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
-      const settings = getSettingsForToken(token);
+      const settings = await getSettingsForToken(token);
       return sendJson(res, 200, { ok: true, ...settings });
     }
 
@@ -217,7 +221,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
       const body = await readJsonBody(req);
-      const settings = updateSettingsForToken(token, body);
+      const settings = await updateSettingsForToken(token, body);
       return sendJson(res, 200, { ok: true, ...settings });
     }
 
@@ -248,6 +252,26 @@ const server = http.createServer(async (req, res) => {
         if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Backup imeshindikana: ' + e.message });
       });
       return;
+    }
+
+    // ── Admin: futa session zote chakavu (pairing/sessions/*) ──────────
+    // Tumia hii mara moja baada ya majaribio ya pairing yaliyoshindwa
+    // kuacha auth-state chakavu nyuma yake (ndiyo chanzo cha "connection
+    // closed" kuendelea kutokea hata baada ya kubadilisha config). Haigusi
+    // .gitkeep. Baada ya kuitumia, kila namba italazimika ku-pair upya.
+    if (req.method === 'POST' && req.url === '/api/admin/reset-sessions') {
+      const authHeader = req.headers['authorization'] || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (!adminAuth.verify(token)) {
+        return sendJson(res, 401, { ok: false, error: 'Session imeisha au si sahihi. Login tena.' });
+      }
+
+      const sessionsDir = path.join(__dirname, 'sessions');
+      const entries = fs.readdirSync(sessionsDir).filter((f) => f !== '.gitkeep');
+      for (const entry of entries) {
+        fs.rmSync(path.join(sessionsDir, entry), { recursive: true, force: true });
+      }
+      return sendJson(res, 200, { ok: true, removed: entries.length });
     }
 
     // ── Admin auth ─────────────────────────────────────────────────────
@@ -286,6 +310,37 @@ const server = http.createServer(async (req, res) => {
         }
         return sendJson(res, 200, { ok: true, user });
       }
+
+      // Full-access bot control (per-customer) — status, groups, settings,
+      // messaging, force session reset. All still behind the same admin
+      // Authorization check above.
+      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|reset-session)$/);
+      if (phoneMatch) {
+        const [, phone, action] = phoneMatch;
+
+        if (action === 'detail' && req.method === 'GET') {
+          const detail = await adminGetInstanceDetail(phone);
+          return sendJson(res, 200, { ok: true, ...detail });
+        }
+
+        if (action === 'settings' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const detail = await adminUpdateInstanceSettings(phone, body);
+          return sendJson(res, 200, { ok: true, ...detail });
+        }
+
+        if (action === 'message' && req.method === 'POST') {
+          // 30MB cap for base64 image/video, same as the customer dashboard route.
+          const body = await readJsonBody(req, 30 * 1e6);
+          const result = await adminSendToGroups(phone, body);
+          return sendJson(res, 200, { ok: true, ...result });
+        }
+
+        if (action === 'reset-session' && req.method === 'POST') {
+          const result = await adminResetUserSession(phone);
+          return sendJson(res, 200, { ok: true, ...result });
+        }
+      }
     }
 
     // ── Customer billing (dashboard) ──────────────────────────────────
@@ -297,38 +352,38 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/pay')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/pay', ''));
-      const phoneNumber = await getPhoneNumberByToken(token);
-      if (!phoneNumber) return sendJson(res, 404, { ok: false, error: 'Dashboard link si sahihi.' });
+      const accountPhoneNumber = await getPhoneNumberByToken(token);
+      if (!accountPhoneNumber) return sendJson(res, 404, { ok: false, error: 'Dashboard link si sahihi.' });
 
       const body = await readJsonBody(req);
       const plan = cfg.PLANS.find(p => p.days === Number(body.days));
       if (!plan) return sendJson(res, 400, { ok: false, error: 'Package hii haipo.' });
 
-      // Payment mobile money number can differ from the WhatsApp number the
-      // bot is connected on (e.g. paying via a relative's line) — defaults
-      // to the connected number when the customer leaves it unchanged.
-      const rawPaymentPhone = (body.paymentPhoneNumber || '').trim();
-      const paymentPhoneNumber = rawPaymentPhone ? normalizePhoneNumber(rawPaymentPhone) : phoneNumber;
-      if (!paymentPhoneNumber || paymentPhoneNumber.length < 9) {
-        return sendJson(res, 400, { ok: false, error: 'Namba ya malipo si sahihi.' });
+      // Namba ya kutuma USSD-push (mteja anaweza kulipia kwa namba TOFAUTI
+      // na ile ya bot yake, mfano ya ndugu/rafiki) — default ni namba yake
+      // ya bot iliyounganishwa. Akaunti inayopewa siku daima ni
+      // accountPhoneNumber, bila kujali ni namba gani ililipia.
+      const rawPaymentPhone = typeof body.paymentPhoneNumber === 'string' ? body.paymentPhoneNumber : '';
+      const paymentPhoneNumber = normalizePhoneNumber(rawPaymentPhone) || accountPhoneNumber;
+      if (paymentPhoneNumber.length < 9) {
+        return sendJson(res, 400, { ok: false, error: 'Namba ya malipo si sahihi. Weka namba kamili yenye country code (mfano 2557XXXXXXXX).' });
       }
 
-      const orderReference = `SUB-${phoneNumber}-${Date.now()}`;
-      await insertPendingOrder(orderReference, phoneNumber, plan.days, plan.price);
+      const orderReference = `SUB-${accountPhoneNumber}-${Date.now()}`;
+      await insertPendingOrder(orderReference, accountPhoneNumber, plan.days, plan.price);
 
       try {
         await clickpesa.initiateUssdPush({ amount: plan.price, phoneNumber: paymentPhoneNumber, orderReference });
       } catch (e) {
-        // Order stays pending in the DB — safe to retry ("jaribu tena")
-        // without double-charging, since the webhook only credits on an
-        // orderReference it can find (and this attempt's push never sent).
-        console.error(`[pay] initiateUssdPush error for ${orderReference}:`, e.message);
-        return sendJson(res, 502, { ok: false, error: e.message });
+        // Onyesha SABABU HALISI moja kwa moja kwenye UI (si logs tu) —
+        // e.details ina jibu kamili la ClickPesa lililowekwa na
+        // clickpesa.js, ili mteja/admin waone tatizo bila kufungua Railway.
+        return sendJson(res, 400, { ok: false, error: e.message, details: e.details || null });
       }
 
       return sendJson(res, 200, {
         ok: true,
-        message: 'Angalia simu yako — utaombwa kuweka PIN ya M-Pesa/Tigo Pesa/Airtel Money kukamilisha malipo.',
+        message: 'Angalia simu ya ' + paymentPhoneNumber + ' — utaombwa kuweka PIN ya M-Pesa/Tigo Pesa/Airtel Money kukamilisha malipo.',
         orderReference,
       });
     }
@@ -372,7 +427,7 @@ const server = http.createServer(async (req, res) => {
     res.end('Not found');
   } catch (e) {
     console.error('[pairing/server] error:', e.message);
-    sendJson(res, 400, { ok: false, error: e.message });
+    sendJson(res, 400, { ok: false, error: e.message, details: e.details || null });
   }
 });
 

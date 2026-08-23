@@ -79,19 +79,13 @@ async function getAuthToken() {
     },
   });
 
-  const rawText = await res.text();
-  let data = {};
-  try { data = JSON.parse(rawText); } catch (e) { /* leave as {} */ }
-
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    console.error(`[clickpesa] AUTH imeshindwa (${res.status}):`, rawText);
-    throw new Error(`ClickPesa AUTH imeshindwa (${res.status}): ${data.message || rawText || 'hakuna maelezo'}`);
+    console.error('[clickpesa] auth imekataliwa:', res.status, JSON.stringify(data));
+    throw new Error(`ClickPesa auth imeshindwa (${res.status}): ${data.message || JSON.stringify(data)}`);
   }
   const token = data.token || data.accessToken || (data.data && data.data.token);
-  if (!token) {
-    console.error('[clickpesa] AUTH ilirudisha 200 lakini bila token:', rawText);
-    throw new Error('ClickPesa haikurudisha token — angalia CLICKPESA_CLIENT_ID / CLICKPESA_API_KEY ndani ya pairingConfig.js.');
-  }
+  if (!token) throw new Error('ClickPesa haikurudisha token — angalia CLICKPESA_CLIENT_ID / CLICKPESA_API_KEY.');
 
   cachedToken = token;
   // Refresh well before typical short-lived-JWT expiry.
@@ -124,16 +118,12 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
     body: JSON.stringify(payload),
   });
 
-  const rawText = await res.text();
-  let data = {};
-  try { data = JSON.parse(rawText); } catch (e) { /* leave as {} */ }
-
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    // Full raw response goes to server logs (Railway) so the real reason
-    // ("invalid phone number", "channel unavailable", bad checksum, etc.)
-    // is visible even though the customer only sees a short message.
-    console.error(`[clickpesa] PUSH imekataliwa (${res.status}) kwa orderReference=${orderReference}:`, rawText);
-    throw new Error(data.message || `ClickPesa imekataa ombi la malipo (${res.status}).`);
+    console.error('[clickpesa] ombi limekataliwa:', res.status, JSON.stringify(data));
+    const err = new Error(data.message || (data.error && data.error.message) || `ClickPesa imekataa ombi la malipo (${res.status}).`);
+    err.details = data; // jibu kamili la ClickPesa — server.js hurudisha hii kwa UI
+    throw err;
   }
   return data;
 }
