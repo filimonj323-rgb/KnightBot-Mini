@@ -57,5 +57,5 @@ module.exports = {
   // "connection closed" mara kwa mara. Imewekwa null kutumia random codes
   // za Baileys ambazo ni za uhakika zaidi. Usiweke thamani hapa tena
   // isipokuwa lazima kabisa.
-  CUSTOM_PAIRING_CODE: null,
+  CUSTOM_PAIRING_CODE: 'UMOJASTA',
 };
