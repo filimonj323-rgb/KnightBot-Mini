@@ -284,7 +284,13 @@
       <button class="ghost" onclick="dSelectNoneGroups()">⬜ Ondoa</button>
     </div>
 
-    <div class="dtabs" style="margin:0 0 12px;">
+    <div class="section-label">Aina ya Kutuma</div>
+    <div class="dtabs" id="dSendModeTabs" style="margin:0 0 12px;">
+      <div class="mtab active" data-sendmode="message">📢 Ujumbe kwa Groups</div>
+      <div class="mtab" data-sendmode="status">📤 Status ya Group</div>
+    </div>
+
+    <div class="dtabs" id="dMediaTypeTabs" style="margin:0 0 12px;">
       <div class="mtab active" data-mtype="text">📝 Text</div>
       <div class="mtab" data-mtype="image">🖼️ Picha</div>
       <div class="mtab" data-mtype="video">🎬 Video</div>
@@ -312,7 +318,7 @@
       <input type="file" id="dAudioFile" accept="audio/*" />
     </div>
 
-    <button onclick="dSendMessage(this)">📢 Tuma kwa Groups Nilizochagua</button>
+    <button id="dSendBtn" onclick="dSendMessage(this)">📢 Tuma kwa Groups Nilizochagua</button>
     <div class="toast" id="dGroupsMsg"></div>
   </div>
 
@@ -337,6 +343,11 @@
     <div class="kv"><span class="k">Malipo ya mwisho</span><span class="v" id="dBillingLastPayment">—</span></div>
 
     <div class="section-label">Badilisha Muda (Ongeza au Punguza)</div>
+    <div class="actrow" style="margin-top:0;">
+      <button class="ghost" onclick="dQuickAdjust(-1, this)">➖ Siku 1</button>
+      <button onclick="dQuickAdjust(1, this)">➕ Siku 1</button>
+    </div>
+    <div class="section-label">Au Weka Idadi Maalum (Manually)</div>
     <div class="linkbox">
       <input type="number" id="dAdjustDays" placeholder="mfano 3 au -3" style="margin-bottom:0;" />
       <button onclick="dAdjustDays()">Weka</button>
@@ -536,14 +547,29 @@
   });
 
   let CURRENT_MTYPE = 'text';
-  document.querySelectorAll('.mtab').forEach(tab => {
+  document.querySelectorAll('#dMediaTypeTabs .mtab').forEach(tab => {
     tab.addEventListener('click', () => {
-      document.querySelectorAll('.mtab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#dMediaTypeTabs .mtab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       CURRENT_MTYPE = tab.dataset.mtype;
       ['text','image','video','audio'].forEach(t => {
         document.getElementById('mpane-' + t).style.display = (t === CURRENT_MTYPE) ? 'block' : 'none';
       });
+    });
+  });
+
+  // "Aina ya Kutuma" — Ujumbe wa kawaida kwa groups, au Status ya group
+  // (groupStatus:true). Inabadilisha endpoint na maandishi ya kitufe.
+  let CURRENT_SENDMODE = 'message';
+  document.querySelectorAll('#dSendModeTabs .mtab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('#dSendModeTabs .mtab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      CURRENT_SENDMODE = tab.dataset.sendmode;
+      const btn = document.getElementById('dSendBtn');
+      btn.textContent = CURRENT_SENDMODE === 'status'
+        ? '📤 Tuma Status kwa Groups Nilizochagua'
+        : '📢 Tuma kwa Groups Nilizochagua';
     });
   });
 
@@ -574,7 +600,8 @@
     document.getElementById('dVideoFile').value = '';
     document.getElementById('dVideoCaption').value = '';
     document.getElementById('dAudioFile').value = '';
-    document.querySelectorAll('.mtab')[0].click();
+    document.querySelectorAll('#dMediaTypeTabs .mtab')[0].click();
+    document.querySelectorAll('#dSendModeTabs .mtab')[0].click();
     await refreshDetail();
     refreshBillingPane();
   }
@@ -660,6 +687,23 @@
     }
   }
 
+  // Quick +1 / -1 day stepper — applies immediately (no need to type
+  // anything). The manual input above still works for custom amounts.
+  async function dQuickAdjust(days, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/adjust-days`, { method: 'POST', body: JSON.stringify({ days }) });
+      showToast('dBillingMsg', true, (days > 0 ? `Umeongeza siku ${days}.` : `Umepunguza siku ${Math.abs(days)}.`));
+      await loadUsers();
+      refreshBillingPane();
+      refreshDetail();
+    } catch (e) {
+      showToast('dBillingMsg', false, e.message);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function copyDashLink() {
     const input = document.getElementById('dDashLink');
     input.select();
@@ -723,10 +767,12 @@
         body.audioMimetype = file.type || 'audio/mpeg';
       }
 
-      const data = await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/message`, {
+      const endpoint = CURRENT_SENDMODE === 'status' ? 'group-status' : 'message';
+      const data = await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/${endpoint}`, {
         method: 'POST', body: JSON.stringify(body),
       });
-      showToast('dGroupsMsg', true, `Imetumwa: ${data.success} zimefanikiwa, ${data.failed} zimeshindwa.`);
+      const label = CURRENT_SENDMODE === 'status' ? 'Status imetumwa' : 'Imetumwa';
+      showToast('dGroupsMsg', true, `${label}: ${data.success} zimefanikiwa, ${data.failed} zimeshindwa.`);
     } catch (e) {
       showToast('dGroupsMsg', false, e.message);
     } finally {
