@@ -22,6 +22,10 @@ const db = require('./db');
 // SAME JSON-file group settings store the WhatsApp commands already use
 // (commands/admin/antilink.js etc.) — one source of truth, no duplication.
 const groupDb = require('../database');
+// Auto-Forward rules — SAME store the `.autoforward` WhatsApp command
+// (commands/owner/autoforward.js) already reads/writes, so a rule set from
+// the dashboard shows up instantly via WhatsApp and vice versa.
+const af = require('../utils/autoforward');
 
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
@@ -945,6 +949,122 @@ async function updateProtectionForToken(token, features) {
   return getProtectionForToken(token);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Auto-Forward rules ("Otomatiki" tab → Auto Forward Messages) — lets a
+// customer set up SOURCE group, DESTINATION (another group/channel/ID), and
+// who triggers the forward (any group admin, or specific numbers) straight
+// from the dashboard, instead of typing `.autoforward` commands in WhatsApp.
+//
+// utils/autoforward.js keeps ONE shared JSON file keyed only by
+// sourceGroupId (used process-wide, including by every pairing customer).
+// That's safe here with zero schema changes because a WhatsApp group ID is
+// globally unique — a customer's bot is only ever a member of their OWN
+// groups — so scoping every dashboard read/write to "sourceGroupId must be
+// one of MY bot's groups" (via listGroups(token), same check used above by
+// getProtectionForToken/updateProtectionForToken) naturally isolates each
+// customer's rules from everyone else's without touching the WhatsApp
+// command at all.
+// ─────────────────────────────────────────────────────────────────────────
+
+function assertOwnsSourceGroup(myGroupIds, sourceGroupId) {
+  if (!sourceGroupId || !myGroupIds.has(sourceGroupId)) {
+    throw new Error('Chagua group ya CHANZO (source) inayosimamiwa na bot yako.');
+  }
+}
+
+/**
+ * Dashboard "Otomatiki" — list this customer's Auto-Forward rules only
+ * (filtered down from the shared store to just this bot's own groups).
+ */
+async function getAutoForwardRulesForToken(token) {
+  const groups = await listGroups(token);
+  const myGroupIds = new Set(groups.map((g) => g.id));
+  const nameById = new Map(groups.map((g) => [g.id, g.subject]));
+
+  const rules = af.getRules().filter((r) => myGroupIds.has(r.sourceGroupId));
+
+  return {
+    rules: rules.map((r) => ({
+      sourceGroupId: r.sourceGroupId,
+      sourceName: nameById.get(r.sourceGroupId) || r.sourceGroupId,
+      destinationJid: r.destinationJid,
+      destinationName: nameById.get(r.destinationJid) || r.destinationJid,
+      enabled: !!r.enabled,
+      alladmin: !!r.alladmin,
+      numbers: r.numbers || [],
+    })),
+  };
+}
+
+/**
+ * Dashboard "Otomatiki" — create/update ONE Auto-Forward rule: source
+ * group, destination (another group/channel/ID), and trigger mode
+ * ("alladmin" = any group admin, or "numbers" = specific phone numbers).
+ * Saving always enables the rule immediately (matches `.autoforward set` +
+ * `.autoforward numbers`/`alladmin on` + `.autoforward on`, done in one step).
+ */
+async function saveAutoForwardRuleForToken(token, payload) {
+  const { sourceGroupId, destinationJid, mode, numbers } = payload || {};
+
+  const groups = await listGroups(token);
+  const myGroupIds = new Set(groups.map((g) => g.id));
+  assertOwnsSourceGroup(myGroupIds, sourceGroupId);
+
+  const dest = String(destinationJid || '').trim();
+  if (!dest) throw new Error('Weka group/channel ya kupelekea (destination).');
+
+  const cleanNumbers = (Array.isArray(numbers) ? numbers : String(numbers || '').split(','))
+    .map((n) => String(n).trim().replace(/[^0-9]/g, ''))
+    .filter(Boolean);
+
+  const alladmin = mode === 'alladmin';
+  if (!alladmin && !cleanNumbers.length) {
+    throw new Error('Chagua "Admin Yeyote" au weka angalau namba moja.');
+  }
+
+  af.upsertRule(sourceGroupId, {
+    destinationJid: dest,
+    alladmin,
+    numbers: alladmin ? [] : cleanNumbers,
+    enabled: true,
+  });
+
+  return getAutoForwardRulesForToken(token);
+}
+
+/**
+ * Dashboard "Otomatiki" — flip a single rule on/off without touching its
+ * source/destination/trigger settings (same as `.autoforward on`/`off`).
+ */
+async function toggleAutoForwardRuleForToken(token, sourceGroupId, enabled) {
+  const groups = await listGroups(token);
+  const myGroupIds = new Set(groups.map((g) => g.id));
+  assertOwnsSourceGroup(myGroupIds, sourceGroupId);
+
+  const rule = af.findRule(sourceGroupId);
+  if (!rule) throw new Error('Rule haipo.');
+  if (enabled && !rule.destinationJid) throw new Error('Weka destination kwanza.');
+  if (enabled && !rule.alladmin && !(rule.numbers || []).length) {
+    throw new Error('Weka "Admin Yeyote" au namba kabla ya kuwasha.');
+  }
+
+  af.upsertRule(sourceGroupId, { enabled: !!enabled });
+  return getAutoForwardRulesForToken(token);
+}
+
+/**
+ * Dashboard "Otomatiki" — permanently delete a rule (same as
+ * `.autoforward remove`).
+ */
+async function removeAutoForwardRuleForToken(token, sourceGroupId) {
+  const groups = await listGroups(token);
+  const myGroupIds = new Set(groups.map((g) => g.id));
+  assertOwnsSourceGroup(myGroupIds, sourceGroupId);
+
+  af.removeRule(sourceGroupId);
+  return getAutoForwardRulesForToken(token);
+}
+
 /**
  * Re-sends the dashboard link to a customer who already connected but lost
  * (forgot) their link. Only works if the instance is still live in THIS
@@ -1307,6 +1427,10 @@ module.exports = {
   updateAutomationForToken,
   getProtectionForToken,
   updateProtectionForToken,
+  getAutoForwardRulesForToken,
+  saveAutoForwardRuleForToken,
+  toggleAutoForwardRuleForToken,
+  removeAutoForwardRuleForToken,
   resendDashboardLink,
   adminListUsers,
   adminMarkPaid,

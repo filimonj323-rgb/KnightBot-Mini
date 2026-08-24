@@ -28,6 +28,10 @@ const {
   updateSettingsForToken,
   updateAutomationForToken,
   updateProtectionForToken,
+  getAutoForwardRulesForToken,
+  saveAutoForwardRuleForToken,
+  toggleAutoForwardRuleForToken,
+  removeAutoForwardRuleForToken,
   resendDashboardLink,
   getPhoneNumberByToken,
   normalizePhoneNumber,
@@ -248,6 +252,39 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const protection = await updateProtectionForToken(token, body.features);
       return sendJson(res, 200, { ok: true, protection });
+    }
+
+    // Auto-Forward: list this customer's rules (source/destination/trigger),
+    // scoped automatically to just the groups their own bot belongs to.
+    if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/autoforward')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/autoforward', ''));
+      const data = await getAutoForwardRulesForToken(token);
+      return sendJson(res, 200, { ok: true, ...data });
+    }
+
+    // Auto-Forward: create/update a rule — source group, destination
+    // (another group/channel/ID), and trigger mode (alladmin OR numbers).
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/autoforward')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/autoforward', ''));
+      const body = await readJsonBody(req);
+      const data = await saveAutoForwardRuleForToken(token, body);
+      return sendJson(res, 200, { ok: true, ...data });
+    }
+
+    // Auto-Forward: enable/disable one rule without changing its settings.
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/autoforward/toggle')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/autoforward/toggle', ''));
+      const body = await readJsonBody(req);
+      const data = await toggleAutoForwardRuleForToken(token, body.sourceGroupId, !!body.enabled);
+      return sendJson(res, 200, { ok: true, ...data });
+    }
+
+    // Auto-Forward: permanently delete a rule.
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/autoforward/remove')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/autoforward/remove', ''));
+      const body = await readJsonBody(req);
+      const data = await removeAutoForwardRuleForToken(token, body.sourceGroupId);
+      return sendJson(res, 200, { ok: true, ...data });
     }
 
     // ── Admin: full backup download (sessions + SQLite db as one .tar.gz) ──
