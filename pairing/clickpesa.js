@@ -120,17 +120,67 @@ async function getAuthToken() {
  * enter their mobile money PIN to approve. amount in whole TZS, phoneNumber
  * in 2557XXXXXXXX format (no +), orderReference must be unique per attempt.
  */
+/**
+ * Inasafisha na kubadilisha phoneNumber kuwa fomati anayotaka ClickPesa:
+ * "2557XXXXXXXX" (country code 255, bila '+', bila nafasi/alama).
+ *
+ * Inakubali namba za aina zifuatazo kutoka kwa mtumiaji/server.js:
+ *   - "0789013686"      -> "255789013686"   (huanza na 0 - namba ya kawaida ya TZ)
+ *   - "255789013686"    -> "255789013686"   (tayari ina country code)
+ *   - "+255789013686"   -> "255789013686"   (ina + mbele)
+ *   - "789013686"       -> "255789013686"   (bila 0 wala country code)
+ */
+function normalizePhoneNumber(rawPhoneNumber) {
+  const digitsOnly = String(rawPhoneNumber || '').replace(/[^0-9]/g, '');
+
+  if (digitsOnly.startsWith('255')) {
+    return digitsOnly;
+  }
+  if (digitsOnly.startsWith('0')) {
+    return '255' + digitsOnly.slice(1);
+  }
+  // namba ya tarakimu 9 bila 0 wala 255 mbele (mf. "789013686")
+  if (digitsOnly.length === 9) {
+    return '255' + digitsOnly;
+  }
+  // haijulikani muundo wake - rudisha kama ilivyo, ClickPesa itakataa kama si sahihi
+  return digitsOnly;
+}
+
 async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
   const token = await getAuthToken();
   console.log(
     `[clickpesa][debug] natumia token (urefu=${token ? token.length : 0} chars) kutuma ombi la malipo | orderReference=${orderReference}`
   );
 
+  const cleanPhoneNumber = normalizePhoneNumber(phoneNumber);
+  if (cleanPhoneNumber !== phoneNumber) {
+    console.log(`[clickpesa][debug] phoneNumber imesafishwa: "${phoneNumber}" -> "${cleanPhoneNumber}"`);
+  }
+  if (!/^255[0-9]{9}$/.test(cleanPhoneNumber)) {
+    throw new Error(
+      `phoneNumber si sahihi baada ya kusafisha: "${cleanPhoneNumber}" (inatakiwa iwe 2557XXXXXXXX - tarakimu 12 zikianza na 255)`
+    );
+  }
+
+  // ClickPesa inataka orderReference iwe herufi/namba TU (bila '-', '_', n.k.).
+  // Tunaisafisha hapa ili orderReference yoyote (hata ikiwa na dashes kutoka
+  // kwa server.js) ipite salama.
+  const cleanOrderReference = String(orderReference || '').replace(/[^a-zA-Z0-9]/g, '');
+  if (!cleanOrderReference) {
+    throw new Error('orderReference haipo sahihi (tupu baada ya kusafisha alama).');
+  }
+  if (cleanOrderReference !== orderReference) {
+    console.log(
+      `[clickpesa][debug] orderReference imesafishwa: "${orderReference}" -> "${cleanOrderReference}"`
+    );
+  }
+
   const payload = {
     amount: String(amount),
     currency: 'TZS',
-    orderReference,
-    phoneNumber,
+    orderReference: cleanOrderReference,
+    phoneNumber: cleanPhoneNumber,
   };
   payload.checksum = createChecksum(payload);
 
