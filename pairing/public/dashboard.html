@@ -209,6 +209,33 @@
   .preview-info { padding: 12px 14px; }
   .preview-info .p-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
   .preview-info .p-meta { font-size: 12px; color: var(--muted); }
+
+  /* Toggle switches (automation / protection) */
+  .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch .slider {
+    position: absolute; inset: 0; cursor: pointer;
+    background: var(--field); border: 1px solid var(--border);
+    border-radius: 24px; transition: 0.2s;
+  }
+  .switch .slider::before {
+    content: ""; position: absolute; height: 18px; width: 18px; left: 2px; top: 2px;
+    background: var(--muted); border-radius: 50%; transition: 0.2s;
+  }
+  .switch input:checked + .slider { background: var(--purple-dark); border-color: var(--purple); }
+  .switch input:checked + .slider::before { transform: translateX(20px); background: #fff; }
+
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+  }
+  .toggle-row:last-child { border-bottom: none; }
+  .toggle-label { font-size: 13.5px; }
+
+  .protect-block { border-bottom: 1px solid var(--border); padding: 4px 0 10px; }
+  .protect-block:last-of-type { border-bottom: none; }
+  .protect-groups { padding: 6px 0 4px; }
+  .protect-hint { font-size: 11.5px; color: var(--muted); margin: -4px 0 10px; }
 </style>
 </head>
 <body>
@@ -349,6 +376,98 @@
       <button class="secondary" id="setClearBtn">↩️ Rudisha Default</button>
 
       <div class="msg" id="setMsgBox"></div>
+    </div>
+
+    <!-- ---- Automation toggles ---- -->
+    <div class="card">
+      <h1>🔘 Vipengele vya Kiotomatiki</h1>
+      <p class="sub">Washa au zima huduma hizi za bot kiotomatiki. Zinatumika kwa jumla (si group moja moja).</p>
+
+      <div class="toggle-row">
+        <span class="toggle-label">👁️ Auto View Status</span>
+        <label class="switch"><input type="checkbox" id="tg_autoViewStatus"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">❤️ Auto React Status</span>
+        <label class="switch"><input type="checkbox" id="tg_autoReactStatus"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">⌨️ Auto Typing</span>
+        <label class="switch"><input type="checkbox" id="tg_autoTyping"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">🎙️ Auto Recording</span>
+        <label class="switch"><input type="checkbox" id="tg_autoRecording"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">😊 Auto React Messages</span>
+        <label class="switch"><input type="checkbox" id="tg_autoReactMessages"><span class="slider"></span></label>
+      </div>
+
+      <div class="msg" id="autoMsgBox"></div>
+    </div>
+
+    <!-- ---- Group-wise protection (anti-features) ---- -->
+    <div class="card">
+      <h1>🛡️ Ulinzi wa Groups</h1>
+      <p class="sub">Washa kipengele kisha chagua groups zitakazolindwa nacho. Kila kipengele kina groups zake tofauti.</p>
+
+      <div class="protect-block" data-feature="antiGroupMention">
+        <div class="toggle-row">
+          <span class="toggle-label">🚫 Anti Group Mention</span>
+          <label class="switch"><input type="checkbox" class="protectToggle"><span class="slider"></span></label>
+        </div>
+        <div class="protect-groups" style="display:none;">
+          <div class="protect-hint">Chagua groups zitakazowasha ulinzi huu</div>
+          <div class="group-list" data-list>
+            <div class="group-row" style="justify-content:center;color:var(--muted);">Inapakia groups...</div>
+          </div>
+          <div class="group-list-actions">
+            <span data-action="all">☑️ Chagua Zote</span>
+            <span data-action="none">⬜ Ondoa Zote</span>
+          </div>
+          <div class="selected-count" data-count>Umechagua groups: 0</div>
+        </div>
+      </div>
+
+      <div class="protect-block" data-feature="antiPromo">
+        <div class="toggle-row">
+          <span class="toggle-label">📵 Anti Promo</span>
+          <label class="switch"><input type="checkbox" class="protectToggle"><span class="slider"></span></label>
+        </div>
+        <div class="protect-groups" style="display:none;">
+          <div class="protect-hint">Chagua groups zitakazowasha ulinzi huu</div>
+          <div class="group-list" data-list>
+            <div class="group-row" style="justify-content:center;color:var(--muted);">Inapakia groups...</div>
+          </div>
+          <div class="group-list-actions">
+            <span data-action="all">☑️ Chagua Zote</span>
+            <span data-action="none">⬜ Ondoa Zote</span>
+          </div>
+          <div class="selected-count" data-count>Umechagua groups: 0</div>
+        </div>
+      </div>
+
+      <div class="protect-block" data-feature="antiLink">
+        <div class="toggle-row">
+          <span class="toggle-label">🔗 Anti Link</span>
+          <label class="switch"><input type="checkbox" class="protectToggle"><span class="slider"></span></label>
+        </div>
+        <div class="protect-groups" style="display:none;">
+          <div class="protect-hint">Chagua groups zitakazowasha ulinzi huu</div>
+          <div class="group-list" data-list>
+            <div class="group-row" style="justify-content:center;color:var(--muted);">Inapakia groups...</div>
+          </div>
+          <div class="group-list-actions">
+            <span data-action="all">☑️ Chagua Zote</span>
+            <span data-action="none">⬜ Ondoa Zote</span>
+          </div>
+          <div class="selected-count" data-count>Umechagua groups: 0</div>
+        </div>
+      </div>
+
+      <button id="protectSaveBtn">💾 Hifadhi Ulinzi</button>
+      <div class="msg" id="protectMsgBox"></div>
     </div>
   </div>
 
@@ -810,6 +929,170 @@
   setClearBtn.addEventListener('click', () => saveSettings('', ''));
 
   /* =========================================================
+     SECTION 4b — Automation toggles (auto view status, n.k.)
+     ========================================================= */
+  const autoToggleIds = ['autoViewStatus', 'autoReactStatus', 'autoTyping', 'autoRecording', 'autoReactMessages'];
+  const autoMsgBox = document.getElementById('autoMsgBox');
+
+  async function loadAutomation() {
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings');
+      const data = await res.json();
+      if (!data.ok) return;
+      const auto = data.automation || {};
+      autoToggleIds.forEach(id => {
+        const el = document.getElementById('tg_' + id);
+        if (el) el.checked = !!auto[id];
+      });
+    } catch (e) {
+      // Silent — toggles just stay off on failure.
+    }
+  }
+
+  async function saveAutomation() {
+    autoMsgBox.className = 'msg';
+    autoMsgBox.style.display = 'none';
+
+    const payload = {};
+    autoToggleIds.forEach(id => {
+      const el = document.getElementById('tg_' + id);
+      if (el) payload[id] = el.checked;
+    });
+
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings/automation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      autoMsgBox.className = data.ok ? 'msg success' : 'msg error';
+      autoMsgBox.textContent = data.ok ? '✅ Imehifadhiwa.' : '❌ ' + (data.error || 'Hitilafu imetokea.');
+    } catch (e) {
+      autoMsgBox.className = 'msg error';
+      autoMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+    }
+  }
+
+  autoToggleIds.forEach(id => {
+    const el = document.getElementById('tg_' + id);
+    if (el) el.addEventListener('change', saveAutomation);
+  });
+
+  /* =========================================================
+     SECTION 4c — Group-wise protection (antiGroupMention, antiPromo, antiLink)
+     ========================================================= */
+  const protectFeatures = ['antiGroupMention', 'antiPromo', 'antiLink'];
+  const protectState = {};
+  protectFeatures.forEach(f => { protectState[f] = { enabled: false, groupIds: new Set() }; });
+
+  function renderProtectGroups(feature) {
+    const block = document.querySelector('.protect-block[data-feature="' + feature + '"]');
+    const listEl = block.querySelector('[data-list]');
+    if (!allGroups.length) {
+      listEl.innerHTML = '<div class="group-row" style="justify-content:center;color:var(--muted);">Hakuna groups zilizopatikana</div>';
+      updateProtectCount(feature);
+      return;
+    }
+    listEl.innerHTML = allGroups.map(g => `
+      <label class="group-row">
+        <input type="checkbox" value="${g.id}" ${protectState[feature].groupIds.has(g.id) ? 'checked' : ''} />
+        <span class="g-name">${g.subject}</span>
+        <span class="g-count">${g.participants} members</span>
+      </label>
+    `).join('');
+    listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) protectState[feature].groupIds.add(cb.value);
+        else protectState[feature].groupIds.delete(cb.value);
+        updateProtectCount(feature);
+      });
+    });
+    updateProtectCount(feature);
+  }
+
+  function updateProtectCount(feature) {
+    const block = document.querySelector('.protect-block[data-feature="' + feature + '"]');
+    block.querySelector('[data-count]').textContent = 'Umechagua groups: ' + protectState[feature].groupIds.size;
+  }
+
+  document.querySelectorAll('.protect-block').forEach(block => {
+    const feature = block.dataset.feature;
+    const toggleInput = block.querySelector('.protectToggle');
+    const groupsWrap = block.querySelector('.protect-groups');
+
+    toggleInput.addEventListener('change', () => {
+      protectState[feature].enabled = toggleInput.checked;
+      groupsWrap.style.display = toggleInput.checked ? 'block' : 'none';
+      if (toggleInput.checked) renderProtectGroups(feature);
+    });
+
+    block.querySelector('[data-action="all"]').addEventListener('click', () => {
+      allGroups.forEach(g => protectState[feature].groupIds.add(g.id));
+      renderProtectGroups(feature);
+    });
+    block.querySelector('[data-action="none"]').addEventListener('click', () => {
+      protectState[feature].groupIds.clear();
+      renderProtectGroups(feature);
+    });
+  });
+
+  async function loadProtection() {
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings');
+      const data = await res.json();
+      if (!data.ok) return;
+      const protection = data.protection || {};
+      protectFeatures.forEach(feature => {
+        const cfg = protection[feature] || {};
+        protectState[feature].enabled = !!cfg.enabled;
+        protectState[feature].groupIds = new Set(cfg.groupIds || []);
+        const block = document.querySelector('.protect-block[data-feature="' + feature + '"]');
+        block.querySelector('.protectToggle').checked = protectState[feature].enabled;
+        block.querySelector('.protect-groups').style.display = protectState[feature].enabled ? 'block' : 'none';
+        if (protectState[feature].enabled) renderProtectGroups(feature);
+      });
+    } catch (e) {
+      // Silent — protection blocks stay off/empty on failure.
+    }
+  }
+
+  const protectSaveBtn = document.getElementById('protectSaveBtn');
+  const protectMsgBox = document.getElementById('protectMsgBox');
+
+  protectSaveBtn.addEventListener('click', async () => {
+    protectMsgBox.className = 'msg';
+    protectMsgBox.style.display = 'none';
+    protectSaveBtn.disabled = true;
+    protectSaveBtn.textContent = 'Inahifadhi...';
+
+    const payload = {
+      features: protectFeatures.map(feature => ({
+        feature,
+        enabled: protectState[feature].enabled,
+        groupIds: Array.from(protectState[feature].groupIds),
+      })),
+    };
+
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings/protection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      protectMsgBox.className = data.ok ? 'msg success' : 'msg error';
+      protectMsgBox.textContent = data.ok ? '✅ Ulinzi umehifadhiwa.' : '❌ ' + (data.error || 'Hitilafu imetokea.');
+    } catch (e) {
+      protectMsgBox.className = 'msg error';
+      protectMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+    } finally {
+      protectSaveBtn.disabled = false;
+      protectSaveBtn.textContent = '💾 Hifadhi Ulinzi';
+    }
+  });
+
+  /* =========================================================
      SECTION 5 — Billing / Malipo
      ========================================================= */
   const billingStatusText = document.getElementById('billingStatusText');
@@ -887,9 +1170,14 @@
     }
   }
 
-  if (token) loadGroups();
-  if (token) loadSettings();
-  if (token) loadBilling();
+  if (token) {
+    loadGroups().then(() => {
+      loadProtection();
+    });
+    loadSettings();
+    loadAutomation();
+    loadBilling();
+  }
 </script>
 </body>
 </html>
