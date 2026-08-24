@@ -95,8 +95,16 @@ async function getAuthToken() {
     console.error('[clickpesa] auth imekataliwa:', res.status, JSON.stringify(data));
     throw new Error(`ClickPesa auth imeshindwa (${res.status}): ${data.message || JSON.stringify(data)}`);
   }
-  const token = data.token || data.accessToken || (data.data && data.data.token);
+  let token = data.token || data.accessToken || (data.data && data.data.token);
   if (!token) throw new Error('ClickPesa haikurudisha token — angalia CLICKPESA_CLIENT_ID / CLICKPESA_API_KEY.');
+
+  // ClickPesa mara nyingine hurudisha token ikiwa na "Bearer " tayari mbele yake
+  // (mf. "Bearer eyJhbGci..."). Tunaiondoa hapa ili tusiongeze "Bearer " mara
+  // mbili tunapotengeneza header ya Authorization chini — hii ndiyo iliyokuwa
+  // ikisababisha 401 kwenye hatua ya malipo hata token ikiwa sahihi.
+  if (token.startsWith('Bearer ')) {
+    token = token.slice('Bearer '.length);
+  }
 
   cachedToken = token;
   // Refresh well before typical short-lived-JWT expiry.
