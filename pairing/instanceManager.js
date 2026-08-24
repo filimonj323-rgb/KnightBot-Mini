@@ -556,7 +556,13 @@ async function postGroupStatusForToken(token, { groupIds, text, caption, imageBa
   let failed = 0;
   for (const gid of targets) {
     try {
-      await inst.sock.sendMessage(gid, payload);
+      // IMPORTANT: pass a FRESH copy of the payload to every send. Baileys
+      // mutates the content object while building the message (uploads
+      // media, rewrites keys, and strips the groupStatus flag once it's
+      // been consumed) — reusing the same object reference across multiple
+      // sendMessage() calls meant only the first group got a real status;
+      // every group after that received it as a normal message instead.
+      await inst.sock.sendMessage(gid, { ...payload });
       success++;
       if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
     } catch (e) {
@@ -609,7 +615,10 @@ async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64
   let failed = 0;
   for (const gid of targets) {
     try {
-      await inst.sock.sendMessage(gid, payload);
+      // Same reasoning as postGroupStatusForToken() above: always send a
+      // fresh copy so Baileys' internal mutation of one send doesn't affect
+      // the next group's message.
+      await inst.sock.sendMessage(gid, { ...payload });
       success++;
       if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
     } catch (e) {
