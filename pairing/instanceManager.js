@@ -510,27 +510,16 @@ async function listGroups(token) {
 }
 
 /**
- * Posts a REAL WhatsApp status update (text, or image/video/audio with
- * optional caption) — visible in the Status tab, not as a chat message.
- *
- * Earlier versions of this used the @itsliaaa/baileys `groupStatus:true`
- * flag (same mechanism as commands/admin/groupstatus.js) which relays a
- * groupStatusMessageV2 INTO the group chat itself — in practice this shows
- * up for members as an ordinary chat bubble, not as a status, because
- * WhatsApp's "group status" client feature isn't available to everyone.
- * This posts to the customer's own personal status (status@broadcast, the
- * same mechanism every WhatsApp status uses) instead, restricted via
- * statusJidList to just the participants of the selected group(s) — a
- * real status post, reliably visible to anyone in that list who has this
- * number saved.
+ * Posts a group status (text, or image/video with optional caption) from
+ * the dashboard, using the same groupStatus:true mechanism the WhatsApp
+ * commands (commands/admin/groupstatus.js, commands/owner/groupmanager.js)
+ * already use.
  */
-async function postGroupStatusForToken(token, { groupIds, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
+async function postGroupStatusForToken(token, { groupId, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
   const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
-  if (!Array.isArray(groupIds) || groupIds.length === 0) {
-    throw new Error('Chagua angalau group moja.');
-  }
+  if (!groupId) throw new Error('Chagua group ya kutuma status.');
 
   let payload;
   if (imageBase64 && audioBase64) {
@@ -553,36 +542,25 @@ async function postGroupStatusForToken(token, { groupIds, text, caption, imageBa
     throw new Error('Weka maandishi, au chagua picha/video/wimbo.');
   }
 
-  // Kusanya washiriki wa groups zilizochaguliwa — hawa ndio walengwa
-  // (statusJidList) wa status hii. WhatsApp bado inahitaji mtu awe na
-  // namba hii kwenye anwani zake ili aone status yoyote — statusJidList
-  // inabana zaidi orodha kwa hawa wanaoshiriki groups ulizochagua, badala
-  // ya kuonekana kwa anwani zako zote.
-  const allGroups = await inst.sock.groupFetchAllParticipating();
-  const targetGroupIds = groupIds.includes('all') ? Object.keys(allGroups) : groupIds;
+  payload.groupStatus = true;
 
-  const participantSet = new Set();
-  let groupsUsed = 0;
-  const selfNumber = inst.sock.user.id.split(':')[0].split('@')[0];
-  for (const gid of targetGroupIds) {
-    const meta = allGroups[gid];
-    if (!meta) continue;
-    groupsUsed++;
-    for (const p of meta.participants) {
-      if (p.id && p.id.split('@')[0] !== selfNumber) participantSet.add(p.id);
+  const targets = groupId === 'all'
+    ? Object.keys(await inst.sock.groupFetchAllParticipating())
+    : [groupId];
+
+  let success = 0;
+  let failed = 0;
+  for (const gid of targets) {
+    try {
+      await inst.sock.sendMessage(gid, payload);
+      success++;
+      if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
+    } catch (e) {
+      failed++;
     }
   }
 
-  if (!participantSet.size) {
-    throw new Error('Groups ulizochagua hazina washiriki wa kutuma status kwao.');
-  }
-
-  const statusJidList = Array.from(participantSet);
-  statusJidList.push(inst.sock.user.id); // baadhi ya matoleo ya Baileys yanahitaji hii iwepo
-
-  await inst.sock.sendMessage('status@broadcast', payload, { statusJidList });
-
-  return { success: 1, failed: 0, total: 1, participants: participantSet.size, groups: groupsUsed };
+  return { success, failed, total: targets.length };
 }
 
 /**
