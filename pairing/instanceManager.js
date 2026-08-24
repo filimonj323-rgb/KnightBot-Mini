@@ -1393,6 +1393,111 @@ async function adminResetUserSession(rawPhoneNumber) {
 }
 
 /**
+ * Admin: invite link ya GROUP MOJA ya instance ya mteja fulani. Inaitwa moja
+ * moja (per group, kwenye kitufe "Pata Link" cha kila group) badala ya
+ * kuchukua links za groups zote kwa pamoja — kuepuka kupiga WhatsApp maombi
+ * mengi kwa wakati mmoja (rate limit), hasa kwa bot yenye groups nyingi.
+ */
+async function adminGetGroupInviteLink(rawPhoneNumber, groupId) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const inst = instances.get(phoneNumber);
+  if (!inst || inst.status !== 'connected' || !inst.sock) {
+    throw new Error('Bot ya namba hii haipo "live" kwa sasa.');
+  }
+  if (!groupId) throw new Error('groupId haipo.');
+
+  try {
+    const code = await inst.sock.groupInviteCode(groupId);
+    return { groupId, link: `https://chat.whatsapp.com/${code}` };
+  } catch (e) {
+    throw new Error('Imeshindwa kupata link (huenda bot si admin kwenye group hii): ' + e.message);
+  }
+}
+
+/**
+ * Admin: tafuta NAMBA yoyote ya WhatsApp (targetRaw) KATIKA GROUPS ZA BOT
+ * ZOTE zinazoendesha (si bot moja tu) — kwa sababu namba fulani inaweza
+ * kuwa kwenye group ya bot A wakati unaangalia bot B. Inapekua kila
+ * instance iliyo "live", na kwa kila group inayopatikana yenye namba hiyo,
+ * inajaribu kupata invite link papo hapo (isipokuwa bot si admin humo, ambapo
+ * inarudisha ujumbe wa sababu badala ya link). Jina na picha ya profile
+ * hutafutwa kwa kutumia instance ya kwanza inayofanikiwa (kila account ina
+ * contact store/faragha yake tofauti).
+ */
+async function adminLookupNumberAcrossAllInstances(targetRaw) {
+  const targetNumber = normalizePhoneNumber(targetRaw);
+  if (!targetNumber || targetNumber.length < 9) throw new Error('Namba si sahihi — weka namba kamili yenye country code.');
+
+  const live = Array.from(instances.values()).filter(inst => inst.status === 'connected' && inst.sock);
+  if (!live.length) throw new Error('Hakuna bot yoyote iliyo "live" kwa sasa.');
+
+  let jid = `${targetNumber}@s.whatsapp.net`;
+  let existsOnWhatsApp = null; // null = haikuthibitika kwa uhakika na instance yoyote
+  for (const inst of live) {
+    try {
+      const check = await inst.sock.onWhatsApp(jid);
+      const result = Array.isArray(check) ? check[0] : check;
+      if (result && typeof result.exists === 'boolean') existsOnWhatsApp = result.exists;
+      if (result && result.jid) jid = result.jid;
+      if (existsOnWhatsApp !== null) break;
+    } catch (e) { /* jaribu instance nyingine */ }
+  }
+  if (existsOnWhatsApp === false) throw new Error('Namba hii haipo kwenye WhatsApp.');
+
+  let name = targetNumber;
+  for (const inst of live) {
+    const contact = inst.sock.store?.contacts?.[jid];
+    const candidate = (contact?.notify && contact.notify.trim() && !/^\d+$/.test(contact.notify.trim())) ? contact.notify.trim()
+      : (contact?.name && contact.name.trim() && !/^\d+$/.test(contact.name.trim())) ? contact.name.trim()
+      : null;
+    if (candidate) { name = candidate; break; }
+  }
+
+  let ppUrl = null;
+  for (const inst of live) {
+    try {
+      ppUrl = await inst.sock.profilePictureUrl(jid, 'image');
+      if (ppUrl) break;
+    } catch (e) { /* akaunti hii haioni picha yake (faragha) — jaribu nyingine */ }
+  }
+
+  // Pekua groups za KILA instance, ukitafuta jid hii kama participant, na
+  // pata link papo hapo kwa kila group inayopatikana.
+  const groups = [];
+  const scanErrors = [];
+  for (const inst of live) {
+    let chats;
+    try {
+      chats = await inst.sock.groupFetchAllParticipating();
+    } catch (e) {
+      scanErrors.push(`${inst.phoneNumber}: ${e.message}`);
+      continue;
+    }
+    const found = Object.values(chats).filter(g => (g.participants || []).some(p => (p.id || p.jid) === jid));
+    for (const g of found) {
+      let link = null;
+      let linkError = null;
+      try {
+        const code = await inst.sock.groupInviteCode(g.id);
+        link = `https://chat.whatsapp.com/${code}`;
+      } catch (e) {
+        linkError = 'Bot si admin humo, hivyo haiwezi kutoa link.';
+      }
+      groups.push({
+        id: g.id,
+        subject: g.subject,
+        participants: g.participants.length,
+        viaBot: inst.phoneNumber,
+        link,
+        linkError,
+      });
+    }
+  }
+
+  return { number: targetNumber, jid, name, ppUrl, groups, scanErrors, scannedBots: live.length };
+}
+
+/**
  * Auto-reconnects every previously-paired customer on server startup — this
  * is what makes bots come back online BY THEMSELVES after a redeploy,
  * instead of everyone needing to open the pairing page and re-scan.
@@ -1503,6 +1608,8 @@ module.exports = {
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
+  adminGetGroupInviteLink,
+  adminLookupNumberAcrossAllInstances,
   restoreAllInstances,
   adminAdjustDays,
 };

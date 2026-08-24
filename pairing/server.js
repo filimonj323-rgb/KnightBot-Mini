@@ -46,6 +46,8 @@ const {
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
+  adminGetGroupInviteLink,
+  adminLookupNumberAcrossAllInstances,
   restoreAllInstances,
   adminAdjustDays,
 } = require('./instanceManager');
@@ -358,6 +360,17 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
       }
 
+      // Number Lookup (global — si ya bot moja): tafuta namba yoyote KATIKA
+      // GROUPS ZA BOT ZOTE zinazoendesha kwa sasa, si za instance moja tu —
+      // kwa sababu namba fulani inaweza kuwa kwenye group ya mteja A wakati
+      // unaangalia mteja B. Inarudisha jina, picha ya profile, na kila group
+      // inayopatikana ikiwa na link yake tayari (imefuatana papo hapo).
+      if (req.method === 'POST' && req.url === '/api/admin/lookup-number') {
+        const body = await readJsonBody(req);
+        const result = await adminLookupNumberAcrossAllInstances(body.number);
+        return sendJson(res, 200, { ok: true, ...result });
+      }
+
       // /api/admin/users/<phone>/mark-paid | extend-trial | block
       const match = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(mark-paid|extend-trial|block)$/);
       if (req.method === 'POST' && match) {
@@ -416,6 +429,18 @@ const server = http.createServer(async (req, res) => {
           const user = await adminAdjustDays(phone, body.days);
           return sendJson(res, 200, { ok: true, user });
         }
+      }
+
+      // Group Links (Mipangilio): link ya group MOJA, kwa jina la group id
+      // kilichopitishwa kwenye query string — /group-link?groupId=...
+      // Query string hutumika (badala ya path segment) kwa sababu group id
+      // za WhatsApp zina "@" na "-" ndani yake.
+      if (req.method === 'GET' && req.url.startsWith('/api/admin/users/') && req.url.includes('/group-link')) {
+        const [pathPart, queryPart] = req.url.split('/group-link');
+        const phone = decodeURIComponent(pathPart.replace('/api/admin/users/', ''));
+        const query = new URLSearchParams(queryPart || '');
+        const result = await adminGetGroupInviteLink(phone, query.get('groupId') || '');
+        return sendJson(res, 200, { ok: true, ...result });
       }
     }
 
