@@ -92,13 +92,20 @@ const PROTECTION_FEATURES = {
 async function getInstanceSettings(phoneNumber) {
   const res = await db.query('SELECT prefix, botName, automation FROM settings WHERE phoneNumber = ?', [phoneNumber]);
   const row = res.rows[0] || {};
-  const out = {};
+  // autoForwardMessages defaults to ON (matches config.js and the bot's
+  // existing always-on behaviour) — UNLIKE the AUTOMATION_KEYS below, which
+  // all default OFF. A customer's .autoforward rules (set via WhatsApp,
+  // see commands/owner/autoforward.js) already work without touching the
+  // dashboard; this toggle is purely a quick kill-switch, so "never
+  // touched it" must still mean "on", not "off".
+  const out = { autoForwardMessages: true };
   if (row.prefix) out.prefix = row.prefix;
   if (row.botName) out.botName = row.botName;
   if (row.automation) {
     try {
       const parsed = JSON.parse(row.automation);
       AUTOMATION_KEYS.forEach((k) => { if (parsed[k]) out[k] = true; });
+      if (parsed.autoForwardMessages === false) out.autoForwardMessages = false;
     } catch (e) {
       // Corrupt/empty JSON — treat as no automation overrides set.
     }
@@ -511,6 +518,24 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     handler.handleMessage(sock, msg).catch(err => {
       console.error(`[pairing:${phoneNumber}] handleMessage error:`, err.message);
     });
+
+    // Antilink & Antipromo — handler.handleMessage() ABOVE already covers
+    // Auto-Forward and Antigroupmention internally (see handler.js), but
+    // NOT these two: the shared/main bot (index.js) triggers them itself in
+    // a separate background step after handleMessage(), and a paired
+    // customer's instance never had the equivalent call — meaning Antilink
+    // and Antipromo have been silently doing NOTHING for every dashboard
+    // customer even when switched ON (Settings > Ulinzi), no matter what
+    // groupmanager.js / database.js had stored. Mirrors index.js's own
+    // pattern (getGroupMetadata + handleAntilink + handleAntipromo) so
+    // paired customers finally get the same protection the main bot has.
+    if (msg.key.remoteJid?.endsWith('@g.us')) {
+      handler.getGroupMetadata(sock, msg.key.remoteJid).then(async (groupMetadata) => {
+        if (!groupMetadata) return;
+        await handler.handleAntilink(sock, msg, groupMetadata);
+        await handler.handleAntipromo(sock, msg, groupMetadata);
+      }).catch(() => {});
+    }
   });
 
   // Only ever request a pairing code on the FIRST connection attempt, never
@@ -785,6 +810,7 @@ async function getSettingsForToken(token) {
 
   const automation = {};
   AUTOMATION_KEYS.forEach((k) => { automation[k] = !!custom[k]; });
+  automation.autoForwardMessages = custom.autoForwardMessages !== false; // default true
 
   return {
     prefix: custom.prefix || '',
@@ -848,6 +874,10 @@ async function updateAutomationForToken(token, payload) {
 
   const automation = {};
   AUTOMATION_KEYS.forEach((k) => { automation[k] = !!(payload || {})[k]; });
+  // Default true (unlike the AUTOMATION_KEYS above) — only an explicit
+  // `false` from the dashboard checkbox turns it off; omitting the field
+  // entirely must not silently disable a customer's forwarding rules.
+  automation.autoForwardMessages = (payload || {}).autoForwardMessages !== false;
 
   const current = await getInstanceSettings(phoneNumber); // keeps prefix/botName intact
   await db.query(
