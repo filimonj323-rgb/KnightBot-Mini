@@ -559,14 +559,26 @@
   const token = params.get('token');
 
   // ---------- Top-level section switching ----------
+  function openSection(name) {
+    const btn = document.querySelector('.section-tab[data-section="' + name + '"]');
+    const pane = document.getElementById('section-' + name);
+    if (!btn || !pane) return false;
+    document.querySelectorAll('.section-tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+    btn.classList.add('active');
+    pane.classList.add('active');
+    return true;
+  }
+
   document.querySelectorAll('.section-tab').forEach(t => {
-    t.addEventListener('click', () => {
-      document.querySelectorAll('.section-tab').forEach(x => x.classList.remove('active'));
-      document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
-      t.classList.add('active');
-      document.getElementById('section-' + t.dataset.section).classList.add('active');
-    });
+    t.addEventListener('click', () => openSection(t.dataset.section));
   });
+
+  // Linki ya malipo kutoka WhatsApp inaongeza "&section=billing" ili
+  // dashboard ifunguke moja kwa moja kwenye tab ya "Malipo" (badala ya
+  // mteja kulazimika kuibofya mwenyewe).
+  const initialSection = params.get('section');
+  if (initialSection) openSection(initialSection);
 
   // ---------- Settings sub-tabs (Msingi / Otomatiki / Ulinzi) ----------
   document.querySelectorAll('.settings-nav-item').forEach(t => {
