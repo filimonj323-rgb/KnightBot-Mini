@@ -69,7 +69,16 @@ let cachedTokenExpiresAt = 0;
 
 async function getAuthToken() {
   assertConfigured();
-  if (cachedToken && Date.now() < cachedTokenExpiresAt) return cachedToken;
+  if (cachedToken && Date.now() < cachedTokenExpiresAt) {
+    console.log(
+      `[clickpesa][debug] tumia token iliyohifadhiwa (cached), itaisha muda baada ya ${Math.round((cachedTokenExpiresAt - Date.now()) / 1000)}s`
+    );
+    return cachedToken;
+  }
+
+  console.log(
+    `[clickpesa][debug] naomba token mpya kutoka ${BASE_URL}/third-parties/generate-token | client-id: ${CLIENT_ID.slice(0, 6)}... | api-key: ${API_KEY.slice(0, 6)}...`
+  );
 
   const res = await fetch(`${BASE_URL}/third-parties/generate-token`, {
     method: 'POST',
@@ -80,6 +89,8 @@ async function getAuthToken() {
   });
 
   const data = await res.json().catch(() => ({}));
+  console.log(`[clickpesa][debug] generate-token jibu: status=${res.status} body=${JSON.stringify(data)}`);
+
   if (!res.ok) {
     console.error('[clickpesa] auth imekataliwa:', res.status, JSON.stringify(data));
     throw new Error(`ClickPesa auth imeshindwa (${res.status}): ${data.message || JSON.stringify(data)}`);
@@ -90,6 +101,9 @@ async function getAuthToken() {
   cachedToken = token;
   // Refresh well before typical short-lived-JWT expiry.
   cachedTokenExpiresAt = Date.now() + 4 * 60 * 1000;
+  console.log(
+    `[clickpesa][debug] token mpya imepatikana (urefu=${token.length} chars), itatumika hadi ${new Date(cachedTokenExpiresAt).toISOString()}`
+  );
   return cachedToken;
 }
 
@@ -100,6 +114,9 @@ async function getAuthToken() {
  */
 async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
   const token = await getAuthToken();
+  console.log(
+    `[clickpesa][debug] natumia token (urefu=${token ? token.length : 0} chars) kutuma ombi la malipo | orderReference=${orderReference}`
+  );
 
   const payload = {
     amount: String(amount),
@@ -109,7 +126,10 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
   };
   payload.checksum = createChecksum(payload);
 
-  const res = await fetch(`${BASE_URL}/third-parties/payments/initiate-ussd-push-request`, {
+  const url = `${BASE_URL}/third-parties/payments/initiate-ussd-push-request`;
+  console.log(`[clickpesa][debug] POST ${url} | payload=${JSON.stringify({ ...payload, checksum: payload.checksum.slice(0, 8) + '...' })}`);
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -119,6 +139,8 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
   });
 
   const data = await res.json().catch(() => ({}));
+  console.log(`[clickpesa][debug] initiate-ussd-push jibu: status=${res.status} headers.www-authenticate=${res.headers.get('www-authenticate') || 'N/A'} body=${JSON.stringify(data)}`);
+
   if (!res.ok) {
     console.error('[clickpesa] ombi limekataliwa:', res.status, JSON.stringify(data));
     const err = new Error(data.message || (data.error && data.error.message) || `ClickPesa imekataa ombi la malipo (${res.status}).`);
