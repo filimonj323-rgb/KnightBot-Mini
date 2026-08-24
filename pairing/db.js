@@ -105,6 +105,17 @@ async function initSchema() {
     // Column already exists — expected on every run after the first.
   }
 
+  // Migration: welcome-message cooldown + cached short links, added when the
+  // WhatsApp "umefanikiwa kuunganisha" message became session-aware. Same
+  // swallow-if-exists pattern as the `automation` migration above.
+  for (const col of ['welcomeSentAt INTEGER', 'shortDashUrl TEXT', 'shortPayUrl TEXT']) {
+    try {
+      await client.execute(`ALTER TABLE tokens ADD COLUMN ${col}`);
+    } catch (e) {
+      // Column already exists — expected on every run after the first.
+    }
+  }
+
   schemaReady = true;
   console.log('[db] Turso schema iko tayari.');
 }

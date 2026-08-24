@@ -13,6 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const axios = require('axios');
 const mediaDownloader = require('./mediaDownloader');
 const userStore = require('./userStore');
 const cfg = require('./pairingConfig');
@@ -114,6 +115,54 @@ function dashboardUrl(token) {
   return `${PUBLIC_BASE_URL}/dashboard.html?token=${token}`;
 }
 
+// Linki ya malipo — dashboard ile ile lakini na "&section=billing" ili
+// mteja akiigusa aende MOJA KWA MOJA kwenye tab ya "💳 Malipo" (package
+// zote), badala ya kuanzia kwenye Status na kutafuta mwenyewe.
+function paymentUrl(token) {
+  return `${dashboardUrl(token)}&section=billing`;
+}
+
+/**
+ * Kufupisha linki (TinyURL, hauhitaji API key) kwa ajili ya ujumbe wa
+ * WhatsApp uonekane safi zaidi. Matokeo yanahifadhiwa kwenye Turso
+ * (tokens.shortDashUrl / shortPayUrl) ili tusiombe TinyURL kila mara —
+ * mara moja tu kwa kila token. Ikishindwa kwa sababu yoyote (mtandao,
+ * TinyURL chini, n.k.) tunarudi kwenye linki ndefu badala ya kuvunja
+ * ujumbe — kufupisha ni "bonus", si lazima.
+ */
+async function shortenUrl(longUrl) {
+  try {
+    const res = await axios.get('https://tinyurl.com/api-create.php', {
+      params: { url: longUrl },
+      timeout: 5000,
+    });
+    const short = String(res.data || '').trim();
+    return short.startsWith('http') ? short : longUrl;
+  } catch (e) {
+    return longUrl;
+  }
+}
+
+/**
+ * Inarudisha { dash, pay } za token husika — zikiwa fupi. Kwa token
+ * mpya inafupisha na kuhifadhi kwenye DB; kwa token iliyokwishafupishwa
+ * awali inasoma kutoka DB moja kwa moja (hakuna ombi jipya kwa TinyURL).
+ */
+async function getShortLinks(token) {
+  const res = await db.query('SELECT shortDashUrl, shortPayUrl FROM tokens WHERE token = ?', [token]);
+  const row = res.rows[0] || {};
+  if (row.shortDashUrl && row.shortPayUrl) {
+    return { dash: row.shortDashUrl, pay: row.shortPayUrl };
+  }
+
+  const longDash = dashboardUrl(token);
+  const longPay = paymentUrl(token);
+  const [dash, pay] = await Promise.all([shortenUrl(longDash), shortenUrl(longPay)]);
+
+  await db.query('UPDATE tokens SET shortDashUrl = ?, shortPayUrl = ? WHERE token = ?', [dash, pay, token]);
+  return { dash, pay };
+}
+
 /**
  * Merges a still image + an audio file into ONE mp4 (image as the frame for
  * the whole clip, audio as the soundtrack, trimmed to the audio's length) —
@@ -162,26 +211,54 @@ async function combineImageAudioToVideo(imageBuffer, audioBuffer) {
   }
 }
 
-function successMessageText(token) {
+async function successMessageText(token) {
+  const { dash, pay } = await getShortLinks(token);
   return (
-    '🎉 *Umefanikiwa kuunganisha Bot!*\n\n' +
-    'Bot yako sasa iko tayari kutumika na commands zote.\n\n' +
-    '📊 Link yako binafsi ya kudhibiti bot (kutuma group status, n.k.):\n' +
-    dashboardUrl(token) + '\n\n' +
-    '💡 Hifadhi (bookmark) link hii — ni yako binafsi, usiishiriki na wengine.\n' +
+    '┏━━━━━━━━━━━━━━━━━━┓\n' +
+    '   ✅  *BOT IMEUNGANISHWA*\n' +
+    '┗━━━━━━━━━━━━━━━━━━┛\n\n' +
+    'Karibu! Bot yako sasa iko *live* na commands zote tayari kutumika.\n\n' +
+    '📊 *1. Dashibodi Yako* _(dhibiti bot: status, groups, settings...)_\n' +
+    dash + '\n\n' +
+    '💳 *2. Package za Malipo* _(ongeza siku za matumizi)_\n' +
+    pay + '\n\n' +
+    '━━━━━━━━━━━━━━━━━━\n' +
+    '💡 Hifadhi (bookmark) link ya dashibodi — ni *yako binafsi*, usiishiriki na wengine.\n' +
     'Ukiisahau, rudi kwenye website ya pairing na tumia "Umesahau link?" kwa namba yako hii hii.'
   );
 }
 
+// Ujumbe wa "Bot Imeunganishwa" usimtumie mteja kila baada ya kuungana
+// upya (reconnect/redeploy) — mara moja tu kwa kipindi hiki cha saa
+// (session), hata kama mchakato uka-restart. Muda umewekwa Turso
+// (tokens.welcomeSentAt), si kwenye kumbukumbu ya process (in-memory),
+// ndiyo maana unabaki sahihi hata baada ya Railway kuanzisha upya.
+const WELCOME_RESEND_HOURS = 24;
+
+async function shouldSendWelcome(token) {
+  const res = await db.query('SELECT welcomeSentAt FROM tokens WHERE token = ?', [token]);
+  const sentAt = res.rows[0] && res.rows[0].welcomeSentAt;
+  if (!sentAt) return true;
+  return (Date.now() - sentAt) >= WELCOME_RESEND_HOURS * 60 * 60 * 1000;
+}
+
+async function markWelcomeSent(token) {
+  await db.query('UPDATE tokens SET welcomeSentAt = ? WHERE token = ?', [Date.now(), token]);
+}
+
 /**
- * Sends the customer their dashboard link over WhatsApp (to their own
- * inbox, i.e. "Message Yourself"), with a success message. Called right
- * after a successful connection, and also from resendDashboardLink().
+ * Sends the customer their dashboard + payment links over WhatsApp (to
+ * their own inbox, i.e. "Message Yourself"), with a success message.
+ * Called right after a successful connection (subject to the 24h
+ * cooldown above), and also from resendDashboardLink() (explicit
+ * request from the customer — always sends, and also resets the
+ * cooldown so an automatic reconnect right after doesn't double-send).
  */
 async function sendDashboardLinkMessage(sock, phoneNumber, token) {
   try {
     const selfJid = `${phoneNumber}@s.whatsapp.net`;
-    await sock.sendMessage(selfJid, { text: successMessageText(token) });
+    await sock.sendMessage(selfJid, { text: await successMessageText(token) });
+    await markWelcomeSent(token);
   } catch (e) {
     console.error(`[pairing:${phoneNumber}] imeshindwa kutuma dashboard link:`, e.message);
   }
@@ -284,9 +361,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       record.status = 'connected';
       record.pairingCode = null;
       record.reconnectAttempts = 0;
-      const isFirstConnect = !record.token;
       record.token = await getOrCreateToken(phoneNumber);
-      if (isFirstConnect) {
+      if (await shouldSendWelcome(record.token)) {
         sendDashboardLinkMessage(sock, phoneNumber, record.token);
       }
 
