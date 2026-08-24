@@ -75,7 +75,8 @@ async function initSchema() {
     `CREATE TABLE IF NOT EXISTS settings (
       phoneNumber TEXT PRIMARY KEY,
       prefix      TEXT,
-      botName     TEXT
+      botName     TEXT,
+      automation  TEXT
     )`,
     `CREATE TABLE IF NOT EXISTS pending_orders (
       orderReference TEXT PRIMARY KEY,
@@ -92,6 +93,17 @@ async function initSchema() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
   ], 'write');
+
+  // Migration for a DB created before the `automation` column existed —
+  // CREATE TABLE IF NOT EXISTS above never touches an already-existing
+  // `settings` table, so old deployments need this ALTER to gain the
+  // column. Swallow the "duplicate column" error on databases that already
+  // have it (fresh DBs created from the CREATE TABLE above included).
+  try {
+    await client.execute('ALTER TABLE settings ADD COLUMN automation TEXT');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
+  }
 
   schemaReady = true;
   console.log('[db] Turso schema iko tayari.');

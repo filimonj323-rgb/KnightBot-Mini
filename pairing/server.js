@@ -26,6 +26,8 @@ const {
   resolveMediaDownloadForToken,
   getSettingsForToken,
   updateSettingsForToken,
+  updateAutomationForToken,
+  updateProtectionForToken,
   resendDashboardLink,
   getPhoneNumberByToken,
   normalizePhoneNumber,
@@ -220,11 +222,32 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Settings: save a customer's optional prefix/bot name (blank clears it).
+    // NOTE: must be checked BEFORE the /settings/automation and
+    // /settings/protection routes below would otherwise never be reached,
+    // since '/settings/automation'.endsWith('/settings') is false anyway —
+    // kept in this order for readability, not correctness.
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings', ''));
       const body = await readJsonBody(req);
       const settings = await updateSettingsForToken(token, body);
       return sendJson(res, 200, { ok: true, ...settings });
+    }
+
+    // Settings: save a customer's automation toggles (autoTyping,
+    // autoRecording, autoViewStatus, autoReactStatus, autoReactMessages).
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings/automation')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings/automation', ''));
+      const body = await readJsonBody(req);
+      const automation = await updateAutomationForToken(token, body);
+      return sendJson(res, 200, { ok: true, automation });
+    }
+
+    // Settings: save group-wise protection (antiGroupMention/antiPromo/antiLink).
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings/protection')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings/protection', ''));
+      const body = await readJsonBody(req);
+      const protection = await updateProtectionForToken(token, body.features);
+      return sendJson(res, 200, { ok: true, protection });
     }
 
     // ── Admin: full backup download (sessions + SQLite db as one .tar.gz) ──

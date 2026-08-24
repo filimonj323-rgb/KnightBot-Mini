@@ -17,6 +17,10 @@ const mediaDownloader = require('./mediaDownloader');
 const userStore = require('./userStore');
 const cfg = require('./pairingConfig');
 const db = require('./db');
+// Group-wise protection (antilink/antigroupmention/antipromo) reuses the
+// SAME JSON-file group settings store the WhatsApp commands already use
+// (commands/admin/antilink.js etc.) — one source of truth, no duplication.
+const groupDb = require('../database');
 
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
@@ -66,9 +70,39 @@ async function getPhoneNumberByToken(token) {
 // shared config.js when a customer hasn't set a custom value — that's what
 // makes both fields optional.
 // ─────────────────────────────────────────────────────────────────────────
+// Automation toggles ("Vipengele vya Kiotomatiki" kwenye dashboard) — kila
+// moja ni boolean, default false hadi mteja aiwashe mwenyewe. Zinahifadhiwa
+// kama JSON moja kwenye safu ya `automation`, kisha zinaunganishwa gorofa
+// (flat) na prefix/botName kwenye sock.instanceSettings, kwa sababu
+// handler.js inasoma effectiveConfig = { ...config, ...sock.instanceSettings }
+// — funguo hizi lazima ziwe gorofa ili zilingane na majina ya config.js
+// (autoTyping, autoRecording, autoReactStatus) au kutumiwa moja kwa moja
+// (autoViewStatus, autoReactMessages) na mantiki ya per-instance.
+const AUTOMATION_KEYS = ['autoViewStatus', 'autoReactStatus', 'autoTyping', 'autoRecording', 'autoReactMessages'];
+
+// Dashboard feature name -> jina la field kwenye database.js (groups.json),
+// lile lile linalotumiwa na commands/admin/antilink.js na antigroupmention.js.
+const PROTECTION_FEATURES = {
+  antiGroupMention: 'antigroupmention',
+  antiPromo: 'antipromo',
+  antiLink: 'antilink',
+};
+
 async function getInstanceSettings(phoneNumber) {
-  const res = await db.query('SELECT prefix, botName FROM settings WHERE phoneNumber = ?', [phoneNumber]);
-  return res.rows[0] || {};
+  const res = await db.query('SELECT prefix, botName, automation FROM settings WHERE phoneNumber = ?', [phoneNumber]);
+  const row = res.rows[0] || {};
+  const out = {};
+  if (row.prefix) out.prefix = row.prefix;
+  if (row.botName) out.botName = row.botName;
+  if (row.automation) {
+    try {
+      const parsed = JSON.parse(row.automation);
+      AUTOMATION_KEYS.forEach((k) => { if (parsed[k]) out[k] = true; });
+    } catch (e) {
+      // Corrupt/empty JSON — treat as no automation overrides set.
+    }
+  }
+  return out;
 }
 
 // Base URL used to build the dashboard link sent to customers over WhatsApp.
@@ -318,6 +352,40 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages?.[0];
     if (!msg?.message) return;
+
+    // Auto View/React Status — per-customer toggles from the dashboard
+    // (Settings > Otomatiki). Independent of the trial/billing gate below,
+    // same as autoTyping/autoRecording aren't billing-gated commands.
+    if (msg.key.remoteJid === 'status@broadcast' && !msg.key.fromMe) {
+      const auto = sock.instanceSettings || {};
+      if (auto.autoViewStatus) {
+        sock.readMessages([msg.key]).catch(() => {});
+      }
+      if (auto.autoReactStatus) {
+        const emojis = ['❤️', '🔥', '😍', '👍', '💯', '✨'];
+        const reaction = emojis[Math.floor(Math.random() * emojis.length)];
+        const posterJid = msg.key.participant || msg.key.remoteJid;
+        // Small random delay so replies don't all fire at the exact same
+        // instant a status is posted — mirrors handler.js's own status
+        // reactor behaviour.
+        setTimeout(() => {
+          sock.sendMessage('status@broadcast', {
+            react: { text: reaction, key: msg.key },
+          }, { statusJidList: [posterJid, sock.user.id] }).catch(() => {});
+        }, 3000 + Math.floor(Math.random() * 5000));
+      }
+    }
+
+    // Auto Recording indicator — per-customer toggle, mirrors index.js's
+    // implementation for the single-owner bot, but scoped to this instance
+    // via sock.instanceSettings instead of the shared config.js.
+    if (sock.instanceSettings?.autoRecording && msg.key.remoteJid && msg.key.remoteJid !== 'status@broadcast' && !msg.key.fromMe) {
+      sock.sendPresenceUpdate('recording', msg.key.remoteJid).then(() => {
+        setTimeout(() => {
+          sock.sendPresenceUpdate('paused', msg.key.remoteJid).catch(() => {});
+        }, 3000);
+      }).catch(() => {});
+    }
 
     const access = await userStore.getAccessStatus(phoneNumber);
     if (!access.allowed) return;
@@ -585,11 +653,17 @@ async function getSettingsForToken(token) {
   if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
   const defaults = require('../config');
   const custom = await getInstanceSettings(phoneNumber);
+
+  const automation = {};
+  AUTOMATION_KEYS.forEach((k) => { automation[k] = !!custom[k]; });
+
   return {
     prefix: custom.prefix || '',
     botName: custom.botName || '',
     defaultPrefix: defaults.prefix,
     defaultBotName: defaults.botName,
+    automation,
+    protection: await getProtectionForToken(token),
   };
 }
 
@@ -623,12 +697,93 @@ async function updateSettingsForToken(token, { prefix, botName }) {
   );
 
   // Live-update the running connection, if any, so the change is instant.
+  // Re-read from the DB (instead of assigning `next` directly) so this
+  // doesn't wipe out automation toggles already merged onto instanceSettings.
   const inst = instances.get(phoneNumber);
   if (inst?.sock) {
-    inst.sock.instanceSettings = next;
+    inst.sock.instanceSettings = await getInstanceSettings(phoneNumber);
   }
 
   return getSettingsForToken(token);
+}
+
+/**
+ * Dashboard "Vipengele vya Kiotomatiki" — save a customer's automation
+ * toggles (autoTyping, autoRecording, n.k). Applies to the whole instance
+ * (not one group), takes effect immediately on the live connection via
+ * sock.instanceSettings, same live-update mechanism as prefix/botName.
+ */
+async function updateAutomationForToken(token, payload) {
+  const phoneNumber = await getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+
+  const automation = {};
+  AUTOMATION_KEYS.forEach((k) => { automation[k] = !!(payload || {})[k]; });
+
+  const current = await getInstanceSettings(phoneNumber); // keeps prefix/botName intact
+  await db.query(
+    `INSERT INTO settings (phoneNumber, prefix, botName, automation) VALUES (?, ?, ?, ?)
+     ON CONFLICT(phoneNumber) DO UPDATE SET automation = excluded.automation`,
+    [phoneNumber, current.prefix || null, current.botName || null, JSON.stringify(automation)]
+  );
+
+  const inst = instances.get(phoneNumber);
+  if (inst?.sock) {
+    inst.sock.instanceSettings = await getInstanceSettings(phoneNumber);
+  }
+
+  return automation;
+}
+
+/**
+ * Dashboard "Ulinzi wa Groups" — reads which groups currently have each
+ * protection feature (antiGroupMention/antiPromo/antiLink) enabled, using
+ * the SAME per-group store the WhatsApp commands write to. A feature is
+ * reported "enabled" if at least one group has it on — the dashboard only
+ * needs the per-group list to render checkboxes correctly.
+ */
+async function getProtectionForToken(token) {
+  const result = {};
+  Object.keys(PROTECTION_FEATURES).forEach((f) => { result[f] = { enabled: false, groupIds: [] }; });
+
+  try {
+    const groups = await listGroups(token);
+    Object.keys(PROTECTION_FEATURES).forEach((feature) => {
+      const dbField = PROTECTION_FEATURES[feature];
+      const groupIds = groups
+        .filter((g) => !!groupDb.getGroupSettings(g.id)[dbField])
+        .map((g) => g.id);
+      result[feature] = { enabled: groupIds.length > 0, groupIds };
+    });
+  } catch (e) {
+    // Bot haijaunganishwa au imeshindwa kupakia groups — onesha ulinzi tupu
+    // badala ya kuvunja ukurasa mzima wa settings.
+  }
+
+  return result;
+}
+
+/**
+ * Dashboard "Ulinzi wa Groups" — save which groups have each protection
+ * feature on. Requires a live connection (needs the current groups list) —
+ * throws a clear Swahili error otherwise, same as other dashboard actions
+ * that need the bot online.
+ */
+async function updateProtectionForToken(token, features) {
+  if (!Array.isArray(features)) throw new Error('Data ya ulinzi si sahihi.');
+
+  const groups = await listGroups(token);
+  for (const entry of features) {
+    const dbField = PROTECTION_FEATURES[entry.feature];
+    if (!dbField) continue;
+    const selected = new Set(Array.isArray(entry.groupIds) ? entry.groupIds : []);
+    for (const g of groups) {
+      const shouldEnable = !!entry.enabled && selected.has(g.id);
+      groupDb.updateGroupSettings(g.id, { [dbField]: shouldEnable });
+    }
+  }
+
+  return getProtectionForToken(token);
 }
 
 /**
@@ -977,6 +1132,9 @@ module.exports = {
   resolveMediaDownloadForToken,
   getSettingsForToken,
   updateSettingsForToken,
+  updateAutomationForToken,
+  getProtectionForToken,
+  updateProtectionForToken,
   resendDashboardLink,
   adminListUsers,
   adminMarkPaid,
