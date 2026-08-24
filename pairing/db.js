@@ -116,6 +116,15 @@ async function initSchema() {
     }
   }
 
+  // Migration: "trial/muda unakaribia kuisha" — onyo LA MAPEMA (kabla ya
+  // kuisha), tofauti na expiryNotifiedAt (baada ya kuisha) na
+  // lastReminderAt (kumbusho la mara kwa mara baada ya kuisha).
+  try {
+    await client.execute('ALTER TABLE users ADD COLUMN trialWarningSentAt INTEGER');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
+  }
+
   schemaReady = true;
   console.log('[db] Turso schema iko tayari.');
 }

@@ -264,6 +264,40 @@ async function sendDashboardLinkMessage(sock, phoneNumber, token) {
   }
 }
 
+/**
+ * Ujumbe wa "muda unaisha / umeisha" — daima na link ya MALIPO pekee
+ * (fupi, inayoenda moja kwa moja "💳 Malipo"), kwa matukio matatu:
+ *   'warning'  → muda bado upo lakini unakaribia kuisha (onyo la mapema)
+ *   'expired'  → muda umekwisha sasa hivi, bot haijibu tena mpaka alipe
+ *   'reminder' → muda ulikwisha tangu awali, kumbusho la mara kwa mara
+ */
+async function buildExpiryMessage(kind, token, extra = {}) {
+  const { pay } = await getShortLinks(token);
+
+  if (kind === 'warning') {
+    return (
+      '⏳ *Muda Wako Unakaribia Kuisha*\n\n' +
+      'Bot yako itaacha kujibu ujumbe hivi karibuni ikiwa hutalipia.\n\n' +
+      '💳 Lipa mapema uendelee bila usumbufu:\n' + pay
+    );
+  }
+
+  if (kind === 'expired') {
+    return (
+      '⏰ *' + (extra.reasonText || 'Muda wako umeisha.') + '*\n\n' +
+      'Bot yako haitajibu ujumbe hadi ulipe.\n\n' +
+      '💳 Lipa hapa kuendelea kutumia:\n' + pay
+    );
+  }
+
+  // 'reminder'
+  return (
+    '⏰ *Kumbusho la Malipo*\n\n' +
+    'Bot yako haijibu ujumbe kwa sasa kwa sababu muda umeisha.\n\n' +
+    '💳 Lipa hapa kuendelea kutumia:\n' + pay
+  );
+}
+
 let baileysBridgeLoaded = false;
 let makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason;
 let handler;
@@ -371,12 +405,18 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       const access = await userStore.getAccessStatus(phoneNumber);
       if (!access.allowed && !access.user.expiryNotifiedAt) {
         const selfJid = `${phoneNumber}@s.whatsapp.net`;
-        const reasonText = access.reason === 'blocked'
-          ? 'Akaunti yako imezuiwa na msimamizi.'
-          : 'Muda wako wa majaribio (trial) umeisha.';
-        sock.sendMessage(selfJid, {
-          text: `⏰ *${reasonText}*\n\nBot yako haitajibu ujumbe hadi ulipe.\n\n💳 Lipa kupitia dashboard yako:\n${dashboardUrl(record.token)}`,
-        }).catch(() => {});
+        if (access.reason === 'blocked') {
+          sock.sendMessage(selfJid, {
+            text: '🚫 *Akaunti Yako Imezuiwa*\n\nAkaunti yako imezuiwa na msimamizi. Wasiliana naye kwa maelezo zaidi.',
+          }).catch(() => {});
+        } else {
+          const reasonText = access.reason === 'subscription_expired'
+            ? 'Muda wa malipo yako umeisha.'
+            : 'Muda wako wa majaribio (trial) umeisha.';
+          buildExpiryMessage('expired', record.token, { reasonText }).then((text) => {
+            sock.sendMessage(selfJid, { text }).catch(() => {});
+          });
+        }
         await userStore.markExpiryNotified(phoneNumber);
       }
       return;
@@ -947,30 +987,43 @@ async function getBillingForToken(token) {
 }
 
 /**
- * Daily payment-reminder scheduler. Every REMINDER_INTERVAL_HOURS, checks
- * every currently-connected instance whose trial/subscription has expired
- * (and who isn't blocked) and sends them a WhatsApp reminder with their
- * dashboard payment link — until they pay, once per interval.
- *
- * Only reaches customers whose socket is live in THIS process (i.e. no
- * redeploy since they last connected) — same limitation as the rest of
- * this in-memory instance model.
+ * Scheduler ya kila saa inayoshughulikia matukio MAWILI kwa kila instance
+ * iliyounganika:
+ *   1) Muda unakaribia kuisha (bado hajaisha) → onyo MOJA la mapema.
+ *   2) Muda tayari umekwisha → kumbusho la mara kwa mara (kila
+ *      REMINDER_INTERVAL_HOURS) mpaka alipe.
+ * Zote mbili zinatumia link ya malipo pekee (fupi, moja kwa moja
+ * "💳 Malipo"). Inafikia tu wateja ambao socket yao iko live kwenye
+ * process hii (yaani hakuna redeploy tangu waunganike mara ya mwisho) —
+ * mipaka ile ile ya model ya in-memory instances iliyopo kwenye faili hii.
  */
 function startReminderScheduler() {
   setInterval(async () => {
+    const warningHours = cfg.TRIAL_WARNING_HOURS || 24;
+
     for (const [phoneNumber, record] of instances.entries()) {
       if (record.status !== 'connected' || !record.sock || !record.token) continue;
+      const selfJid = `${phoneNumber}@s.whatsapp.net`;
+
+      // (1) Onyo la mapema — muda bado upo lakini unakaribia kuisha.
+      if (await userStore.isExpiryWarningDue(phoneNumber, warningHours)) {
+        buildExpiryMessage('warning', record.token).then((text) => {
+          record.sock.sendMessage(selfJid, { text }).catch(() => {});
+        });
+        await userStore.markExpiryWarningSent(phoneNumber);
+        continue; // asipate onyo na kumbusho kwenye mzunguko mmoja
+      }
+
+      // (2) Muda tayari umekwisha — kumbusho la mara kwa mara.
       const due = await userStore.isReminderDue(phoneNumber, cfg.REMINDER_INTERVAL_HOURS || 24);
       if (!due) continue;
 
-      const selfJid = `${phoneNumber}@s.whatsapp.net`;
-      const link = dashboardUrl(record.token);
-      record.sock.sendMessage(selfJid, {
-        text: `⏰ *Kumbusho la Malipo*\n\nBot yako haijibu ujumbe kwa sasa kwa sababu muda umeisha.\n\n💳 Lipa hapa kuendelea kutumia:\n${link}`,
-      }).catch(() => {});
+      buildExpiryMessage('reminder', record.token).then((text) => {
+        record.sock.sendMessage(selfJid, { text }).catch(() => {});
+      });
       await userStore.markReminderSent(phoneNumber);
     }
-  }, 60 * 60 * 1000); // checks every hour; REMINDER_INTERVAL_HOURS controls per-user due-time above
+  }, 60 * 60 * 1000); // checks every hour; per-user due-time controlled above
 }
 
 /**

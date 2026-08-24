@@ -23,6 +23,7 @@ function rowToUser(row) {
     blocked: !!row.blocked,
     expiryNotifiedAt: row.expiryNotifiedAt,
     lastReminderAt: row.lastReminderAt,
+    trialWarningSentAt: row.trialWarningSentAt,
   };
 }
 
@@ -65,8 +66,8 @@ async function getPaymentHistory(phoneNumber) {
 
 async function saveUser(u) {
   await db.query(
-    `UPDATE users SET trialExpiresAt=?, isPaid=?, paidUntil=?, blocked=?, expiryNotifiedAt=?, lastReminderAt=? WHERE phoneNumber=?`,
-    [u.trialExpiresAt, u.isPaid ? 1 : 0, u.paidUntil, u.blocked ? 1 : 0, u.expiryNotifiedAt, u.lastReminderAt, u.phoneNumber]
+    `UPDATE users SET trialExpiresAt=?, isPaid=?, paidUntil=?, blocked=?, expiryNotifiedAt=?, lastReminderAt=?, trialWarningSentAt=? WHERE phoneNumber=?`,
+    [u.trialExpiresAt, u.isPaid ? 1 : 0, u.paidUntil, u.blocked ? 1 : 0, u.expiryNotifiedAt, u.lastReminderAt, u.trialWarningSentAt, u.phoneNumber]
   );
 }
 
@@ -101,6 +102,7 @@ async function markPaid(phoneNumber, days, meta = {}) {
   u.isPaid = true;
   u.paidUntil = base + days * DAY_MS;
   u.expiryNotifiedAt = null;
+  u.trialWarningSentAt = null;
   await saveUser(u);
 
   await db.query(
@@ -117,6 +119,7 @@ async function extendTrial(phoneNumber, days) {
   const base = u.trialExpiresAt > now ? u.trialExpiresAt : now;
   u.trialExpiresAt = base + days * DAY_MS;
   u.expiryNotifiedAt = null;
+  u.trialWarningSentAt = null;
   await saveUser(u);
   return u;
 }
@@ -140,6 +143,7 @@ async function adjustActiveDays(phoneNumber, deltaDays) {
     u.trialExpiresAt = u.trialExpiresAt + deltaDays * DAY_MS;
   }
   u.expiryNotifiedAt = null;
+  u.trialWarningSentAt = null;
   await saveUser(u);
   return u;
 }
@@ -171,6 +175,37 @@ async function isReminderDue(phoneNumber, intervalHours) {
 async function markReminderSent(phoneNumber) {
   const u = await ensureUser(phoneNumber);
   u.lastReminderAt = Date.now();
+  await saveUser(u);
+}
+
+/**
+ * True kama akaunti BADO ina access (trial au malipo) lakini muda
+ * uliobaki ni mchache (<= warningHours) na bado hajapewa onyo hili kwa
+ * mzunguko huu wa kuisha — hutumika kutuma "muda unakaribia kuisha" MARA
+ * MOJA kabla haujaisha (tofauti na isReminderDue, ambayo ni kwa AKAUNTI
+ * ZILIZOKWISHA ISHA muda tayari).
+ */
+async function isExpiryWarningDue(phoneNumber, warningHours) {
+  const u = await ensureUser(phoneNumber);
+  if (u.blocked) return false;
+
+  const now = Date.now();
+  const expiresAt = u.isPaid ? u.paidUntil : u.trialExpiresAt;
+  if (!expiresAt) return false;
+
+  const msLeft = expiresAt - now;
+  if (msLeft <= 0) return false; // tayari imeisha — hiyo inashughulikiwa na notisi/kumbusho lingine
+  if (msLeft > warningHours * 60 * 60 * 1000) return false; // bado mapema
+
+  // Onyo moja tu kwa kila "mzunguko wa kuisha" (yaani tangu mara ya mwisho
+  // aliyeongezewa muda / kulipa) — trialWarningSentAt inafutwa na
+  // markPaid/extendTrial/adjustActiveDays, hivyo huanza upya kila mzunguko.
+  return !u.trialWarningSentAt;
+}
+
+async function markExpiryWarningSent(phoneNumber) {
+  const u = await ensureUser(phoneNumber);
+  u.trialWarningSentAt = Date.now();
   await saveUser(u);
 }
 
@@ -220,6 +255,8 @@ module.exports = {
   markExpiryNotified,
   isReminderDue,
   markReminderSent,
+  isExpiryWarningDue,
+  markExpiryWarningSent,
   getPaymentHistory,
   incrementUsage,
   getUsage,
