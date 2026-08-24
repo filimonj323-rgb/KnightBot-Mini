@@ -44,6 +44,7 @@ const {
   adminGetInstanceDetail,
   adminUpdateInstanceSettings,
   adminSendToGroups,
+  adminPostGroupStatus,
   adminResetUserSession,
   restoreAllInstances,
   adminAdjustDays,
@@ -376,7 +377,7 @@ const server = http.createServer(async (req, res) => {
       // Full-access bot control (per-customer) — status, groups, settings,
       // messaging, force session reset. All still behind the same admin
       // Authorization check above.
-      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|reset-session|adjust-days)$/);
+      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|group-status|reset-session|adjust-days)$/);
       if (phoneMatch) {
         const [, phone, action] = phoneMatch;
 
@@ -395,6 +396,13 @@ const server = http.createServer(async (req, res) => {
           // 30MB cap for base64 image/video/audio, same as the customer dashboard route.
           const body = await readJsonBody(req, 30 * 1e6);
           const result = await adminSendToGroups(phone, body);
+          return sendJson(res, 200, { ok: true, ...result });
+        }
+
+        if (action === 'group-status' && req.method === 'POST') {
+          // 30MB cap for base64 image/video/audio, same as the customer dashboard route.
+          const body = await readJsonBody(req, 30 * 1e6);
+          const result = await adminPostGroupStatus(phone, body);
           return sendJson(res, 200, { ok: true, ...result });
         }
 

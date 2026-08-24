@@ -1315,6 +1315,66 @@ async function adminSendToGroups(rawPhoneNumber, { groupIds, text, caption, imag
 }
 
 /**
+ * Admin-triggered GROUP STATUS post — same idea as adminSendToGroups(),
+ * but flags every payload with groupStatus:true (same mechanism as
+ * postGroupStatusForToken() above / commands/admin/groupstatus.js), so the
+ * admin dashboard's "Groups" tab can post a status update to one or more
+ * of a customer's groups directly, without the customer needing to do it
+ * themselves from their own dashboard.
+ */
+async function adminPostGroupStatus(rawPhoneNumber, { groupIds, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const inst = instances.get(phoneNumber);
+  if (!inst) throw new Error('Bot ya namba hii haipo "live" kwenye process hii kwa sasa (labda haijaunganishwa, au kuna redeploy tangu iunganishwe).');
+  if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
+  if (!Array.isArray(groupIds) || groupIds.length === 0) throw new Error('Chagua angalau group moja ya kutuma status.');
+
+  let payload;
+  if (imageBase64 && audioBase64) {
+    const videoBuf = await combineImageAudioToVideo(
+      Buffer.from(imageBase64, 'base64'),
+      Buffer.from(audioBase64, 'base64')
+    );
+    payload = { video: videoBuf, caption: caption || '' };
+  } else if (imageBase64) {
+    payload = { image: Buffer.from(imageBase64, 'base64'), caption: caption || '' };
+  } else if (videoBase64) {
+    payload = { video: Buffer.from(videoBase64, 'base64'), caption: caption || '' };
+  } else if (audioBase64) {
+    payload = { audio: Buffer.from(audioBase64, 'base64'), mimetype: audioMimetype || 'audio/mpeg', ptt: false };
+  } else if (text) {
+    payload = { text, backgroundColor: '#9C27B0' };
+  } else {
+    throw new Error('Weka maandishi, au chagua picha/video/wimbo.');
+  }
+
+  payload.groupStatus = true;
+
+  const targets = groupIds.includes('all')
+    ? Object.keys(await inst.sock.groupFetchAllParticipating())
+    : groupIds;
+
+  let success = 0;
+  let failed = 0;
+  for (const gid of targets) {
+    try {
+      // Fresh copy per send — Baileys mutates the content object while
+      // building the message (uploads media, strips groupStatus once
+      // consumed), so reusing one object across sends only works for the
+      // first group. Same fix as postGroupStatusForToken() above.
+      await inst.sock.sendMessage(gid, { ...payload });
+      success++;
+      if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
+    } catch (e) {
+      failed++;
+    }
+  }
+  return { success, failed, total: targets.length };
+}
+
+
+
+/**
  * Force-resets ONE customer's session (disconnects the live socket if any,
  * then deletes their pairing/sessions/<phone> folder) — the per-user
  * version of the bulk "Futa Sessions Chakavu" admin action. Customer will
@@ -1441,6 +1501,7 @@ module.exports = {
   adminGetInstanceDetail,
   adminUpdateInstanceSettings,
   adminSendToGroups,
+  adminPostGroupStatus,
   adminResetUserSession,
   restoreAllInstances,
   adminAdjustDays,
