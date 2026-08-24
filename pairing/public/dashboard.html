@@ -757,7 +757,7 @@
       if (!data.ok) {
         showMsg(msgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
       } else {
-        showMsg(msgBox, true, `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total}`);
+        showMsg(msgBox, true, `✅ Status imetumwa! Itaonekana kwa washiriki ${data.participants} wa groups ${data.groups} (waliohifadhi namba yako).`);
         textInput.value = '';
         mediaInput.value = '';
         captionInput.value = '';
