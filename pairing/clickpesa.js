@@ -166,7 +166,7 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
   // ClickPesa inataka orderReference iwe herufi/namba TU (bila '-', '_', n.k.).
   // Tunaisafisha hapa ili orderReference yoyote (hata ikiwa na dashes kutoka
   // kwa server.js) ipite salama.
-  const cleanOrderReference = String(orderReference || '').replace(/[^a-zA-Z0-9]/g, '');
+  let cleanOrderReference = String(orderReference || '').replace(/[^a-zA-Z0-9]/g, '');
   if (!cleanOrderReference) {
     throw new Error('orderReference haipo sahihi (tupu baada ya kusafisha alama).');
   }
@@ -174,6 +174,16 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
     console.log(
       `[clickpesa][debug] orderReference imesafishwa: "${orderReference}" -> "${cleanOrderReference}"`
     );
+  }
+  // ClickPesa inataka orderReference iwe herufi 20 au chini. Tunachukua herufi
+  // za MWISHO (siyo za mwanzo) kwa sababu timestamp ipo mwishoni — hivyo
+  // usiofanana (uniqueness) unabaki hata baada ya kukata.
+  if (cleanOrderReference.length > 20) {
+    const truncated = cleanOrderReference.slice(-20);
+    console.log(
+      `[clickpesa][debug] orderReference imepunguzwa (urefu ulikuwa ${cleanOrderReference.length}): "${cleanOrderReference}" -> "${truncated}"`
+    );
+    cleanOrderReference = truncated;
   }
 
   const payload = {
