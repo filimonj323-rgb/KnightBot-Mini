@@ -209,56 +209,6 @@
   .preview-info { padding: 12px 14px; }
   .preview-info .p-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
   .preview-info .p-meta { font-size: 12px; color: var(--muted); }
-
-  /* Audio toolkit (trim + fetch-from-server) */
-  .audio-toolkit {
-    display: none;
-    margin: -4px 0 14px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 14px;
-    background: var(--field);
-  }
-  .audio-toolkit.open { display: block; }
-  .audio-toolkit .at-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .audio-toolkit .at-title { font-size: 12.5px; font-weight: 600; color: var(--purple-light); }
-  .audio-toolkit .at-duration { font-size: 11.5px; color: var(--muted); }
-  .audio-toolkit .at-range-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-  .audio-toolkit select { margin-bottom: 10px; }
-  .audio-toolkit input[type="range"] { margin-bottom: 6px; accent-color: var(--purple); }
-  .at-actions { display: flex; gap: 8px; margin-top: 8px; }
-  .at-actions button { flex: 1; }
-  .at-status { font-size: 11.5px; color: var(--muted); margin-top: 6px; min-height: 14px; }
-  .at-switch { text-align: center; margin: 10px 0 4px; }
-  .at-switch a { color: var(--purple-light); font-size: 12px; text-decoration: underline; cursor: pointer; }
-
-  .server-search-box { display: none; margin-top: 10px; }
-  .server-search-box.open { display: block; }
-  .server-search-box .ss-row { display: flex; gap: 8px; margin-bottom: 10px; }
-  .server-search-box .ss-row input { margin-bottom: 0; flex: 1; }
-  .server-search-box .ss-row button { width: auto; padding: 12px 16px; }
-  .ss-result {
-    display: none;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 10px 12px;
-    background: var(--card);
-    margin-bottom: 10px;
-    font-size: 12.5px;
-  }
-  .ss-result.open { display: block; }
-  .ss-result .r-title { font-weight: 600; margin-bottom: 2px; }
-  .ss-result .r-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 8px; }
-
-  .badge-limit {
-    display: inline-block;
-    font-size: 10.5px;
-    color: var(--muted);
-    background: rgba(156,39,176,0.12);
-    padding: 3px 8px;
-    border-radius: 999px;
-    margin-left: 6px;
-  }
 </style>
 </head>
 <body>
@@ -284,7 +234,7 @@
   <div class="section active" id="section-status">
     <div class="card">
       <h1>📤 Tuma Group Status</h1>
-      <p class="sub">Chagua group, andika au ambatanisha picha/video/wimbo, kisha tuma.</p>
+      <p class="sub">Chagua group, andika au ambatanisha picha/video, kisha tuma.</p>
 
       <label for="groupSelect">Group</label>
       <select id="groupSelect">
@@ -293,37 +243,20 @@
 
       <div class="tabs">
         <div class="tab active" data-tab="text" data-group="status">📝 Text</div>
-        <div class="tab" data-tab="media" data-group="status">🖼️🎬🎵 Media</div>
-        <div class="tab" data-tab="combo" data-group="status">🖼️+🎵 Wimbo+Picha</div>
+        <div class="tab" data-tab="media" data-group="status">🖼️🎬 Picha/Video</div>
       </div>
 
       <div id="textTab">
         <label for="textInput">Maandishi</label>
-        <textarea id="textInput" placeholder="Andika status yako hapa..."></textarea>
+        <textarea id="textInput" placeholder="Andika status yako hapa..." rows="6"></textarea>
       </div>
 
       <div id="mediaTab" style="display:none;">
-        <label for="mediaInput">Chagua picha, video au wimbo</label>
-        <input type="file" id="mediaInput" accept="image/*,video/*,audio/*" />
+        <label for="mediaInput">Chagua picha au video</label>
+        <input type="file" id="mediaInput" accept="image/*,video/*" />
         <div class="file-preview" id="filePreview"></div>
-        <div id="mediaAudioToolkit" class="audio-toolkit"></div>
         <label for="captionInput">Caption (hiari)</label>
-        <textarea id="captionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
-      </div>
-
-      <div id="comboTab" style="display:none;">
-        <p class="sub" style="margin:-8px 0 14px;">Chagua picha MOJA na wimbo MOJA — vitaunganishwa kuwa status moja (video) yenye picha ikicheza na wimbo huo.</p>
-        <label for="comboImageInput">Picha</label>
-        <input type="file" id="comboImageInput" accept="image/*" />
-        <div class="file-preview" id="comboImagePreview"></div>
-
-        <label for="comboAudioInput">Wimbo / Audio</label>
-        <input type="file" id="comboAudioInput" accept="audio/*" />
-        <div class="file-preview" id="comboAudioPreview"></div>
-        <div id="comboAudioToolkit" class="audio-toolkit"></div>
-
-        <label for="comboCaptionInput">Caption (hiari)</label>
-        <textarea id="comboCaptionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
+        <textarea id="captionInput" placeholder="Maelezo mafupi (si lazima)..." rows="6"></textarea>
       </div>
 
       <button id="postBtn">Tuma Status</button>
@@ -335,7 +268,7 @@
   <div class="section" id="section-broadcast">
     <div class="card">
       <h1>📢 Tuma Ujumbe kwa Groups</h1>
-      <p class="sub">Chagua groups moja au zaidi, kisha tuma maandishi, picha, video au wimbo.</p>
+      <p class="sub">Chagua groups moja au zaidi, kisha tuma maandishi, picha au video.</p>
 
       <label>Chagua Groups</label>
       <div class="group-list" id="bGroupList">
@@ -349,21 +282,20 @@
 
       <div class="tabs">
         <div class="tab active" data-tab="text" data-group="broadcast">📝 Text</div>
-        <div class="tab" data-tab="media" data-group="broadcast">🖼️🎬🎵 Media</div>
+        <div class="tab" data-tab="media" data-group="broadcast">🖼️🎬 Picha/Video</div>
       </div>
 
       <div id="bTextTab">
         <label for="bTextInput">Maandishi</label>
-        <textarea id="bTextInput" placeholder="Andika ujumbe wako hapa..."></textarea>
+        <textarea id="bTextInput" placeholder="Andika ujumbe wako hapa..." rows="6"></textarea>
       </div>
 
       <div id="bMediaTab" style="display:none;">
-        <label for="bMediaInput">Chagua picha, video au wimbo</label>
-        <input type="file" id="bMediaInput" accept="image/*,video/*,audio/*" />
+        <label for="bMediaInput">Chagua picha au video</label>
+        <input type="file" id="bMediaInput" accept="image/*,video/*" />
         <div class="file-preview" id="bFilePreview"></div>
-        <div id="bMediaAudioToolkit" class="audio-toolkit"></div>
         <label for="bCaptionInput">Caption (hiari)</label>
-        <textarea id="bCaptionInput" placeholder="Maelezo mafupi (si lazima)..."></textarea>
+        <textarea id="bCaptionInput" placeholder="Maelezo mafupi (si lazima)..." rows="6"></textarea>
       </div>
 
       <button id="bSendBtn">Tuma kwa Groups Nilizochagua</button>
@@ -474,311 +406,18 @@
   }
 
   /* =========================================================
-     AUDIO TOOLKIT — shared by mediaTab, comboTab, broadcast media.
-     Two jobs:
-       1) Trim the chosen audio to a WhatsApp-status-safe clip length,
-          entirely client-side (Web Audio API — decode, slice, WAV-encode).
-          No upload happens until "Tumia" is pressed.
-       2) Let the customer search a song on the SERVER instead of
-          uploading one from their phone (reuses the same catalogue as
-          the Downloads tab) — needs a small backend addition, see the
-          BACKEND_NOTE below.
-     ========================================================= */
-
-  // NOTE for the backend: this calls
-  //   POST /api/dashboard/:token/audio-for-status  { input }
-  //   -> { ok, audioBase64, mimetype, title, duration }
-  // (same "input" contract as the existing /media-preview search box).
-  // Not implemented in server.js yet — share server.js /
-  // mediaDownloader.js next and it'll be wired up.
-
-  const MAX_CLIP_OPTIONS = [15, 30, 60];
-  const MAX_CLIP_SECONDS = 60; // matches WhatsApp's long-standing status cap
-
-  function fmtSec(s) {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60).toString().padStart(2, '0');
-    return `${m}:${sec}`;
-  }
-
-  async function decodeAudioSource(blob) {
-    const arrayBuffer = await blob.arrayBuffer();
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new Ctx();
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
-    return { ctx, audioBuffer };
-  }
-
-  function encodeWav(audioBuffer) {
-    const numChannels = audioBuffer.numberOfChannels;
-    const sampleRate = audioBuffer.sampleRate;
-    const byteLength = audioBuffer.length * numChannels * 2 + 44;
-    const buffer = new ArrayBuffer(byteLength);
-    const view = new DataView(buffer);
-
-    const writeStr = (offset, str) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeStr(0, 'RIFF');
-    view.setUint32(4, byteLength - 8, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * numChannels * 2, true);
-    view.setUint16(32, numChannels * 2, true);
-    view.setUint16(34, 16, true);
-    writeStr(36, 'data');
-    view.setUint32(40, byteLength - 44, true);
-
-    const channels = [];
-    for (let c = 0; c < numChannels; c++) channels.push(audioBuffer.getChannelData(c));
-
-    let offset = 44;
-    for (let i = 0; i < audioBuffer.length; i++) {
-      for (let c = 0; c < numChannels; c++) {
-        let sample = Math.max(-1, Math.min(1, channels[c][i]));
-        sample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-        view.setInt16(offset, sample, true);
-        offset += 2;
-      }
-    }
-    return new Blob([view], { type: 'audio/wav' });
-  }
-
-  async function trimAudioBlob(sourceBlob, startSec, clipSeconds) {
-    const { ctx, audioBuffer } = await decodeAudioSource(sourceBlob);
-    const sampleRate = audioBuffer.sampleRate;
-    const startSample = Math.floor(startSec * sampleRate);
-    const frameCount = Math.min(Math.floor(clipSeconds * sampleRate), audioBuffer.length - startSample);
-    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    const offlineCtx = new OfflineCtx(audioBuffer.numberOfChannels, frameCount, sampleRate);
-    const trimmed = offlineCtx.createBuffer(audioBuffer.numberOfChannels, frameCount, sampleRate);
-    for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
-      trimmed.copyToChannel(audioBuffer.getChannelData(c).subarray(startSample, startSample + frameCount), c);
-    }
-    ctx.close();
-    return encodeWav(trimmed);
-  }
-
-  /**
-   * Wires up one audio slot. fileInputEl is the <input type="file"> the
-   * customer uses to pick a song from their phone. containerEl is an empty
-   * div where the trim UI + "search from server instead" box get rendered.
-   * Returns { getFinalBlob(), getFinalMimetype(), reset() } — callers read
-   * getFinalBlob() when building the payload, instead of fileInputEl.files[0].
-   */
-  function createAudioToolkit(fileInputEl, containerEl) {
-    let originalBlob = null;
-    let originalDuration = 0;
-    let finalBlob = null;
-    let finalMimetype = 'audio/mpeg';
-
-    containerEl.innerHTML = `
-      <div class="at-row">
-        <span class="at-title">✂️ Kata Wimbo</span>
-        <span class="at-duration" data-role="duration"></span>
-      </div>
-      <div class="at-range-label">
-        <span>Anzia: <b data-role="startLabel">0:00</b></span>
-        <span>Muda: <b data-role="clipLabel">30s</b></span>
-      </div>
-      <input type="range" data-role="startRange" min="0" max="0" step="1" value="0" />
-      <select data-role="clipSelect">
-        ${MAX_CLIP_OPTIONS.map(s => `<option value="${s}" ${s === 30 ? 'selected' : ''}>${s} sekunde${s === 60 ? ' (kikomo cha WhatsApp)' : ''}</option>`).join('')}
-      </select>
-      <div class="at-actions">
-        <button type="button" class="secondary small" data-role="previewBtn">▶️ Sikiliza</button>
-        <button type="button" class="small" data-role="applyBtn">✅ Tumia Sehemu Hii</button>
-      </div>
-      <div class="at-status" data-role="status"></div>
-      <audio data-role="player" style="display:none;"></audio>
-
-      <div class="at-switch">
-        <a data-role="toggleSearch">🔍 Badala yake, tafuta wimbo kutoka server (bila kupakia kutoka simu)</a>
-      </div>
-      <div class="server-search-box" data-role="searchBox">
-        <div class="ss-row">
-          <input type="text" placeholder="Jina la wimbo, mfano: Marioo Pombe" data-role="searchInput" />
-          <button type="button" class="small" data-role="searchBtn">Tafuta</button>
-        </div>
-        <div class="ss-result" data-role="resultBox">
-          <div class="r-title" data-role="resultTitle"></div>
-          <div class="r-meta" data-role="resultMeta"></div>
-          <button type="button" class="small" data-role="useServerBtn">Tumia Wimbo Huu</button>
-        </div>
-        <div class="at-status" data-role="searchStatus"></div>
-      </div>
-    `;
-
-    const q = (role) => containerEl.querySelector(`[data-role="${role}"]`);
-    const durationLabel = q('duration');
-    const startRange = q('startRange');
-    const startLabel = q('startLabel');
-    const clipSelect = q('clipSelect');
-    const clipLabel = q('clipLabel');
-    const previewBtn = q('previewBtn');
-    const applyBtn = q('applyBtn');
-    const statusEl = q('status');
-    const player = q('player');
-    const toggleSearch = q('toggleSearch');
-    const searchBox = q('searchBox');
-    const searchInput = q('searchInput');
-    const searchBtn = q('searchBtn');
-    const resultBox = q('resultBox');
-    const resultTitle = q('resultTitle');
-    const resultMeta = q('resultMeta');
-    const useServerBtn = q('useServerBtn');
-    const searchStatus = q('searchStatus');
-
-    let serverResult = null;
-
-    function updateLabels() {
-      const start = Number(startRange.value);
-      startLabel.textContent = fmtSec(start);
-      clipLabel.textContent = clipSelect.value + 's';
-    }
-
-    async function openWithBlob(blob, mimetype, isFromServer) {
-      originalBlob = blob;
-      finalMimetype = mimetype || blob.type || 'audio/mpeg';
-      statusEl.textContent = 'Inasoma muda wa wimbo...';
-      containerEl.classList.add('open');
-      try {
-        const { ctx, audioBuffer } = await decodeAudioSource(blob);
-        originalDuration = audioBuffer.duration;
-        ctx.close();
-        durationLabel.textContent = 'Muda kamili: ' + fmtSec(originalDuration);
-        const maxStart = Math.max(0, Math.floor(originalDuration - 5));
-        startRange.max = String(maxStart);
-        startRange.value = '0';
-        updateLabels();
-        statusEl.textContent = isFromServer
-          ? '✅ Wimbo umepatikana kutoka server. Chagua sehemu, kisha "Tumia Sehemu Hii".'
-          : '✅ Wimbo umepakiwa. Chagua sehemu, kisha "Tumia Sehemu Hii".';
-        player.src = URL.createObjectURL(blob);
-        finalBlob = null; // must press "Tumia" to confirm a clip
-      } catch (e) {
-        statusEl.textContent = '❌ Imeshindwa kusoma wimbo huu (muundo hauungwi mkono na browser).';
-      }
-    }
-
-    fileInputEl.addEventListener('change', () => {
-      const file = fileInputEl.files[0];
-      if (file) openWithBlob(file, file.type, false);
-      else { containerEl.classList.remove('open'); finalBlob = null; }
-    });
-
-    startRange.addEventListener('input', updateLabels);
-    clipSelect.addEventListener('change', updateLabels);
-
-    previewBtn.addEventListener('click', () => {
-      if (!player.src) return;
-      player.currentTime = Number(startRange.value);
-      player.play();
-      const clipMs = Number(clipSelect.value) * 1000;
-      setTimeout(() => player.pause(), clipMs);
-    });
-
-    applyBtn.addEventListener('click', async () => {
-      if (!originalBlob) return;
-      applyBtn.disabled = true;
-      applyBtn.textContent = 'Inakata...';
-      statusEl.textContent = '';
-      try {
-        const start = Number(startRange.value);
-        const clip = Math.min(Number(clipSelect.value), MAX_CLIP_SECONDS);
-        finalBlob = await trimAudioBlob(originalBlob, start, clip);
-        finalMimetype = 'audio/wav';
-        statusEl.textContent = `✅ Tayari — sehemu ya ${fmtSec(start)} hadi ${fmtSec(start + clip)} imechaguliwa.`;
-      } catch (e) {
-        statusEl.textContent = '❌ Imeshindwa kukata wimbo. Jaribu tena au chagua sehemu fupi zaidi.';
-      } finally {
-        applyBtn.disabled = false;
-        applyBtn.textContent = '✅ Tumia Sehemu Hii';
-      }
-    });
-
-    toggleSearch.addEventListener('click', () => {
-      searchBox.classList.toggle('open');
-    });
-
-    searchBtn.addEventListener('click', async () => {
-      const q2 = searchInput.value.trim();
-      if (!q2) { searchStatus.textContent = '❌ Andika jina la wimbo kwanza.'; return; }
-      searchBtn.disabled = true;
-      searchBtn.textContent = '...';
-      searchStatus.textContent = '';
-      resultBox.classList.remove('open');
-      try {
-        const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/audio-for-status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ input: q2 }),
-        });
-        const data = await res.json();
-        if (!data.ok) { searchStatus.textContent = '❌ ' + (data.error || 'Haikupatikana.'); return; }
-
-        serverResult = data;
-        resultTitle.textContent = data.title || q2;
-        resultMeta.textContent = data.duration ? '⏱ ' + data.duration : '';
-        resultBox.classList.add('open');
-      } catch (e) {
-        searchStatus.textContent = '❌ Kipengele hiki bado hakijaunganishwa upande wa server (angalia BACKEND_NOTE kwenye code).';
-      } finally {
-        searchBtn.disabled = false;
-        searchBtn.textContent = 'Tafuta';
-      }
-    });
-
-    useServerBtn.addEventListener('click', async () => {
-      if (!serverResult) return;
-      const bytes = atob(serverResult.audioBase64);
-      const arr = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-      const blob = new Blob([arr], { type: serverResult.mimetype || 'audio/mpeg' });
-      searchBox.classList.remove('open');
-      await openWithBlob(blob, serverResult.mimetype, true);
-    });
-
-    return {
-      getFinalBlob: () => finalBlob,
-      getFinalMimetype: () => finalMimetype,
-      isReady: () => !!finalBlob,
-      reset: () => {
-        originalBlob = null;
-        finalBlob = null;
-        containerEl.classList.remove('open');
-        fileInputEl.value = '';
-      },
-    };
-  }
-
-  /* =========================================================
      SECTION 1 — Group Status
      ========================================================= */
   const groupSelect = document.getElementById('groupSelect');
   const textTab = document.getElementById('textTab');
   const mediaTab = document.getElementById('mediaTab');
-  const comboTab = document.getElementById('comboTab');
   const textInput = document.getElementById('textInput');
   const mediaInput = document.getElementById('mediaInput');
   const captionInput = document.getElementById('captionInput');
   const filePreview = document.getElementById('filePreview');
-  const comboImageInput = document.getElementById('comboImageInput');
-  const comboAudioInput = document.getElementById('comboAudioInput');
-  const comboImagePreview = document.getElementById('comboImagePreview');
-  const comboAudioPreview = document.getElementById('comboAudioPreview');
-  const comboCaptionInput = document.getElementById('comboCaptionInput');
   const postBtn = document.getElementById('postBtn');
   const msgBox = document.getElementById('msgBox');
   let activeTab = 'text';
-
-  const mediaAudioToolkit = createAudioToolkit(mediaInput, document.getElementById('mediaAudioToolkit'));
-  const comboAudioToolkit = createAudioToolkit(comboAudioInput, document.getElementById('comboAudioToolkit'));
 
   document.querySelectorAll('.tab[data-group="status"]').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -787,7 +426,6 @@
       activeTab = tab.dataset.tab;
       textTab.style.display = activeTab === 'text' ? 'block' : 'none';
       mediaTab.style.display = activeTab === 'media' ? 'block' : 'none';
-      comboTab.style.display = activeTab === 'combo' ? 'block' : 'none';
     });
   });
 
@@ -798,26 +436,6 @@
       filePreview.textContent = `📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
     } else {
       filePreview.style.display = 'none';
-    }
-  });
-
-  comboImageInput.addEventListener('change', () => {
-    const file = comboImageInput.files[0];
-    if (file) {
-      comboImagePreview.style.display = 'block';
-      comboImagePreview.textContent = `🖼️ ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-    } else {
-      comboImagePreview.style.display = 'none';
-    }
-  });
-
-  comboAudioInput.addEventListener('change', () => {
-    const file = comboAudioInput.files[0];
-    if (file) {
-      comboAudioPreview.style.display = 'block';
-      comboAudioPreview.textContent = `🎵 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-    } else {
-      comboAudioPreview.style.display = 'none';
     }
   });
 
@@ -864,40 +482,16 @@
         return;
       }
       payload.text = text;
-    } else if (activeTab === 'combo') {
-      const imgFile = comboImageInput.files[0];
-      const audFile = comboAudioInput.files[0];
-      if (!imgFile || !audFile) {
-        msgBox.className = 'msg error';
-        msgBox.textContent = '❌ Chagua PICHA na WIMBO — vyote viwili vinahitajika.';
-        return;
-      }
-      if (!comboAudioToolkit.isReady()) {
-        msgBox.className = 'msg error';
-        msgBox.textContent = '❌ Bofya "Tumia Sehemu Hii" kwenye kikata-wimbo kwanza (chagua sehemu ya wimbo).';
-        return;
-      }
-      payload.imageBase64 = await fileToBase64(imgFile);
-      payload.audioBase64 = await fileToBase64(comboAudioToolkit.getFinalBlob());
-      payload.caption = comboCaptionInput.value.trim();
     } else {
       const file = mediaInput.files[0];
       if (!file) {
         msgBox.className = 'msg error';
-        msgBox.textContent = '❌ Chagua picha, video au wimbo kwanza.';
+        msgBox.textContent = '❌ Chagua picha au video kwanza.';
         return;
       }
       if (file.type.startsWith('video/')) {
         payload.videoBase64 = await fileToBase64(file);
         payload.caption = captionInput.value.trim();
-      } else if (file.type.startsWith('audio/')) {
-        if (!mediaAudioToolkit.isReady()) {
-          msgBox.className = 'msg error';
-          msgBox.textContent = '❌ Bofya "Tumia Sehemu Hii" kwenye kikata-wimbo kwanza.';
-          return;
-        }
-        payload.audioBase64 = await fileToBase64(mediaAudioToolkit.getFinalBlob());
-        payload.audioMimetype = mediaAudioToolkit.getFinalMimetype();
       } else {
         payload.imageBase64 = await fileToBase64(file);
         payload.caption = captionInput.value.trim();
@@ -905,7 +499,7 @@
     }
 
     postBtn.disabled = true;
-    postBtn.textContent = activeTab === 'combo' ? 'Inaunganisha na kutuma...' : 'Inatuma...';
+    postBtn.textContent = 'Inatuma...';
 
     try {
       const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groupstatus', {
@@ -925,13 +519,6 @@
         mediaInput.value = '';
         captionInput.value = '';
         filePreview.style.display = 'none';
-        mediaAudioToolkit.reset();
-        comboImageInput.value = '';
-        comboAudioInput.value = '';
-        comboCaptionInput.value = '';
-        comboImagePreview.style.display = 'none';
-        comboAudioPreview.style.display = 'none';
-        comboAudioToolkit.reset();
       }
     } catch (e) {
       msgBox.className = 'msg error';
@@ -958,8 +545,6 @@
   const bSendBtn = document.getElementById('bSendBtn');
   const bMsgBox = document.getElementById('bMsgBox');
   let bActiveTab = 'text';
-
-  const bMediaAudioToolkit = createAudioToolkit(bMediaInput, document.getElementById('bMediaAudioToolkit'));
 
   document.querySelectorAll('.tab[data-group="broadcast"]').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -1039,20 +624,12 @@
       const file = bMediaInput.files[0];
       if (!file) {
         bMsgBox.className = 'msg error';
-        bMsgBox.textContent = '❌ Chagua picha, video au wimbo kwanza.';
+        bMsgBox.textContent = '❌ Chagua picha au video kwanza.';
         return;
       }
       if (file.type.startsWith('video/')) {
         payload.videoBase64 = await fileToBase64(file);
         payload.caption = bCaptionInput.value.trim();
-      } else if (file.type.startsWith('audio/')) {
-        if (!bMediaAudioToolkit.isReady()) {
-          bMsgBox.className = 'msg error';
-          bMsgBox.textContent = '❌ Bofya "Tumia Sehemu Hii" kwenye kikata-wimbo kwanza.';
-          return;
-        }
-        payload.audioBase64 = await fileToBase64(bMediaAudioToolkit.getFinalBlob());
-        payload.audioMimetype = bMediaAudioToolkit.getFinalMimetype();
       } else {
         payload.imageBase64 = await fileToBase64(file);
         payload.caption = bCaptionInput.value.trim();
@@ -1080,7 +657,6 @@
         bMediaInput.value = '';
         bCaptionInput.value = '';
         bFilePreview.style.display = 'none';
-        bMediaAudioToolkit.reset();
       }
     } catch (e) {
       bMsgBox.className = 'msg error';
