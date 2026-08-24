@@ -184,6 +184,17 @@
   .usage-row .ub-fill { height: 100%; background: var(--accent-dim); }
   .usage-row .un { width: 28px; text-align: right; color: var(--text); flex-shrink: 0; }
 
+  /* ── Group Links & Number Lookup (Mipangilio) ── */
+  .group-row { flex-wrap: wrap; }
+  .group-row .linkbtn { flex: 0 0 auto; min-width: 0; padding: 6px 10px; font-size: 10px; }
+  .group-row .glink-box { flex-basis: 100%; display: flex; gap: 6px; margin-top: 6px; }
+  .group-row .glink-box input { flex: 1; margin-bottom: 0; font-size: 10px; }
+  .lookup-card { display: flex; align-items: center; gap: 12px; padding: 12px; background: #071009; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; }
+  .lookup-avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; background: var(--panel-2); flex-shrink: 0; }
+  .lookup-avatar-fallback { display: flex; align-items: center; justify-content: center; font-size: 24px; }
+  .lookup-name { font-weight: 700; font-size: 13px; }
+  .lookup-number { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
   @media (max-width: 640px) {
     #detail { width: 100vw; }
     .content { padding: 14px 12px 60px; }
@@ -333,6 +344,18 @@
       <button class="ghost" onclick="dClearSettings()">Rudisha Default</button>
     </div>
     <div class="toast" id="dSettingsMsg"></div>
+
+    <div class="section-label">🔗 Links za Groups</div>
+    <div class="group-list" id="dGroupLinksList"><div class="empty">Inapakia...</div></div>
+
+    <div class="section-label">🔍 Angalia Namba (Bots Zote)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Inapekua groups za bots zote zinazoendesha, si za mteja huyu tu.</div>
+    <div class="linkbox">
+      <input type="text" id="dLookupNumber" placeholder="Mfano 2557XXXXXXXX" />
+      <button onclick="dLookupNumber(this)">Tafuta</button>
+    </div>
+    <div id="dLookupResult"></div>
+    <div class="toast" id="dLookupMsg"></div>
   </div>
 
   <!-- Billing -->
@@ -588,10 +611,14 @@
     document.getElementById('overlay').style.display = 'block';
     document.getElementById('detail').style.display = 'block';
     document.querySelectorAll('.dtab')[0].click();
-    ['dOverviewMsg','dGroupsMsg','dSettingsMsg','dBillingMsg'].forEach(id => {
+    ['dOverviewMsg','dGroupsMsg','dSettingsMsg','dBillingMsg','dLookupMsg'].forEach(id => {
       document.getElementById(id).className = 'toast';
       document.getElementById(id).textContent = '';
     });
+    // Number Lookup ni ya muda (per-customer view) — isibaki ikionyesha
+    // matokeo ya mteja aliyepita akifungua mteja mwingine.
+    document.getElementById('dLookupNumber').value = '';
+    document.getElementById('dLookupResult').innerHTML = '';
     // Reset the compose form so a file/text picked for a PREVIOUS customer
     // never accidentally gets sent to this one.
     document.getElementById('dMsgText').value = '';
@@ -642,6 +669,23 @@
       document.getElementById('dPrefix').placeholder = 'Default: ' + data.settings.defaultPrefix;
       document.getElementById('dBotName').value = data.settings.botName || '';
       document.getElementById('dBotName').placeholder = 'Default: ' + data.settings.defaultBotName;
+
+      const linksList = document.getElementById('dGroupLinksList');
+      if (data.liveStatus !== 'connected') {
+        linksList.innerHTML = `<div class="empty">Bot haipo "live" kwa sasa — links hazipatikani.</div>`;
+      } else if (data.groupsError) {
+        linksList.innerHTML = `<div class="empty">❌ ${escapeHtml(data.groupsError)}</div>`;
+      } else if (!data.groups.length) {
+        linksList.innerHTML = `<div class="empty">Bot haipo kwenye group yoyote.</div>`;
+      } else {
+        linksList.innerHTML = data.groups.map(g => `
+          <div class="group-row">
+            <span class="gn">${escapeHtml(g.subject)}</span>
+            <span class="gc">${g.participants}</span>
+            <button class="ghost linkbtn" onclick="dFetchGroupLink('${escapeAttr(g.id)}', this)">🔗 Pata Link</button>
+          </div>
+        `).join('');
+      }
 
       // Billing pane — package + last payment (server-computed, not from ALL_USERS)
       document.getElementById('dBillingPackage').textContent = data.billing.packageLabel;
@@ -797,6 +841,98 @@
     document.getElementById('dPrefix').value = '';
     document.getElementById('dBotName').value = '';
     dSaveSettings();
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function escapeAttr(s) {
+    return String(s ?? '').replace(/'/g, '&#39;');
+  }
+
+  // "🔗 Links za Groups" — inapata invite link ya group MOJA kwa wakati mmoja
+  // (kila kitufe kinajitegemea), ili kuepuka kuomba WhatsApp links nyingi kwa
+  // pamoja mara moja (rate limit ikiwa bot ina groups nyingi).
+  async function dFetchGroupLink(groupId, btn) {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ ...';
+    try {
+      const data = await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/group-link?groupId=${encodeURIComponent(groupId)}`);
+      const row = btn.closest('.group-row');
+      const box = document.createElement('div');
+      box.className = 'glink-box';
+      box.innerHTML = `
+        <input type="text" readonly value="${escapeAttr(data.link)}" onclick="this.select()" />
+        <button class="ghost" onclick="navigator.clipboard.writeText('${escapeAttr(data.link)}')">Copy</button>
+      `;
+      row.appendChild(box);
+      btn.remove();
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+      showToast('dSettingsMsg', false, e.message);
+    }
+  }
+
+  // "🔍 Angalia Namba" — sawa na command ya .getpp lakini kutoka dashboard:
+  // jina, picha ya profile, na groups (miongoni mwa za bot hii) ambazo
+  // namba husika ipo.
+  async function dLookupNumber(btn) {
+    const raw = document.getElementById('dLookupNumber').value.trim();
+    document.getElementById('dLookupMsg').className = 'toast';
+    document.getElementById('dLookupMsg').textContent = '';
+    const resultBox = document.getElementById('dLookupResult');
+    if (!raw) return showToast('dLookupMsg', false, 'Weka namba kwanza.');
+
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Inatafuta (bots zote)...';
+    resultBox.innerHTML = '';
+    try {
+      // Global — inapekua GROUPS ZA BOT ZOTE zinazoendesha, si za mteja
+      // huyu tu, kwa hiyo haitegemei CURRENT_PHONE.
+      const data = await api(`/api/admin/lookup-number`, {
+        method: 'POST',
+        body: JSON.stringify({ number: raw }),
+      });
+
+      const avatarHtml = data.ppUrl
+        ? `<img class="lookup-avatar" src="${escapeAttr(data.ppUrl)}" onerror="this.outerHTML='<div class=&quot;lookup-avatar lookup-avatar-fallback&quot;>👤</div>'" />`
+        : `<div class="lookup-avatar lookup-avatar-fallback">👤</div>`;
+
+      const groupsHtml = data.groups.length
+        ? data.groups.map(g => `
+            <div class="group-row">
+              <div style="flex:1;min-width:0;">
+                <div class="gn">${escapeHtml(g.subject)}</div>
+                <div class="gc">kupitia bot ${escapeHtml(g.viaBot)} · washiriki ${g.participants}</div>
+              </div>
+              ${g.link
+                ? `<div class="glink-box"><input type="text" readonly value="${escapeAttr(g.link)}" onclick="this.select()" /><button class="ghost" onclick="navigator.clipboard.writeText('${escapeAttr(g.link)}')">Copy</button></div>`
+                : `<div class="glink-box"><span class="empty" style="padding:4px 0;">⚠️ ${escapeHtml(g.linkError || 'Link haipatikani')}</span></div>`}
+            </div>
+          `).join('')
+        : `<div class="empty">Namba hii haipo kwenye group yoyote ya bots zetu.</div>`;
+
+      resultBox.innerHTML = `
+        <div class="lookup-card">
+          ${avatarHtml}
+          <div>
+            <div class="lookup-name">${escapeHtml(data.name)}</div>
+            <div class="lookup-number">+${escapeHtml(data.number)}</div>
+          </div>
+        </div>
+        <div class="section-label">Groups Alizomo (${data.groups.length}) — bots ${data.scannedBots} zilizopekuliwa</div>
+        <div class="group-list">${groupsHtml}</div>
+        ${data.scanErrors && data.scanErrors.length ? `<div class="empty">⚠️ Baadhi ya bots hazikupekuliwa kikamilifu: ${escapeHtml(data.scanErrors.join(' · '))}</div>` : ''}
+      `;
+    } catch (e) {
+      showToast('dLookupMsg', false, e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   }
 
   async function dMarkPaid() {
