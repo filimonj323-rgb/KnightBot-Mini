@@ -661,8 +661,12 @@ const handleMessage = async (sock, msg) => {
     // Fetch group metadata immediately if it's a group
     const groupMetadata = isGroup ? await getGroupMetadata(sock, from) : null;
 
-    // Auto-Forward System (runs on every group message, not just commands)
-    if (isGroup) {
+    // Auto-Forward System (runs on every group message, not just commands) —
+    // gated by effectiveConfig.autoForwardMessages so a paired customer can
+    // switch this off from their dashboard without deleting their configured
+    // .autoforward rules (config.js defaults it to true, so the shared/main
+    // bot's existing always-on behaviour is unchanged).
+    if (isGroup && effectiveConfig.autoForwardMessages) {
       handleAutoForward(sock, msg, groupMetadata).catch(err => {
         console.error('[AutoForward Error]', err.message);
       });
