@@ -573,16 +573,20 @@ const handleMessage = async (sock, msg) => {
       // Clear cache to get fresh config values
       delete require.cache[require.resolve('./config')];
       const config = require('./config');
+      // Re-merge the paired customer's per-instance override (dashboard's
+      // "Auto React Messages" toggle) on top of the freshly-reloaded shared
+      // config — effectiveConfig above was computed before this reload.
+      const liveConfig = sock.instanceSettings ? { ...config, ...sock.instanceSettings } : config;
 
       const reactJid = msg.key.remoteJid;
       const groupReactSettings = reactJid?.endsWith('@g.us')
         ? database.getGroupSettings(reactJid)
         : null;
 
-      // Washa kama: (global config.autoReact) AU (per-group autoreact imewashwa)
-      const reactEnabled = config.autoReact || groupReactSettings?.autoreact;
-      // Mode: per-group inapewa kipaumbele, kisha global config
-      const reactMode = groupReactSettings?.autoreactMode || config.autoReactMode || 'bot';
+      // Washa kama: (dashboard "Auto React Messages") AU (global config.autoReact) AU (per-group autoreact imewashwa)
+      const reactEnabled = liveConfig.autoReactMessages || liveConfig.autoReact || groupReactSettings?.autoreact;
+      // Mode: per-group inapewa kipaumbele, kisha dashboard toggle (humaanisha 'react kila ujumbe'), kisha global config
+      const reactMode = groupReactSettings?.autoreactMode || (liveConfig.autoReactMessages ? 'all' : liveConfig.autoReactMode) || 'bot';
 
       if (reactEnabled && msg.message && !msg.key.fromMe) {
         const content = msg.message.ephemeralMessage?.message || msg.message;
@@ -1000,8 +1004,12 @@ const handleMessage = async (sock, msg) => {
       }
     }
     
-    // Auto-typing
-    if (config.autoTyping) {
+    // Auto-typing — must read effectiveConfig (merges sock.instanceSettings,
+    // the paired-customer's per-instance override from the dashboard), not
+    // the shared `config` directly, or a customer's autoTyping toggle would
+    // silently do nothing while every OTHER instance in this process still
+    // shared the same on/off state.
+    if (effectiveConfig.autoTyping) {
       await sock.sendPresenceUpdate('composing', from);
     }
     
