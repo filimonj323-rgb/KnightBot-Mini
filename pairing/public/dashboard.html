@@ -227,10 +227,42 @@
 
   .toggle-row {
     display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
     padding: 12px 0; border-bottom: 1px solid var(--border);
   }
   .toggle-row:last-child { border-bottom: none; }
   .toggle-label { font-size: 13.5px; }
+  .toggle-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  /* Settings section — sub-navigation between Msingi / Otomatiki / Ulinzi */
+  .settings-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    background: var(--field);
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .settings-nav-item {
+    flex: 1;
+    text-align: center;
+    padding: 10px 4px;
+    border-radius: 9px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .settings-nav-item .icon { font-size: 14px; }
+  .settings-nav-item.active { background: linear-gradient(135deg, var(--purple), var(--purple-dark)); color: white; }
+  .settings-pane { display: none; animation: fadeIn 0.2s ease; }
+  .settings-pane.active { display: block; }
 
   .protect-block { border-bottom: 1px solid var(--border); padding: 4px 0 10px; }
   .protect-block:last-of-type { border-bottom: none; }
@@ -362,8 +394,16 @@
 
   <!-- ============ SECTION 4: Settings (prefix / bot name — optional) ============ -->
   <div class="section" id="section-settings">
+
+    <div class="settings-nav">
+      <div class="settings-nav-item active" data-settings-tab="basic"><span class="icon">🪪</span>Msingi</div>
+      <div class="settings-nav-item" data-settings-tab="automation"><span class="icon">🔘</span>Otomatiki</div>
+      <div class="settings-nav-item" data-settings-tab="protection"><span class="icon">🛡️</span>Ulinzi</div>
+    </div>
+
+    <div class="settings-pane active" id="settingspane-basic">
     <div class="card">
-      <h1>⚙️ Settings za Bot</h1>
+      <h1>🪪 Settings za Msingi</h1>
       <p class="sub">Hiari — acha wazi kama hutaki kubadilisha, bot itaendelea kutumia default.</p>
 
       <label for="setPrefix">Prefix (herufi 1-3, mfano: . au ! au #)</label>
@@ -377,37 +417,56 @@
 
       <div class="msg" id="setMsgBox"></div>
     </div>
+    </div>
 
     <!-- ---- Automation toggles ---- -->
+    <div class="settings-pane" id="settingspane-automation">
     <div class="card">
       <h1>🔘 Vipengele vya Kiotomatiki</h1>
-      <p class="sub">Washa au zima huduma hizi za bot kiotomatiki. Zinatumika kwa jumla (si group moja moja).</p>
+      <p class="sub">Washa au zima huduma hizi za bot kiotomatiki. Zinatumika kwa jumla (si group moja moja). Mabadiliko yanaanza kufanya kazi papo hapo.</p>
 
       <div class="toggle-row">
-        <span class="toggle-label">👁️ Auto View Status</span>
+        <div>
+          <span class="toggle-label">👁️ Auto View Status</span>
+          <div class="toggle-hint">Bot itaangalia (view) status za watu kiotomatiki</div>
+        </div>
         <label class="switch"><input type="checkbox" id="tg_autoViewStatus"><span class="slider"></span></label>
       </div>
       <div class="toggle-row">
-        <span class="toggle-label">❤️ Auto React Status</span>
+        <div>
+          <span class="toggle-label">❤️ Auto React Status</span>
+          <div class="toggle-hint">Bot itapenda/kureact status za watu kiotomatiki</div>
+        </div>
         <label class="switch"><input type="checkbox" id="tg_autoReactStatus"><span class="slider"></span></label>
       </div>
       <div class="toggle-row">
-        <span class="toggle-label">⌨️ Auto Typing</span>
+        <div>
+          <span class="toggle-label">⌨️ Auto Typing</span>
+          <div class="toggle-hint">Bot itaonesha "inaandika..." kabla ya kujibu amri</div>
+        </div>
         <label class="switch"><input type="checkbox" id="tg_autoTyping"><span class="slider"></span></label>
       </div>
       <div class="toggle-row">
-        <span class="toggle-label">🎙️ Auto Recording</span>
+        <div>
+          <span class="toggle-label">🎙️ Auto Recording</span>
+          <div class="toggle-hint">Bot itaonesha "inarekodi sauti..." unapotuma ujumbe</div>
+        </div>
         <label class="switch"><input type="checkbox" id="tg_autoRecording"><span class="slider"></span></label>
       </div>
       <div class="toggle-row">
-        <span class="toggle-label">😊 Auto React Messages</span>
+        <div>
+          <span class="toggle-label">😊 Auto React Messages</span>
+          <div class="toggle-hint">Bot itareact kila ujumbe unaotumwa kwake</div>
+        </div>
         <label class="switch"><input type="checkbox" id="tg_autoReactMessages"><span class="slider"></span></label>
       </div>
 
       <div class="msg" id="autoMsgBox"></div>
     </div>
+    </div>
 
     <!-- ---- Group-wise protection (anti-features) ---- -->
+    <div class="settings-pane" id="settingspane-protection">
     <div class="card">
       <h1>🛡️ Ulinzi wa Groups</h1>
       <p class="sub">Washa kipengele kisha chagua groups zitakazolindwa nacho. Kila kipengele kina groups zake tofauti.</p>
@@ -469,6 +528,8 @@
       <button id="protectSaveBtn">💾 Hifadhi Ulinzi</button>
       <div class="msg" id="protectMsgBox"></div>
     </div>
+    </div>
+
   </div>
 
   <!-- ============ SECTION 5: Billing / Malipo ============ -->
@@ -501,6 +562,36 @@
       document.getElementById('section-' + t.dataset.section).classList.add('active');
     });
   });
+
+  // ---------- Settings sub-tabs (Msingi / Otomatiki / Ulinzi) ----------
+  document.querySelectorAll('.settings-nav-item').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.settings-nav-item').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.settings-pane').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById('settingspane-' + t.dataset.settingsTab).classList.add('active');
+    });
+  });
+
+  // ---------- Shared success/error message helper ----------
+  // Every dashboard action (status post, broadcast, downloads, settings,
+  // automation, protection, billing) uses this so a success message stays
+  // visible for at least 30 seconds instead of vanishing the instant the
+  // user taps elsewhere — long enough to actually notice it worked.
+  const MIN_MSG_VISIBLE_MS = 30000;
+  function showMsg(el, ok, text) {
+    if (el._hideTimer) {
+      clearTimeout(el._hideTimer);
+      el._hideTimer = null;
+    }
+    el.className = 'msg ' + (ok ? 'success' : 'error');
+    el.style.display = 'block';
+    el.textContent = text;
+    el._hideTimer = setTimeout(() => {
+      el.style.display = 'none';
+      el._hideTimer = null;
+    }, MIN_MSG_VISIBLE_MS);
+  }
 
   function fileToBase64(fileOrBlob) {
     return new Promise((resolve, reject) => {
@@ -581,13 +672,11 @@
   }
 
   postBtn.addEventListener('click', async () => {
-    msgBox.className = 'msg';
     msgBox.style.display = 'none';
 
     const groupId = groupSelect.value;
     if (!groupId) {
-      msgBox.className = 'msg error';
-      msgBox.textContent = '❌ Chagua group kwanza.';
+      showMsg(msgBox, false, '❌ Chagua group kwanza.');
       return;
     }
 
@@ -596,16 +685,14 @@
     if (activeTab === 'text') {
       const text = textInput.value.trim();
       if (!text) {
-        msgBox.className = 'msg error';
-        msgBox.textContent = '❌ Andika maandishi kwanza.';
+        showMsg(msgBox, false, '❌ Andika maandishi kwanza.');
         return;
       }
       payload.text = text;
     } else {
       const file = mediaInput.files[0];
       if (!file) {
-        msgBox.className = 'msg error';
-        msgBox.textContent = '❌ Chagua picha au video kwanza.';
+        showMsg(msgBox, false, '❌ Chagua picha au video kwanza.');
         return;
       }
       if (file.type.startsWith('video/')) {
@@ -629,19 +716,16 @@
       const data = await res.json();
 
       if (!data.ok) {
-        msgBox.className = 'msg error';
-        msgBox.textContent = '❌ ' + (data.error || 'Hitilafu imetokea.');
+        showMsg(msgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
       } else {
-        msgBox.className = 'msg success';
-        msgBox.textContent = `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total}`;
+        showMsg(msgBox, true, `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total}`);
         textInput.value = '';
         mediaInput.value = '';
         captionInput.value = '';
         filePreview.style.display = 'none';
       }
     } catch (e) {
-      msgBox.className = 'msg error';
-      msgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+      showMsg(msgBox, false, '❌ Imeshindwa kuwasiliana na server.');
     } finally {
       postBtn.disabled = false;
       postBtn.textContent = 'Tuma Status';
@@ -719,13 +803,11 @@
   });
 
   bSendBtn.addEventListener('click', async () => {
-    bMsgBox.className = 'msg';
     bMsgBox.style.display = 'none';
 
     const groupIds = Array.from(bGroupList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
     if (!groupIds.length) {
-      bMsgBox.className = 'msg error';
-      bMsgBox.textContent = '❌ Chagua angalau group moja.';
+      showMsg(bMsgBox, false, '❌ Chagua angalau group moja.');
       return;
     }
 
@@ -734,16 +816,14 @@
     if (bActiveTab === 'text') {
       const text = bTextInput.value.trim();
       if (!text) {
-        bMsgBox.className = 'msg error';
-        bMsgBox.textContent = '❌ Andika maandishi kwanza.';
+        showMsg(bMsgBox, false, '❌ Andika maandishi kwanza.');
         return;
       }
       payload.text = text;
     } else {
       const file = bMediaInput.files[0];
       if (!file) {
-        bMsgBox.className = 'msg error';
-        bMsgBox.textContent = '❌ Chagua picha au video kwanza.';
+        showMsg(bMsgBox, false, '❌ Chagua picha au video kwanza.');
         return;
       }
       if (file.type.startsWith('video/')) {
@@ -767,19 +847,16 @@
       const data = await res.json();
 
       if (!data.ok) {
-        bMsgBox.className = 'msg error';
-        bMsgBox.textContent = '❌ ' + (data.error || 'Hitilafu imetokea.');
+        showMsg(bMsgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
       } else {
-        bMsgBox.className = 'msg success';
-        bMsgBox.textContent = `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total} groups`;
+        showMsg(bMsgBox, true, `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total} groups`);
         bTextInput.value = '';
         bMediaInput.value = '';
         bCaptionInput.value = '';
         bFilePreview.style.display = 'none';
       }
     } catch (e) {
-      bMsgBox.className = 'msg error';
-      bMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+      showMsg(bMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
     } finally {
       bSendBtn.disabled = false;
       bSendBtn.textContent = 'Tuma kwa Groups Nilizochagua';
@@ -820,8 +897,7 @@
 
     const input = dlInput.value.trim();
     if (!input) {
-      dlMsgBox.className = 'msg error';
-      dlMsgBox.textContent = '❌ Andika jina la wimbo/video au bandika link kwanza.';
+      showMsg(dlMsgBox, false, '❌ Andika jina la wimbo/video au bandika link kwanza.');
       return;
     }
 
@@ -837,8 +913,7 @@
       const data = await res.json();
 
       if (!data.ok) {
-        dlMsgBox.className = 'msg error';
-        dlMsgBox.textContent = '❌ ' + (data.error || 'Haikupatikana.');
+        showMsg(dlMsgBox, false, '❌ ' + (data.error || 'Haikupatikana.'));
         return;
       }
 
@@ -849,8 +924,7 @@
       dlPreview.style.display = 'block';
       dlDownloadBtn.style.display = 'block';
     } catch (e) {
-      dlMsgBox.className = 'msg error';
-      dlMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+      showMsg(dlMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
     } finally {
       dlSearchBtn.disabled = false;
       dlSearchBtn.textContent = '🔍 Tafuta / Preview';
@@ -859,8 +933,7 @@
 
   dlDownloadBtn.addEventListener('click', () => {
     if (!currentPreview) return;
-    dlMsgBox.className = 'msg success';
-    dlMsgBox.textContent = '⬇️ Kupakua kunaanza... subiri kidogo, itategemea ukubwa wa faili.';
+    showMsg(dlMsgBox, true, '⬇️ Kupakua kunaanza... subiri kidogo, itategemea ukubwa wa faili.');
 
     const url = '/api/dashboard/' + encodeURIComponent(token) + '/media-download'
       + '?type=' + encodeURIComponent(dlType)
@@ -908,17 +981,14 @@
       const data = await res.json();
 
       if (!data.ok) {
-        setMsgBox.className = 'msg error';
-        setMsgBox.textContent = '❌ ' + (data.error || 'Hitilafu imetokea.');
+        showMsg(setMsgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
       } else {
-        setMsgBox.className = 'msg success';
-        setMsgBox.textContent = '✅ Settings zimehifadhiwa.';
+        showMsg(setMsgBox, true, '✅ Settings zimehifadhiwa.');
         setPrefix.value = data.prefix || '';
         setBotName.value = data.botName || '';
       }
     } catch (e) {
-      setMsgBox.className = 'msg error';
-      setMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+      showMsg(setMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
     } finally {
       setSaveBtn.disabled = false;
       setClearBtn.disabled = false;
@@ -966,11 +1036,9 @@
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      autoMsgBox.className = data.ok ? 'msg success' : 'msg error';
-      autoMsgBox.textContent = data.ok ? '✅ Imehifadhiwa.' : '❌ ' + (data.error || 'Hitilafu imetokea.');
+      showMsg(autoMsgBox, !!data.ok, data.ok ? '✅ Imehifadhiwa.' : '❌ ' + (data.error || 'Hitilafu imetokea.'));
     } catch (e) {
-      autoMsgBox.className = 'msg error';
-      autoMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+      showMsg(autoMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
     }
   }
 
@@ -1081,11 +1149,9 @@
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      protectMsgBox.className = data.ok ? 'msg success' : 'msg error';
-      protectMsgBox.textContent = data.ok ? '✅ Ulinzi umehifadhiwa.' : '❌ ' + (data.error || 'Hitilafu imetokea.');
+      showMsg(protectMsgBox, !!data.ok, data.ok ? '✅ Ulinzi umehifadhiwa.' : '❌ ' + (data.error || 'Hitilafu imetokea.'));
     } catch (e) {
-      protectMsgBox.className = 'msg error';
-      protectMsgBox.textContent = '❌ Imeshindwa kuwasiliana na server.';
+      showMsg(protectMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
     } finally {
       protectSaveBtn.disabled = false;
       protectSaveBtn.textContent = '💾 Hifadhi Ulinzi';
@@ -1145,8 +1211,7 @@
   }
 
   async function payForPlan(days) {
-    billingMsgBox.className = 'msg';
-    billingMsgBox.textContent = '';
+    billingMsgBox.style.whiteSpace = 'normal';
     document.querySelectorAll('.planBtn').forEach(b => b.disabled = true);
     try {
       const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/pay', {
@@ -1159,12 +1224,10 @@
         const detailText = data.details ? '\n\n' + JSON.stringify(data.details) : '';
         throw new Error((data.error || 'Hitilafu haijulikani.') + detailText);
       }
-      billingMsgBox.className = 'msg success';
-      billingMsgBox.textContent = '✅ ' + data.message;
+      showMsg(billingMsgBox, true, '✅ ' + data.message);
     } catch (e) {
-      billingMsgBox.className = 'msg error';
       billingMsgBox.style.whiteSpace = 'pre-wrap';
-      billingMsgBox.textContent = '❌ ' + e.message;
+      showMsg(billingMsgBox, false, '❌ ' + e.message);
     } finally {
       document.querySelectorAll('.planBtn').forEach(b => b.disabled = false);
     }
