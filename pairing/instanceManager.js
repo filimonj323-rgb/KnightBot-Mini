@@ -515,11 +515,13 @@ async function listGroups(token) {
  * commands (commands/admin/groupstatus.js, commands/owner/groupmanager.js)
  * already use.
  */
-async function postGroupStatusForToken(token, { groupId, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
+async function postGroupStatusForToken(token, { groupIds, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
   const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
-  if (!groupId) throw new Error('Chagua group ya kutuma status.');
+  if (!Array.isArray(groupIds) || groupIds.length === 0) {
+    throw new Error('Chagua angalau group moja.');
+  }
 
   let payload;
   if (imageBase64 && audioBase64) {
@@ -544,9 +546,9 @@ async function postGroupStatusForToken(token, { groupId, text, caption, imageBas
 
   payload.groupStatus = true;
 
-  const targets = groupId === 'all'
+  const targets = groupIds.includes('all')
     ? Object.keys(await inst.sock.groupFetchAllParticipating())
-    : [groupId];
+    : groupIds;
 
   let success = 0;
   let failed = 0;
