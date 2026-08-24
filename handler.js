@@ -124,19 +124,35 @@ const getLiveGroupMetadata = async (sock, groupId) => {
 const getGroupMetadata = getCachedGroupMetadata;
 
 // Helper functions
-const isOwner = (sender) => {
+const isOwner = (sender, sock) => {
   if (!sender) return false;
   
   // Normalize sender JID to handle LID
   const normalizedSender = normalizeJidWithLid(sender);
   const senderNumber = normalizeJid(normalizedSender);
   
-  // Check against owner numbers
-  return config.ownerNumber.some(owner => {
+  // Global owners (config.js ownerNumber) — the developer/admin keeps
+  // owner access on EVERY instance, including customers' paired bots.
+  const isGlobalOwner = config.ownerNumber.some(owner => {
     const normalizedOwner = normalizeJidWithLid(owner.includes('@') ? owner : `${owner}@s.whatsapp.net`);
     const ownerNumber = normalizeJid(normalizedOwner);
     return ownerNumber === senderNumber;
   });
+  if (isGlobalOwner) return true;
+
+  // Per-instance owner: whoever's WhatsApp number the bot is actually
+  // linked to (sock.user.id) is automatically the owner of THAT bot —
+  // this is what gives a customer full owner access on their own paired
+  // bot (pairing/instanceManager.js) without adding every customer's
+  // number to the shared config.js list, which would give them owner
+  // access on every OTHER customer's bot too.
+  if (sock?.user?.id) {
+    const botOwnJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+    const botOwnNumber = normalizeJid(normalizeJidWithLid(botOwnJid));
+    if (botOwnNumber === senderNumber) return true;
+  }
+
+  return false;
 };
 
 const isMod = (sender) => {
@@ -691,7 +707,7 @@ const handleMessage = async (sock, msg) => {
             sender,
             isGroup,
             groupMetadata,
-            isOwner: isOwner(sender),
+            isOwner: isOwner(sender, sock),
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
@@ -709,7 +725,7 @@ const handleMessage = async (sock, msg) => {
             sender,
             isGroup,
             groupMetadata,
-            isOwner: isOwner(sender),
+            isOwner: isOwner(sender, sock),
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
@@ -727,7 +743,7 @@ const handleMessage = async (sock, msg) => {
             sender,
             isGroup,
             groupMetadata,
-            isOwner: isOwner(sender),
+            isOwner: isOwner(sender, sock),
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
@@ -758,7 +774,7 @@ const handleMessage = async (sock, msg) => {
       const groupSettings = database.getGroupSettings(from);
       if (groupSettings.antiall) {
         const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-        const senderIsOwner = isOwner(sender);
+        const senderIsOwner = isOwner(sender, sock);
         
         if (!senderIsAdmin && !senderIsOwner) {
           const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
@@ -803,7 +819,7 @@ const handleMessage = async (sock, msg) => {
             
             if (totalMentions >= mentionThreshold || hasManyNumericMentions) {
               const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-              const senderIsOwner = isOwner(sender);
+              const senderIsOwner = isOwner(sender, sock);
               
               if (!senderIsAdmin && !senderIsOwner) {
                 const action = (groupSettings.antitagAction || 'delete').toLowerCase();
@@ -883,7 +899,7 @@ const handleMessage = async (sock, msg) => {
                   sender,
                   isGroup,
                   groupMetadata,
-                  isOwner: isOwner(sender),
+                  isOwner: isOwner(sender, sock),
                   isAdmin: await isAdmin(sock, sender, from, groupMetadata),
                   isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
                   isMod: isMod(sender),
@@ -913,7 +929,7 @@ const handleMessage = async (sock, msg) => {
             sender,
             isGroup,
             groupMetadata,
-            isOwner: isOwner(sender),
+            isOwner: isOwner(sender, sock),
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
@@ -945,7 +961,7 @@ const handleMessage = async (sock, msg) => {
             sender,
             isGroup,
             groupMetadata,
-            isOwner: isOwner(sender),
+            isOwner: isOwner(sender, sock),
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
@@ -972,16 +988,16 @@ const handleMessage = async (sock, msg) => {
     if (!command) return;
     
     // Check self mode (private mode) - only owner can use commands
-    if (config.selfMode && !isOwner(sender)) {
+    if (config.selfMode && !isOwner(sender, sock)) {
       return;
     }
     
     // Permission checks
-    if (command.ownerOnly && !isOwner(sender)) {
+    if (command.ownerOnly && !isOwner(sender, sock)) {
       return sock.sendMessage(from, { text: config.messages.ownerOnly }, { quoted: msg });
     }
     
-    if (command.modOnly && !isMod(sender) && !isOwner(sender)) {
+    if (command.modOnly && !isMod(sender) && !isOwner(sender, sock)) {
       return sock.sendMessage(from, { text: '🔒 This command is only for moderators!' }, { quoted: msg });
     }
     
@@ -993,7 +1009,7 @@ const handleMessage = async (sock, msg) => {
       return sock.sendMessage(from, { text: config.messages.privateOnly }, { quoted: msg });
     }
     
-    if (command.adminOnly && !(await isAdmin(sock, sender, from, groupMetadata)) && !isOwner(sender)) {
+    if (command.adminOnly && !(await isAdmin(sock, sender, from, groupMetadata)) && !isOwner(sender, sock)) {
       return sock.sendMessage(from, { text: config.messages.adminOnly }, { quoted: msg });
     }
     
@@ -1021,7 +1037,7 @@ const handleMessage = async (sock, msg) => {
       sender,
       isGroup,
       groupMetadata,
-      isOwner: isOwner(sender),
+      isOwner: isOwner(sender, sock),
       isAdmin: await isAdmin(sock, sender, from, groupMetadata),
       isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
       isMod: isMod(sender),
@@ -1399,7 +1415,7 @@ const handleAntilink = async (sock, msg, groupMetadata) => {
     // Check for any links (with or without protocol)
     if (linkPattern.test(body)) {
               const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-      const senderIsOwner = isOwner(sender);
+      const senderIsOwner = isOwner(sender, sock);
       
       if (senderIsAdmin || senderIsOwner) return;
       
@@ -1531,7 +1547,7 @@ const handleAntigroupmention = async (sock, msg, groupMetadata) => {
       }
       
       const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-      const senderIsOwner = isOwner(sender);
+      const senderIsOwner = isOwner(sender, sock);
       
       if (groupSettings.antigroupmention) {
         // Debug log removed
@@ -1589,7 +1605,7 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
 
     // Usimguse admin au owner
     const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-    const senderIsOwner = isOwner(sender);
+    const senderIsOwner = isOwner(sender, sock);
     if (senderIsAdmin || senderIsOwner) return;
 
     // Pata content RAW kwanza (kabla ya unwrap) kuangalia view-once wrapper
