@@ -465,6 +465,13 @@
         </div>
         <label class="switch"><input type="checkbox" id="tg_autoReactMessages"><span class="slider"></span></label>
       </div>
+      <div class="toggle-row">
+        <div>
+          <span class="toggle-label">📤 Auto Forward Messages</span>
+          <div class="toggle-hint">Peleka ujumbe kiotomatiki kutoka group moja kwenda nyingine, kufuatana na rules ulizoweka kwa amri ya WhatsApp <code>.autoforward</code> (tuma <code>.autoforward help</code> kwenye inbox ya bot yako kuziweka/kuzitazama). Zima huku ukitaka kusimamisha uforwardaji wote papo hapo bila kufuta rules zako.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="tg_autoForwardMessages"><span class="slider"></span></label>
+      </div>
 
       <div class="msg" id="autoMsgBox"></div>
     </div>
@@ -1052,7 +1059,7 @@
   /* =========================================================
      SECTION 4b — Automation toggles (auto view status, n.k.)
      ========================================================= */
-  const autoToggleIds = ['autoViewStatus', 'autoReactStatus', 'autoTyping', 'autoRecording', 'autoReactMessages'];
+  const autoToggleIds = ['autoViewStatus', 'autoReactStatus', 'autoTyping', 'autoRecording', 'autoReactMessages', 'autoForwardMessages'];
   const autoMsgBox = document.getElementById('autoMsgBox');
 
   async function loadAutomation() {
@@ -1063,7 +1070,10 @@
       const auto = data.automation || {};
       autoToggleIds.forEach(id => {
         const el = document.getElementById('tg_' + id);
-        if (el) el.checked = !!auto[id];
+        if (!el) return;
+        // autoForwardMessages defaults ON (server already treats "not set" as
+        // true) — every other toggle here defaults OFF.
+        el.checked = id === 'autoForwardMessages' ? (auto[id] !== false) : !!auto[id];
       });
     } catch (e) {
       // Silent — toggles just stay off on failure.
