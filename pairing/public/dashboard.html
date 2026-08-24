@@ -268,6 +268,29 @@
   .protect-block:last-of-type { border-bottom: none; }
   .protect-groups { padding: 6px 0 4px; }
   .protect-hint { font-size: 11.5px; color: var(--muted); margin: -4px 0 10px; }
+
+  /* Auto-Forward rule builder (Settings → Otomatiki) */
+  .af-panel { margin-top: 16px; border-top: 1px dashed var(--border); padding-top: 16px; }
+  .af-rule-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--field);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .af-rule-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .af-rule-route { font-size: 13px; font-weight: 600; line-height: 1.5; }
+  .af-rule-route .arrow { color: var(--purple-light); }
+  .af-rule-meta { font-size: 11.5px; color: var(--muted); margin-bottom: 8px; }
+  .af-rule-actions { display: flex; gap: 8px; }
+  .af-rule-actions button { width: auto; }
+  .af-rule-actions .danger { border-color: var(--error); color: var(--error); }
+
+  /* Downloads section — Play + Pakua side by side */
+  .dl-actions { display: flex; gap: 10px; }
+  .dl-actions button { margin-top: 0; }
+  .dl-player { display: none; margin: 0 0 14px; }
+  .dl-player audio, .dl-player video { width: 100%; display: block; border-radius: 10px; background: #000; }
 </style>
 </head>
 <body>
@@ -391,7 +414,15 @@
         </div>
       </div>
 
-      <button class="secondary" id="dlDownloadBtn" style="display:none;">⬇️ Pakua Sasa</button>
+      <div class="dl-player" id="dlPlayerWrap">
+        <audio id="dlAudioPlayer" controls style="display:none;"></audio>
+        <video id="dlVideoPlayer" controls playsinline style="display:none;"></video>
+      </div>
+
+      <div class="dl-actions">
+        <button class="secondary" id="dlPlayBtn" style="display:none;">▶️ Cheza Kwanza</button>
+        <button class="secondary" id="dlDownloadBtn" style="display:none;">⬇️ Pakua Sasa</button>
+      </div>
 
       <div class="msg" id="dlMsgBox"></div>
     </div>
@@ -474,6 +505,33 @@
       </div>
 
       <div class="msg" id="autoMsgBox"></div>
+
+      <!-- ---- Auto Forward: source/destination rule builder ---- -->
+      <div class="af-panel">
+        <label>📥 Chanzo (Source Group)</label>
+        <select id="afSource"><option value="">Inapakia groups...</option></select>
+
+        <label>📤 Pa Kupelekea (Destination)</label>
+        <div class="tabs">
+          <div class="tab active" data-af-dest="group">Group Nyingine</div>
+          <div class="tab" data-af-dest="custom">Weka ID Mwenyewe</div>
+        </div>
+        <select id="afDestGroup"><option value="">Inapakia groups...</option></select>
+        <input type="text" id="afDestCustom" style="display:none;" placeholder="Mfano: 255xxxxxxxxx-xxxxxxxxxx@g.us au channel ID" />
+
+        <label>🎯 Nani Atrigger Uforwardaji?</label>
+        <div class="tabs">
+          <div class="tab active" data-af-mode="alladmin">👑 Admin Yeyote</div>
+          <div class="tab" data-af-mode="numbers">🔢 Namba Maalum</div>
+        </div>
+        <input type="text" id="afNumbers" style="display:none;" placeholder="Namba, tenganisha kwa comma: 255712345678,255789111222" />
+        <div class="toggle-hint" id="afModeHint" style="margin: -8px 0 14px;">Ujumbe utaforwardiwa ukitumwa na ADMIN YEYOTE wa group ya chanzo.</div>
+
+        <button id="afSaveBtn">💾 Hifadhi Rule</button>
+        <div class="msg" id="afMsgBox"></div>
+
+        <div id="afRulesList" style="margin-top: 6px;"></div>
+      </div>
     </div>
     </div>
 
@@ -931,27 +989,48 @@
   const dlTitle = document.getElementById('dlTitle');
   const dlMeta = document.getElementById('dlMeta');
   const dlDownloadBtn = document.getElementById('dlDownloadBtn');
+  const dlPlayBtn = document.getElementById('dlPlayBtn');
+  const dlPlayerWrap = document.getElementById('dlPlayerWrap');
+  const dlAudioPlayer = document.getElementById('dlAudioPlayer');
+  const dlVideoPlayer = document.getElementById('dlVideoPlayer');
   const dlMsgBox = document.getElementById('dlMsgBox');
   let dlType = 'mp3';
   let currentPreview = null;
+
+  function resetDlActionsUI() {
+    dlPreview.style.display = 'none';
+    dlDownloadBtn.style.display = 'none';
+    dlPlayBtn.style.display = 'none';
+    dlPlayerWrap.style.display = 'none';
+    dlAudioPlayer.pause();
+    dlAudioPlayer.removeAttribute('src');
+    dlAudioPlayer.style.display = 'none';
+    dlVideoPlayer.pause();
+    dlVideoPlayer.removeAttribute('src');
+    dlVideoPlayer.style.display = 'none';
+    currentPreview = null;
+  }
+
+  function buildMediaDownloadUrl() {
+    return '/api/dashboard/' + encodeURIComponent(token) + '/media-download'
+      + '?type=' + encodeURIComponent(dlType)
+      + '&url=' + encodeURIComponent(currentPreview.url)
+      + '&title=' + encodeURIComponent(currentPreview.title || 'download');
+  }
 
   document.querySelectorAll('.tab[data-dltype]').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.tab[data-dltype]').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       dlType = tab.dataset.dltype;
-      dlPreview.style.display = 'none';
-      dlDownloadBtn.style.display = 'none';
-      currentPreview = null;
+      resetDlActionsUI();
     });
   });
 
   dlSearchBtn.addEventListener('click', async () => {
     dlMsgBox.className = 'msg';
     dlMsgBox.style.display = 'none';
-    dlPreview.style.display = 'none';
-    dlDownloadBtn.style.display = 'none';
-    currentPreview = null;
+    resetDlActionsUI();
 
     const input = dlInput.value.trim();
     if (!input) {
@@ -981,6 +1060,7 @@
       dlMeta.textContent = (data.duration ? '⏱ ' + data.duration + '  •  ' : '') + (data.author || '');
       dlPreview.style.display = 'block';
       dlDownloadBtn.style.display = 'block';
+      dlPlayBtn.style.display = 'block';
     } catch (e) {
       showMsg(dlMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
     } finally {
@@ -989,16 +1069,37 @@
     }
   });
 
+  // "Cheza Kwanza" — pata link ya moja kwa moja na icheze humo humo kabla
+  // ya kupakua chochote, ili mteja aone/asikie kwanza kama ndicho anachotaka.
+  dlPlayBtn.addEventListener('click', () => {
+    if (!currentPreview) return;
+    const url = buildMediaDownloadUrl();
+
+    dlPlayerWrap.style.display = 'block';
+    dlPlayBtn.disabled = true;
+    dlPlayBtn.textContent = '⏳ Inapakia...';
+
+    if (dlType === 'mp4') {
+      dlAudioPlayer.pause(); dlAudioPlayer.removeAttribute('src'); dlAudioPlayer.style.display = 'none';
+      dlVideoPlayer.style.display = 'block';
+      dlVideoPlayer.src = url;
+      dlVideoPlayer.play().catch(() => {});
+    } else {
+      dlVideoPlayer.pause(); dlVideoPlayer.removeAttribute('src'); dlVideoPlayer.style.display = 'none';
+      dlAudioPlayer.style.display = 'block';
+      dlAudioPlayer.src = url;
+      dlAudioPlayer.play().catch(() => {});
+    }
+
+    showMsg(dlMsgBox, true, '▶️ Ukiridhika, bonyeza "Pakua Sasa" kupakua faili.');
+    dlPlayBtn.disabled = false;
+    dlPlayBtn.textContent = '▶️ Cheza Kwanza';
+  });
+
   dlDownloadBtn.addEventListener('click', () => {
     if (!currentPreview) return;
     showMsg(dlMsgBox, true, '⬇️ Kupakua kunaanza... subiri kidogo, itategemea ukubwa wa faili.');
-
-    const url = '/api/dashboard/' + encodeURIComponent(token) + '/media-download'
-      + '?type=' + encodeURIComponent(dlType)
-      + '&url=' + encodeURIComponent(currentPreview.url)
-      + '&title=' + encodeURIComponent(currentPreview.title || 'download');
-
-    window.location.href = url;
+    window.location.href = buildMediaDownloadUrl();
   });
 
   /* =========================================================
@@ -1106,6 +1207,178 @@
   autoToggleIds.forEach(id => {
     const el = document.getElementById('tg_' + id);
     if (el) el.addEventListener('change', saveAutomation);
+  });
+
+  /* =========================================================
+     SECTION 4b-2 — Auto Forward: source/destination rule builder
+     ========================================================= */
+  const afSource = document.getElementById('afSource');
+  const afDestGroup = document.getElementById('afDestGroup');
+  const afDestCustom = document.getElementById('afDestCustom');
+  const afNumbers = document.getElementById('afNumbers');
+  const afModeHint = document.getElementById('afModeHint');
+  const afSaveBtn = document.getElementById('afSaveBtn');
+  const afMsgBox = document.getElementById('afMsgBox');
+  const afRulesList = document.getElementById('afRulesList');
+
+  let afDestMode = 'group'; // 'group' | 'custom'
+  let afTriggerMode = 'alladmin'; // 'alladmin' | 'numbers'
+
+  document.querySelectorAll('.tab[data-af-dest]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab[data-af-dest]').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      afDestMode = tab.dataset.afDest;
+      afDestGroup.style.display = afDestMode === 'group' ? 'block' : 'none';
+      afDestCustom.style.display = afDestMode === 'custom' ? 'block' : 'none';
+    });
+  });
+
+  document.querySelectorAll('.tab[data-af-mode]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab[data-af-mode]').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      afTriggerMode = tab.dataset.afMode;
+      afNumbers.style.display = afTriggerMode === 'numbers' ? 'block' : 'none';
+      afModeHint.style.display = afTriggerMode === 'alladmin' ? 'block' : 'none';
+    });
+  });
+
+  // Chanzo (source) na destination zote zinatumia groups za bot hii hii —
+  // tunatumia `allGroups` ile ile iliyopakiwa na loadGroups() (Status/Groups
+  // tabs), hakuna haja ya kuomba tena kwenye server.
+  function renderAfGroupSelects() {
+    const options = allGroups.length
+      ? allGroups.map(g => `<option value="${g.id}">${g.subject}</option>`).join('')
+      : '<option value="">Hakuna groups zilizopatikana</option>';
+    afSource.innerHTML = '<option value="">-- Chagua group ya chanzo --</option>' + options;
+    afDestGroup.innerHTML = '<option value="">-- Chagua group ya kupelekea --</option>' + options;
+  }
+
+  function renderAfRules(rules) {
+    if (!rules || !rules.length) {
+      afRulesList.innerHTML = '<div class="toggle-hint">Bado hujaweka rule yoyote ya Auto Forward.</div>';
+      return;
+    }
+    afRulesList.innerHTML = rules.map(r => `
+      <div class="af-rule-card" data-source="${r.sourceGroupId}">
+        <div class="af-rule-top">
+          <div class="af-rule-route">${r.sourceName} <span class="arrow">➜</span> ${r.destinationName}</div>
+          <label class="switch"><input type="checkbox" class="afRuleToggle" ${r.enabled ? 'checked' : ''} /><span class="slider"></span></label>
+        </div>
+        <div class="af-rule-meta">
+          ${r.alladmin ? '👑 Admin Yeyote' : '🔢 Namba: ' + (r.numbers.length ? r.numbers.map(n => '+' + n).join(', ') : '-')}
+        </div>
+        <div class="af-rule-actions">
+          <button class="secondary small danger afRuleRemove">🗑️ Futa</button>
+        </div>
+      </div>
+    `).join('');
+
+    afRulesList.querySelectorAll('.af-rule-card').forEach(card => {
+      const sourceGroupId = card.dataset.source;
+
+      card.querySelector('.afRuleToggle').addEventListener('change', async (ev) => {
+        const enabled = ev.target.checked;
+        try {
+          const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceGroupId, enabled }),
+          });
+          const data = await res.json();
+          if (!data.ok) {
+            ev.target.checked = !enabled;
+            showMsg(afMsgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
+            return;
+          }
+          renderAfRules(data.rules);
+        } catch (e) {
+          ev.target.checked = !enabled;
+          showMsg(afMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
+        }
+      });
+
+      card.querySelector('.afRuleRemove').addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceGroupId }),
+          });
+          const data = await res.json();
+          if (!data.ok) {
+            showMsg(afMsgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
+            return;
+          }
+          showMsg(afMsgBox, true, '🗑️ Rule imefutwa.');
+          renderAfRules(data.rules);
+        } catch (e) {
+          showMsg(afMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
+        }
+      });
+    });
+  }
+
+  async function loadAutoForward() {
+    renderAfGroupSelects();
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward');
+      const data = await res.json();
+      if (!data.ok) return;
+      renderAfRules(data.rules);
+    } catch (e) {
+      // Silent — orodha ya rules inabaki tupu ikishindikana.
+    }
+  }
+
+  afSaveBtn.addEventListener('click', async () => {
+    afMsgBox.className = 'msg';
+    afMsgBox.style.display = 'none';
+
+    const sourceGroupId = afSource.value;
+    const destinationJid = afDestMode === 'group' ? afDestGroup.value : afDestCustom.value.trim();
+
+    if (!sourceGroupId) {
+      showMsg(afMsgBox, false, '❌ Chagua group ya chanzo (source).');
+      return;
+    }
+    if (!destinationJid) {
+      showMsg(afMsgBox, false, '❌ Chagua au weka pa kupelekea (destination).');
+      return;
+    }
+    if (afTriggerMode === 'numbers' && !afNumbers.value.trim()) {
+      showMsg(afMsgBox, false, '❌ Weka angalau namba moja, au chagua "Admin Yeyote".');
+      return;
+    }
+
+    afSaveBtn.disabled = true;
+    afSaveBtn.textContent = 'Inahifadhi...';
+
+    try {
+      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceGroupId,
+          destinationJid,
+          mode: afTriggerMode,
+          numbers: afNumbers.value,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        showMsg(afMsgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
+        return;
+      }
+      showMsg(afMsgBox, true, '✅ Rule imehifadhiwa na imewashwa.');
+      renderAfRules(data.rules);
+    } catch (e) {
+      showMsg(afMsgBox, false, '❌ Imeshindwa kuwasiliana na server.');
+    } finally {
+      afSaveBtn.disabled = false;
+      afSaveBtn.textContent = '💾 Hifadhi Rule';
+    }
   });
 
   /* =========================================================
@@ -1297,6 +1570,7 @@
   if (token) {
     loadGroups().then(() => {
       loadProtection();
+      loadAutoForward();
     });
     loadSettings();
     loadAutomation();
