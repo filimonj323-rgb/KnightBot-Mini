@@ -295,10 +295,15 @@
       <h1>📤 Tuma Group Status</h1>
       <p class="sub">Chagua group, andika au ambatanisha picha/video, kisha tuma.</p>
 
-      <label for="groupSelect">Group</label>
-      <select id="groupSelect">
-        <option value="">Inapakia groups...</option>
-      </select>
+      <label>Chagua Groups</label>
+      <div class="group-list" id="sGroupList">
+        <div class="group-row" style="justify-content:center;color:var(--muted);">Inapakia groups...</div>
+      </div>
+      <div class="group-list-actions">
+        <span id="sSelectAll">☑️ Chagua Zote</span>
+        <span id="sSelectNone">⬜ Ondoa Zote</span>
+      </div>
+      <div class="selected-count" id="sSelectedCount">Umechagua groups: 0</div>
 
       <div class="tabs">
         <div class="tab active" data-tab="text" data-group="status">📝 Text</div>
@@ -618,7 +623,10 @@
   /* =========================================================
      SECTION 1 — Group Status
      ========================================================= */
-  const groupSelect = document.getElementById('groupSelect');
+  const sGroupList = document.getElementById('sGroupList');
+  const sSelectAll = document.getElementById('sSelectAll');
+  const sSelectNone = document.getElementById('sSelectNone');
+  const sSelectedCount = document.getElementById('sSelectedCount');
   const textTab = document.getElementById('textTab');
   const mediaTab = document.getElementById('mediaTab');
   const textInput = document.getElementById('textInput');
@@ -651,22 +659,53 @@
 
   let allGroups = [];
 
+  function updateSelectedCountStatus() {
+    const checked = sGroupList.querySelectorAll('input[type="checkbox"]:checked').length;
+    sSelectedCount.textContent = 'Umechagua groups: ' + checked;
+  }
+
+  function renderStatusGroups(groups) {
+    if (!groups.length) {
+      sGroupList.innerHTML = '<div class="group-row" style="justify-content:center;color:var(--muted);">Hakuna groups zilizopatikana</div>';
+      updateSelectedCountStatus();
+      return;
+    }
+    sGroupList.innerHTML = groups.map(g => `
+      <label class="group-row">
+        <input type="checkbox" value="${g.id}" />
+        <span class="g-name">${g.subject}</span>
+        <span class="g-count">${g.participants} members</span>
+      </label>
+    `).join('');
+    sGroupList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', updateSelectedCountStatus);
+    });
+    updateSelectedCountStatus();
+  }
+
+  sSelectAll.addEventListener('click', () => {
+    sGroupList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    updateSelectedCountStatus();
+  });
+  sSelectNone.addEventListener('click', () => {
+    sGroupList.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    updateSelectedCountStatus();
+  });
+
   async function loadGroups() {
     try {
       const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groups');
       const data = await res.json();
       if (!data.ok) {
-        groupSelect.innerHTML = '<option value="">Imeshindwa kupakia groups</option>';
+        renderStatusGroups([]);
         renderBroadcastGroups([]);
         return;
       }
       allGroups = data.groups || [];
-      groupSelect.innerHTML =
-        '<option value="all">🌍 Groups Zote (' + allGroups.length + ')</option>' +
-        allGroups.map(g => `<option value="${g.id}">${g.subject} (${g.participants} members)</option>`).join('');
+      renderStatusGroups(allGroups);
       renderBroadcastGroups(allGroups);
     } catch (e) {
-      groupSelect.innerHTML = '<option value="">Hitilafu — jaribu kupakua upya ukurasa</option>';
+      renderStatusGroups([]);
       renderBroadcastGroups([]);
     }
   }
@@ -674,13 +713,13 @@
   postBtn.addEventListener('click', async () => {
     msgBox.style.display = 'none';
 
-    const groupId = groupSelect.value;
-    if (!groupId) {
-      showMsg(msgBox, false, '❌ Chagua group kwanza.');
+    const groupIds = Array.from(sGroupList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
+    if (!groupIds.length) {
+      showMsg(msgBox, false, '❌ Chagua group moja au zaidi kwanza.');
       return;
     }
 
-    const payload = { groupId };
+    const payload = { groupIds };
 
     if (activeTab === 'text') {
       const text = textInput.value.trim();
