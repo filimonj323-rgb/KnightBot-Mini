@@ -8,26 +8,30 @@ const path = require('path');
 const fs = require('fs');
 const config = require('../config');
 
-// LID mapping cache
+// LID mapping cache — keyed by session path too, so different customer
+// instances (each with their own session folder) never share/overwrite
+// each other's cached mappings.
 const lidMappingCache = new Map();
 
-// Get LID mapping value from files
-const getLidMappingValue = (user, direction) => {
+// Get LID mapping value from files. `sessionPath`, if given, points at a
+// specific instance's own session folder (multi-tenant pairing bots);
+// omitted, it falls back to the single shared session used by the main
+// owner bot — existing callers that don't pass it keep working unchanged.
+const getLidMappingValue = (user, direction, sessionPath) => {
   if (!user) return null;
-  const cacheKey = `${direction}:${user}`;
+  const basePath = sessionPath || path.join(__dirname, '..', config.sessionName || 'session');
+  const cacheKey = `${basePath}::${direction}:${user}`;
   if (lidMappingCache.has(cacheKey)) {
     return lidMappingCache.get(cacheKey);
   }
-  
-  const sessionPath = path.join(__dirname, '..', config.sessionName || 'session');
-  const suffix = direction === 'pnToLid' ? '.json' : '_reverse.json';
-  const filePath = path.join(sessionPath, `lid-mapping-${user}${suffix}`);
-  
+
+  const filePath = path.join(basePath, `lid-mapping-${user}${direction === 'pnToLid' ? '.json' : '_reverse.json'}`);
+
   if (!fs.existsSync(filePath)) {
     lidMappingCache.set(cacheKey, null);
     return null;
   }
-  
+
   try {
     const raw = fs.readFileSync(filePath, 'utf8').trim();
     const value = raw ? JSON.parse(raw) : null;
@@ -39,8 +43,10 @@ const getLidMappingValue = (user, direction) => {
   }
 };
 
-// Normalize JID handling LID conversion
-const normalizeJidWithLid = (jid) => {
+// Normalize JID handling LID conversion. Pass `sessionPath` for a specific
+// customer instance (pairing/instanceManager.js does this); omit it for the
+// main owner bot, same as before.
+const normalizeJidWithLid = (jid, sessionPath) => {
   if (!jid) return jid;
   
   try {
@@ -53,7 +59,7 @@ const normalizeJidWithLid = (jid) => {
     let server = decoded.server === 'c.us' ? 's.whatsapp.net' : decoded.server;
     
     const mapToPn = () => {
-      const pnUser = getLidMappingValue(user, 'lidToPn');
+      const pnUser = getLidMappingValue(user, 'lidToPn', sessionPath);
       if (pnUser) {
         user = pnUser;
         server = server === 'hosted.lid' ? 'hosted' : 's.whatsapp.net';
