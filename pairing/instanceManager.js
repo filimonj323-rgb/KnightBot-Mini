@@ -27,10 +27,6 @@ const groupDb = require('../database');
 // (commands/owner/autoforward.js) already reads/writes, so a rule set from
 // the dashboard shows up instantly via WhatsApp and vice versa.
 const af = require('../utils/autoforward');
-// LID-aware JID normalization — same helper commands/owner/promote.js etc.
-// already rely on, needed so status reactions actually deliver (WhatsApp
-// wants a phone-number JID in statusJidList, not a raw @lid one).
-const { normalizeJidWithLid } = require('../utils/jidHelper');
 
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
@@ -534,6 +530,14 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
               const delayMs = 30000 + Math.floor(Math.random() * 30000);
               setTimeout(async () => {
                 try {
+                  // Required lazily (not at module top) because this file is
+                  // require()'d by server.js at startup, before
+                  // ensureBaileysBridge() has set global.__baileys —
+                  // jidHelper.js reads that at require-time, so requiring it
+                  // early crashes the whole server on boot. By the time this
+                  // callback runs, connectInstance() (and therefore the
+                  // bridge) has always already completed.
+                  const { normalizeJidWithLid } = require('../utils/jidHelper');
                   const deliverJid = normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
                   await sock.sendMessage('status@broadcast', {
                     react: { text: '❤️', key: msg.key },
