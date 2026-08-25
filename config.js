@@ -9,7 +9,7 @@ module.exports = {
 
     // Bot Configuration
     botName: 'MR.IT MEDIATOR',
-    prefix: '.',
+    prefix: 'it',
     sessionName: 'session',
     sessionID: process.env.SESSION_ID || '',
     newsletterJid: '',
