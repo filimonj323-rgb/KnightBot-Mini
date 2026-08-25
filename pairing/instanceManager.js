@@ -14,6 +14,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
+const NodeCache = require('node-cache');
 const mediaDownloader = require('./mediaDownloader');
 const userStore = require('./userStore');
 const cfg = require('./pairingConfig');
@@ -26,6 +27,10 @@ const groupDb = require('../database');
 // (commands/owner/autoforward.js) already reads/writes, so a rule set from
 // the dashboard shows up instantly via WhatsApp and vice versa.
 const af = require('../utils/autoforward');
+// LID-aware JID normalization — same helper commands/owner/promote.js etc.
+// already rely on, needed so status reactions actually deliver (WhatsApp
+// wants a phone-number JID in statusJidList, not a raw @lid one).
+const { normalizeJidWithLid } = require('../utils/jidHelper');
 
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
@@ -93,22 +98,33 @@ const PROTECTION_FEATURES = {
   antiLink: 'antilink',
 };
 
+// Automation keys that ship ON for every customer unless they explicitly
+// switch them off from the dashboard (Settings > Otomatiki) — same
+// "opt-out, not opt-in" treatment as autoForwardMessages below. Requested
+// so AutoStatus (view + react) works out of the box, matching the /owner
+// !autostatus command's own default behaviour (AUTOSTATUS_DEFAULTS.view/
+// .react = true in commands/owner/autostatus.js's spirit).
+const DEFAULT_ON_AUTOMATION_KEYS = ['autoViewStatus', 'autoReactStatus'];
+
 async function getInstanceSettings(phoneNumber) {
   const res = await db.query('SELECT prefix, botName, automation FROM settings WHERE phoneNumber = ?', [phoneNumber]);
   const row = res.rows[0] || {};
-  // autoForwardMessages defaults to ON (matches config.js and the bot's
-  // existing always-on behaviour) — UNLIKE the AUTOMATION_KEYS below, which
-  // all default OFF. A customer's .autoforward rules (set via WhatsApp,
-  // see commands/owner/autoforward.js) already work without touching the
-  // dashboard; this toggle is purely a quick kill-switch, so "never
-  // touched it" must still mean "on", not "off".
-  const out = { autoForwardMessages: true };
+  // autoForwardMessages, autoViewStatus and autoReactStatus default to ON
+  // (see DEFAULT_ON_AUTOMATION_KEYS above) — UNLIKE the rest of
+  // AUTOMATION_KEYS, which all default OFF until a customer opts in.
+  const out = { autoForwardMessages: true, autoViewStatus: true, autoReactStatus: true };
   if (row.prefix) out.prefix = row.prefix;
   if (row.botName) out.botName = row.botName;
   if (row.automation) {
     try {
       const parsed = JSON.parse(row.automation);
-      AUTOMATION_KEYS.forEach((k) => { if (parsed[k]) out[k] = true; });
+      AUTOMATION_KEYS.forEach((k) => {
+        if (DEFAULT_ON_AUTOMATION_KEYS.includes(k)) {
+          if (parsed[k] === false) out[k] = false; // explicit opt-out
+        } else if (parsed[k]) {
+          out[k] = true; // explicit opt-in
+        }
+      });
       if (parsed.autoForwardMessages === false) out.autoForwardMessages = false;
     } catch (e) {
       // Corrupt/empty JSON — treat as no automation overrides set.
@@ -391,6 +407,14 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     markOnlineOnConnect: false,
   });
 
+  // Auto View/React Status — per-instance dedup cache + processing queue,
+  // same pattern as handler.js's setupAutoStatusViewer() (the /owner
+  // !autostatus implementation), scoped to THIS customer only so one
+  // instance's cache can never suppress another's view/react on the same
+  // broadcasted status.
+  const viewedStatusCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, maxKeys: 5000 });
+  const statusProcessingQueue = new Set();
+
   record.sock = sock;
   // Attach this customer's optional overrides (prefix / bot name) so
   // handler.js can prefer them over the shared config.js — see the
@@ -481,25 +505,48 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     if (!msg?.message) return;
 
     // Auto View/React Status — per-customer toggles from the dashboard
-    // (Settings > Otomatiki). Independent of the trial/billing gate below,
-    // same as autoTyping/autoRecording aren't billing-gated commands.
+    // (Settings > Otomatiki), ON BY DEFAULT for every customer (see
+    // getInstanceSettings() below). Independent of the trial/billing gate
+    // below, same as autoTyping/autoRecording aren't billing-gated commands.
+    // Mirrors handler.js's setupAutoStatusViewer() (the /owner !autostatus
+    // command's own logic) — dedup cache, delayed react, and LID-aware
+    // delivery JID — because that is the version proven to actually work;
+    // the difference here is it's scoped to sock.instanceSettings per
+    // customer instead of one shared database/autostatus.json file.
     if (msg.key.remoteJid === 'status@broadcast' && !msg.key.fromMe) {
       const auto = sock.instanceSettings || {};
-      if (auto.autoViewStatus) {
-        sock.readMessages([msg.key]).catch(() => {});
-      }
-      if (auto.autoReactStatus) {
-        const emojis = ['❤️', '🔥', '😍', '👍', '💯', '✨'];
-        const reaction = emojis[Math.floor(Math.random() * emojis.length)];
-        const posterJid = msg.key.participant || msg.key.remoteJid;
-        // Small random delay so replies don't all fire at the exact same
-        // instant a status is posted — mirrors handler.js's own status
-        // reactor behaviour.
-        setTimeout(() => {
-          sock.sendMessage('status@broadcast', {
-            react: { text: reaction, key: msg.key },
-          }, { statusJidList: [posterJid, sock.user.id] }).catch(() => {});
-        }, 3000 + Math.floor(Math.random() * 5000));
+      const statusId = msg.key.id;
+
+      if ((auto.autoViewStatus || auto.autoReactStatus) && statusId
+          && !viewedStatusCache.has(statusId) && !statusProcessingQueue.has(statusId)) {
+        statusProcessingQueue.add(statusId);
+        viewedStatusCache.set(statusId, true);
+
+        (async () => {
+          try {
+            if (auto.autoViewStatus) {
+              await sock.readMessages([msg.key]);
+            }
+            if (auto.autoReactStatus) {
+              const posterJid = msg.key.participant || msg.key.remoteJid;
+              // 30-60s random delay — mirrors the /owner behaviour so
+              // reactions don't all fire the instant a status goes up.
+              const delayMs = 30000 + Math.floor(Math.random() * 30000);
+              setTimeout(async () => {
+                try {
+                  const deliverJid = normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
+                  await sock.sendMessage('status@broadcast', {
+                    react: { text: '❤️', key: msg.key },
+                  }, { statusJidList: [deliverJid, sock.user.id] });
+                } catch (e) { /* status inaweza kuwa imeondolewa kabla ya react — si tatizo */ }
+              }, delayMs);
+            }
+          } catch (e) {
+            viewedStatusCache.del(statusId);
+          } finally {
+            statusProcessingQueue.delete(statusId);
+          }
+        })();
       }
     }
 
