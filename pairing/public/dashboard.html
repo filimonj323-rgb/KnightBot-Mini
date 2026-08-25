@@ -1161,6 +1161,9 @@
      SECTION 4b — Automation toggles (auto view status, n.k.)
      ========================================================= */
   const autoToggleIds = ['autoViewStatus', 'autoReactStatus', 'autoTyping', 'autoRecording', 'autoReactMessages', 'autoForwardMessages'];
+  // These default ON for every customer (server treats "not set" as true) —
+  // every other toggle here defaults OFF until a customer opts in.
+  const DEFAULT_ON_TOGGLE_IDS = ['autoViewStatus', 'autoReactStatus', 'autoForwardMessages'];
   const autoMsgBox = document.getElementById('autoMsgBox');
 
   async function loadAutomation() {
@@ -1172,9 +1175,7 @@
       autoToggleIds.forEach(id => {
         const el = document.getElementById('tg_' + id);
         if (!el) return;
-        // autoForwardMessages defaults ON (server already treats "not set" as
-        // true) — every other toggle here defaults OFF.
-        el.checked = id === 'autoForwardMessages' ? (auto[id] !== false) : !!auto[id];
+        el.checked = DEFAULT_ON_TOGGLE_IDS.includes(id) ? (auto[id] !== false) : !!auto[id];
       });
     } catch (e) {
       // Silent — toggles just stay off on failure.
