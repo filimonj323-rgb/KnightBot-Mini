@@ -456,10 +456,29 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
+      // statusCode 440 = another socket connected with the SAME creds at the
+      // same time (e.g. an overlapping Railway deploy, or >1 replica, both
+      // calling restoreAllInstances() for this number). This is NOT a bad
+      // or corrupt session — deleting it here would be wrong. Handle it
+      // separately, before the retry counter below can ever reach the
+      // destructive fs.rm branch for this cause.
+      const conflict = DisconnectReason && statusCode === DisconnectReason.connectionReplaced;
 
       if (loggedOut) {
         record.status = 'disconnected';
         instances.delete(phoneNumber);
+        return;
+      }
+
+      if (conflict) {
+        console.warn(`[pairing:${phoneNumber}] mgongano wa connection (statusCode 440) — socket nyingine ilikuwa imeunganishwa na creds zilezile (mf. deploy mbili zikiendesha kwa wakati mmoja). Kusubiri na kujaribu tena bila kugusa session.`);
+        record.status = 'connecting';
+        setTimeout(() => {
+          connectInstance(phoneNumber, sessionFolder, record, true).catch((e) => {
+            record.status = 'error';
+            record.error = e.message;
+          });
+        }, 8000);
         return;
       }
 
