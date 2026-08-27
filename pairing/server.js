@@ -470,7 +470,15 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { ok: false, error: 'Namba ya malipo si sahihi. Weka namba kamili yenye country code (mfano 2557XXXXXXXX).' });
       }
 
-      const orderReference = `SUB-${accountPhoneNumber}-${Date.now()}`;
+      // MUHIMU: orderReference LAZIMA ibaki herufi 20 au chini tangu hapa —
+      // clickpesa.js inakata (bila taarifa) reference ndefu zaidi ya 20 kabla
+      // ya kuituma ClickPesa, na ClickPesa inarudisha ile iliyokatwa kwenye
+      // webhook. Kama tuliyohifadhi kwenye pending_orders ni ndefu zaidi,
+      // getPendingOrder() haitaikuta reference ya webhook -> malipo
+      // hayasajiliwi hata baada ya mteja kulipa kikamilifu (status inabaki
+      // "unpaid"). Fomu hii ni herufi 20 kwa mbali sana (S + siku 6 za mwisho
+      // za namba + timestamp base36), hivyo haigusiwi na ukataji huo kamwe.
+      const orderReference = `S${accountPhoneNumber.slice(-6)}${Date.now().toString(36)}`;
       await insertPendingOrder(orderReference, accountPhoneNumber, plan.days, plan.price);
 
       try {
