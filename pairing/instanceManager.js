@@ -321,6 +321,42 @@ async function buildExpiryMessage(kind, token, extra = {}) {
   );
 }
 
+/**
+ * Anatuma ujumbe wa reminder/expiry kwa mteja kutoka namba ya OWNER ya bot
+ * kuu (index.js), si kutoka bot ndogo ya mteja mwenyewe — kwa kupiga
+ * endpoint ya HTTP iliyowekwa kwenye index.js (REMINDER_SEND_PATH), kwa
+ * sababu bot kuu na pairing server ni process/Railway service tofauti.
+ * Ikishindikana (bot kuu haipo online, secret hailingani, n.k.) tunarudi
+ * kwenye njia ya zamani (mteja kujitumia mwenyewe) ili mteja asikose
+ * kabisa ujumbe wake wa malipo.
+ */
+async function notifyCustomerViaMainBot(phoneNumber, text, fallbackSock) {
+  const url = cfg.MAIN_BOT_API_URL;
+  const secret = cfg.MAIN_BOT_API_SECRET;
+
+  if (url && secret) {
+    try {
+      await axios.post(`${url.replace(/\/$/, '')}/api/send-reminder?secret=${encodeURIComponent(secret)}`, {
+        to: phoneNumber,
+        text,
+      }, { timeout: 15000 });
+      return true;
+    } catch (e) {
+      console.error(`[ReminderRelay] imeshindwa kufikia bot kuu kwa ${phoneNumber}, narudi kwenye self-message:`, e.message);
+    }
+  }
+
+  if (fallbackSock) {
+    try {
+      await fallbackSock.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text });
+      return true;
+    } catch (e) {
+      console.error(`[ReminderRelay] fallback self-message imeshindwa kwa ${phoneNumber}:`, e.message);
+    }
+  }
+  return false;
+}
+
 let baileysBridgeLoaded = false;
 let makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason;
 let handler;
@@ -350,6 +386,15 @@ async function ensureBaileysBridge() {
   handler = require('../handler');
 
   baileysBridgeLoaded = true;
+}
+
+// Emoji pool for per-customer status auto-react (autoReactStatus). Kept
+// local to this file (not handler.js's STATUS_REACTIONS) so it stays fully
+// independent of the main/owner bot — see the file-level comment above.
+const STATUS_REACT_EMOJIS = ['❤️', '🔥', '👍', '😍', '🥰', '💯', '😊', '✨', '😂', '👌', '🤝', '💫'];
+
+function randomStatusReaction() {
+  return STATUS_REACT_EMOJIS[Math.floor(Math.random() * STATUS_REACT_EMOJIS.length)];
 }
 
 function normalizePhoneNumber(raw) {
@@ -445,7 +490,7 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
             ? 'Muda wa malipo yako umeisha.'
             : 'Muda wako wa majaribio (trial) umeisha.';
           buildExpiryMessage('expired', record.token, { reasonText }).then((text) => {
-            sock.sendMessage(selfJid, { text }).catch(() => {});
+            notifyCustomerViaMainBot(phoneNumber, text, sock);
           });
         }
         await userStore.markExpiryNotified(phoneNumber);
@@ -558,8 +603,11 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
                   // bridge) has always already completed.
                   const { normalizeJidWithLid } = require('../utils/jidHelper');
                   const deliverJid = normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
+                  // Random emoji per reaction — picked fresh from
+                  // STATUS_REACT_EMOJIS above (bot kuu's fixed/randomReact
+                  // toggle in handler.js is untouched by this).
                   await sock.sendMessage('status@broadcast', {
-                    react: { text: '❤️', key: msg.key },
+                    react: { text: randomStatusReaction(), key: msg.key },
                   }, { statusJidList: [deliverJid, sock.user.id] });
                 } catch (e) { /* status inaweza kuwa imeondolewa kabla ya react — si tatizo */ }
               }, delayMs);
@@ -1213,9 +1261,13 @@ async function getBillingForToken(token) {
  *   2) Muda tayari umekwisha → kumbusho la mara kwa mara (kila
  *      REMINDER_INTERVAL_HOURS) mpaka alipe.
  * Zote mbili zinatumia link ya malipo pekee (fupi, moja kwa moja
- * "💳 Malipo"). Inafikia tu wateja ambao socket yao iko live kwenye
- * process hii (yaani hakuna redeploy tangu waunganike mara ya mwisho) —
- * mipaka ile ile ya model ya in-memory instances iliyopo kwenye faili hii.
+ * "💳 Malipo"), na zinatumwa kutoka namba ya OWNER ya bot kuu (kupitia
+ * notifyCustomerViaMainBot — ona comment yake juu) badala ya mteja
+ * kujitumia mwenyewe; hii inarudi kwenye njia ya zamani (self-message)
+ * PEKEE kama bot kuu haifikiki wakati huo. Inafikia tu wateja ambao
+ * socket yao iko live kwenye process hii (yaani hakuna redeploy tangu
+ * waunganike mara ya mwisho) — mipaka ile ile ya model ya in-memory
+ * instances iliyopo kwenye faili hii.
  */
 function startReminderScheduler() {
   setInterval(async () => {
@@ -1223,12 +1275,11 @@ function startReminderScheduler() {
 
     for (const [phoneNumber, record] of instances.entries()) {
       if (record.status !== 'connected' || !record.sock || !record.token) continue;
-      const selfJid = `${phoneNumber}@s.whatsapp.net`;
 
       // (1) Onyo la mapema — muda bado upo lakini unakaribia kuisha.
       if (await userStore.isExpiryWarningDue(phoneNumber, warningHours)) {
         buildExpiryMessage('warning', record.token).then((text) => {
-          record.sock.sendMessage(selfJid, { text }).catch(() => {});
+          notifyCustomerViaMainBot(phoneNumber, text, record.sock);
         });
         await userStore.markExpiryWarningSent(phoneNumber);
         continue; // asipate onyo na kumbusho kwenye mzunguko mmoja
@@ -1239,7 +1290,7 @@ function startReminderScheduler() {
       if (!due) continue;
 
       buildExpiryMessage('reminder', record.token).then((text) => {
-        record.sock.sendMessage(selfJid, { text }).catch(() => {});
+        notifyCustomerViaMainBot(phoneNumber, text, record.sock);
       });
       await userStore.markReminderSent(phoneNumber);
     }

@@ -56,6 +56,17 @@ module.exports = {
   // ── Pairing website base URL (used in WhatsApp dashboard-link messages) ──
   PAIRING_BASE_URL: 'https://pairingpage.up.railway.app', // badilisha kama domain yako ni tofauti
 
+  // ── Bot kuu (index.js) — inatumika ili reminders za malipo zitumwe
+  // kutoka namba ya OWNER (config.ownerNumber kwenye root config.js), si
+  // kutoka bot ndogo ya mteja mwenyewe. Kwa sababu bot kuu na pairing server
+  // zinaendesha kwenye Railway projects MBILI tofauti (process tofauti,
+  // hakuna memory ya pamoja), mawasiliano ni kwa HTTP: pairing server
+  // inapiga endpoint hii kwenye service inayoendesha index.js.
+  // MAIN_BOT_API_SECRET LAZIMA ilingane HASA na REMINDER_SECRET (env var)
+  // kwenye service ya index.js, la sivyo ombi litakataliwa (403).
+  MAIN_BOT_API_URL: 'https://badilisha-hii-kuwa-url-ya-service-ya-index-js.up.railway.app',
+  MAIN_BOT_API_SECRET: 'badilisha_hii_pia_iwe_secret_ndefu_na_ngumu_kubashiri',
+
   // ── Optional custom pairing code (must be EXACTLY 8 uppercase A-Z0-9) ──
   // NOTE: WhatsApp often rejects custom codes even when correctly
   // formatted, ambayo ndiyo iliyokuwa inasababisha "couldn't connect" na
