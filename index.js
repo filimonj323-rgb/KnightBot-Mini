@@ -639,6 +639,17 @@ const BACKUP_RECEIVE_PATH = '/receive-backup';
 const HTTP_PORT = process.env.PORT || 3000;
 const MAX_BACKUP_SIZE = 50 * 1024 * 1024; // 50MB - kikomo cha usalama
 
+// ===== REMINDER RELAY: pairing/server.js (mfumo wa wateja, Railway service
+// TOFAUTI) inaomba bot kuu (hii) itume ujumbe wa kumbusho la malipo kwa
+// namba ya mteja moja kwa moja kutoka namba ya owner (config.ownerNumber),
+// badala ya mteja kujitumia ujumbe mwenyewe kwenye bot yake ndogo. Michakato
+// hii miwili haishirikiani memory (Railway projects mbili), hivyo mawasiliano
+// ni kwa HTTP + secret — endpoint hii ndiyo "mlango" pekee anaoweza kutumia
+// pairing server kuamuru bot kuu kutuma ujumbe.
+const REMINDER_SECRET = process.env.REMINDER_SECRET || 'badilisha_hii_pia_iwe_secret_ndefu_na_ngumu_kubashiri';
+const REMINDER_SEND_PATH = '/api/send-reminder';
+const MAX_REMINDER_BODY = 10 * 1024; // 10KB - ujumbe wa maandishi tu, si faili
+
 const backupServer = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url.split('?')[0] === BACKUP_RECEIVE_PATH) {
     const urlObj = new URL(req.url, `http://${req.headers.host}`);
@@ -708,6 +719,68 @@ const backupServer = http.createServer((req, res) => {
         res.end('OK');
       } catch (err) {
         console.error(`[AutoBackup] Imeshindwa kutuma backup iliyopokelewa: ${err.message}`);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('ERROR');
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url.split('?')[0] === REMINDER_SEND_PATH) {
+    const urlObj = new URL(req.url, `http://${req.headers.host}`);
+    const secret = urlObj.searchParams.get('secret') || req.headers['x-reminder-secret'];
+
+    if (secret !== REMINDER_SECRET) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('FORBIDDEN');
+      console.error('[ReminderRelay] Ombi la kutuma reminder limekataliwa - secret hailingani.');
+      return;
+    }
+
+    const chunks = [];
+    let totalSize = 0;
+    let rejected = false;
+
+    req.on('data', (chunk) => {
+      totalSize += chunk.length;
+      if (totalSize > MAX_REMINDER_BODY) {
+        rejected = true;
+        res.writeHead(413, { 'Content-Type': 'text/plain' });
+        res.end('TOO_LARGE');
+        req.destroy();
+      } else {
+        chunks.push(chunk);
+      }
+    });
+
+    req.on('end', async () => {
+      if (rejected) return;
+
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        const to = String(body.to || '').replace(/[^0-9]/g, '');
+        const text = String(body.text || '').trim();
+
+        if (!to || !text) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('MISSING_TO_OR_TEXT');
+          return;
+        }
+        if (!global.currentSock) {
+          console.error('[ReminderRelay] Bot kuu bado haijaunganishwa na WhatsApp - reminder imepotea.');
+          res.writeHead(503, { 'Content-Type': 'text/plain' });
+          res.end('BOT_NOT_READY');
+          return;
+        }
+
+        const jid = `${to}@s.whatsapp.net`;
+        await global.currentSock.sendMessage(jid, { text });
+
+        console.log(`[ReminderRelay] Reminder imetumwa kwenda +${to} - ${new Date().toLocaleString('sw-TZ')}`);
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('OK');
+      } catch (err) {
+        console.error(`[ReminderRelay] Imeshindwa kutuma reminder: ${err.message}`);
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end('ERROR');
       }
