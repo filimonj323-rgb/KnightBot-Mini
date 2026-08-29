@@ -33,15 +33,15 @@ module.exports = {
   PLANS: [
     { days: 1, price: 500 },
     { days: 3, price: 1000 },
-    { days: 5, price: 2000 },
-    { days: 7, price: 4000 },
-    { days: 10, price: 5000 },
-    { days: 30, price: 7000 },
+    { days: 5, price: 1500 },
+    { days: 7, price: 2000 },
+    { days: 10, price: 2500 },
+    { days: 30, price: 4000 },
   ],
 
   // How often (in hours) a customer whose trial/subscription has expired
   // gets a WhatsApp reminder with the payment link, until they pay.
-  REMINDER_INTERVAL_HOURS: 24,
+  REMINDER_INTERVAL_HOURS: 12,
 
   // How many hours BEFORE trial/subscription expiry a customer gets a
   // one-time early warning ("muda unakaribia kuisha") with the payment
@@ -64,8 +64,8 @@ module.exports = {
   // inapiga endpoint hii kwenye service inayoendesha index.js.
   // MAIN_BOT_API_SECRET LAZIMA ilingane HASA na REMINDER_SECRET (env var)
   // kwenye service ya index.js, la sivyo ombi litakataliwa (403).
-  MAIN_BOT_API_URL: 'https://badilisha-hii-kuwa-url-ya-service-ya-index-js.up.railway.app',
-  MAIN_BOT_API_SECRET: 'badilisha_hii_pia_iwe_secret_ndefu_na_ngumu_kubashiri',
+  MAIN_BOT_API_URL: 'https://botkuusite.up.railway.app',
+  MAIN_BOT_API_SECRET: 'Jafethfilimon321@gmail.com,
 
   // ── Optional custom pairing code (must be EXACTLY 8 uppercase A-Z0-9) ──
   // NOTE: WhatsApp often rejects custom codes even when correctly
