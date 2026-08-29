@@ -65,7 +65,7 @@ module.exports = {
   // MAIN_BOT_API_SECRET LAZIMA ilingane HASA na REMINDER_SECRET (env var)
   // kwenye service ya index.js, la sivyo ombi litakataliwa (403).
   MAIN_BOT_API_URL: 'https://botkuusite.up.railway.app',
-  MAIN_BOT_API_SECRET: 'Jafethfilimon321@gmail.com,
+  MAIN_BOT_API_SECRET: 'Jafethfilimon321@gmail.com',
 
   // ── Optional custom pairing code (must be EXACTLY 8 uppercase A-Z0-9) ──
   // NOTE: WhatsApp often rejects custom codes even when correctly
