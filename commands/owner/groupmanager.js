@@ -127,6 +127,7 @@ module.exports = {
           `• .gm broadcast <message> — Tuma kwa GROUPS ZOTE\n` +
           `• .gm groupstatus <namba|groupId|all> <text> — Tuma text status\n` +
           `• (reply picha/video) .gm groupstatus <namba|groupId|all> [caption] — Tuma image/video status\n` +
+          `• .gm groupstatus 1,3,5 <text> — Tuma kwa groups kadhaa (namba zenye comma)\n` +
           `• .gm groupstatus chagua <text> — Bot inaleta vitufe vya kuchagua group\n` +
           `• .gm autoreact <groupId|all> on/off [bot|all] — Auto react\n` +
           `• .gm restore <groupId|all> [namba] — Rudisha walioondoka\n` +
@@ -161,8 +162,9 @@ module.exports = {
       // INFO - Maelezo ya group
       // ══════════════════════════════════════
       if (opt === 'info') {
-        const groupId = args[1];
-        if (!groupId) return extra.reply('❌ Taja group ID: .gm info <groupId>');
+        let groupId = args[1];
+        if (!groupId) return extra.reply('❌ Taja group namba/ID: .gm info <namba|groupId>');
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const meta = await sock.groupMetadata(groupId);
         const admins = meta.participants.filter(p => p.admin);
@@ -184,8 +186,9 @@ module.exports = {
       // ADMINS - Admins wa group
       // ══════════════════════════════════════
       if (opt === 'admins') {
-        const groupId = args[1];
-        if (!groupId) return extra.reply('❌ Taja group ID: .gm admins <groupId>');
+        let groupId = args[1];
+        if (!groupId) return extra.reply('❌ Taja group namba/ID: .gm admins <namba|groupId>');
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const meta = await sock.groupMetadata(groupId);
         const admins = meta.participants.filter(p => p.admin);
@@ -204,8 +207,9 @@ module.exports = {
       // MEMBERS - Members wa group
       // ══════════════════════════════════════
       if (opt === 'members') {
-        const groupId = args[1];
-        if (!groupId) return extra.reply('❌ Taja group ID: .gm members <groupId>');
+        let groupId = args[1];
+        if (!groupId) return extra.reply('❌ Taja group namba/ID: .gm members <namba|groupId>');
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const meta = await sock.groupMetadata(groupId);
         let text = `👥 *Members wa ${meta.subject} (${meta.participants.length})*\n\n`;
@@ -222,11 +226,12 @@ module.exports = {
       // ANTILINK - Washa/Zima antilink
       // ══════════════════════════════════════
       if (opt === 'antilink') {
-        const groupId = args[1];
+        let groupId = args[1];
         const val = args[2]?.toLowerCase();
         if (!groupId || !val) {
-          return extra.reply('❌ Tumia: .gm antilink <groupId|all> on/off');
+          return extra.reply('❌ Tumia: .gm antilink <namba|groupId|all> on/off');
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const database = require('../../database');
 
@@ -256,11 +261,12 @@ module.exports = {
       // ANTIPROMO - Washa/Zima antipromo
       // ══════════════════════════════════════
       if (opt === 'antipromo') {
-        const groupId = args[1];
+        let groupId = args[1];
         const val = args[2]?.toLowerCase();
         if (!groupId || !val) {
-          return extra.reply('❌ Tumia: .gm antipromo <groupId|all> on/off');
+          return extra.reply('❌ Tumia: .gm antipromo <namba|groupId|all> on/off');
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const database = require('../../database');
 
@@ -290,16 +296,17 @@ module.exports = {
       // ANTIGROUPMENTION - Washa/Zima antigroupmention
       // ══════════════════════════════════════
       if (opt === 'antigroupmention' || opt === 'agm') {
-        const groupId = args[1];
+        let groupId = args[1];
         const val = args[2]?.toLowerCase();
 
         if (!groupId) {
           return extra.reply(
             '❌ Tumia:\n' +
-            '.gm antigroupmention <groupId|all> on/off\n' +
-            '.gm antigroupmention <groupId> set delete|kick'
+            '.gm antigroupmention <namba|groupId|all> on/off\n' +
+            '.gm antigroupmention <namba|groupId> set delete|kick'
           );
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const database = require('../../database');
 
@@ -349,11 +356,12 @@ module.exports = {
       // MUTE - Funga/Fungua group
       // ══════════════════════════════════════
       if (opt === 'mute') {
-        const groupId = args[1];
+        let groupId = args[1];
         const val = args[2]?.toLowerCase();
         if (!groupId || !val) {
-          return extra.reply('❌ Tumia: .gm mute <groupId> on/off');
+          return extra.reply('❌ Tumia: .gm mute <namba|groupId> on/off');
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         await sock.groupSettingUpdate(groupId, val === 'on' ? 'announcement' : 'not_announcement');
         const meta = await sock.groupMetadata(groupId);
@@ -367,11 +375,12 @@ module.exports = {
       // KICK - Toa member
       // ══════════════════════════════════════
       if (opt === 'kick') {
-        const groupId = args[1];
+        let groupId = args[1];
         const number = args[2]?.replace(/[^0-9]/g, '');
         if (!groupId || !number) {
-          return extra.reply('❌ Tumia: .gm kick <groupId> <namba>');
+          return extra.reply('❌ Tumia: .gm kick <namba ya group|groupId> <namba ya mtu>');
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const jid = number + '@s.whatsapp.net';
         await sock.groupParticipantsUpdate(groupId, [jid], 'remove');
@@ -383,11 +392,12 @@ module.exports = {
       // PROMOTE - Fanya admin
       // ══════════════════════════════════════
       if (opt === 'promote') {
-        const groupId = args[1];
+        let groupId = args[1];
         const number = args[2]?.replace(/[^0-9]/g, '');
         if (!groupId || !number) {
-          return extra.reply('❌ Tumia: .gm promote <groupId> <namba>');
+          return extra.reply('❌ Tumia: .gm promote <namba ya group|groupId> <namba ya mtu>');
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const jid = number + '@s.whatsapp.net';
         await sock.groupParticipantsUpdate(groupId, [jid], 'promote');
@@ -399,11 +409,12 @@ module.exports = {
       // DEMOTE - Ondoa admin
       // ══════════════════════════════════════
       if (opt === 'demote') {
-        const groupId = args[1];
+        let groupId = args[1];
         const number = args[2]?.replace(/[^0-9]/g, '');
         if (!groupId || !number) {
-          return extra.reply('❌ Tumia: .gm demote <groupId> <namba>');
+          return extra.reply('❌ Tumia: .gm demote <namba ya group|groupId> <namba ya mtu>');
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const jid = number + '@s.whatsapp.net';
         await sock.groupParticipantsUpdate(groupId, [jid], 'demote');
@@ -415,8 +426,9 @@ module.exports = {
       // LINK - Pata invite link
       // ══════════════════════════════════════
       if (opt === 'link') {
-        const groupId = args[1];
-        if (!groupId) return extra.reply('❌ Tumia: .gm link <groupId>');
+        let groupId = args[1];
+        if (!groupId) return extra.reply('❌ Tumia: .gm link <namba|groupId>');
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const code = await sock.groupInviteCode(groupId);
         const meta = await sock.groupMetadata(groupId);
@@ -430,8 +442,9 @@ module.exports = {
       // RESETLINK - Reset invite link
       // ══════════════════════════════════════
       if (opt === 'resetlink') {
-        const groupId = args[1];
-        if (!groupId) return extra.reply('❌ Tumia: .gm resetlink <groupId>');
+        let groupId = args[1];
+        if (!groupId) return extra.reply('❌ Tumia: .gm resetlink <namba|groupId>');
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         await sock.groupRevokeInvite(groupId);
         const newCode = await sock.groupInviteCode(groupId);
@@ -446,11 +459,12 @@ module.exports = {
       // SEND - Tuma message kwa group
       // ══════════════════════════════════════
       if (opt === 'send') {
-        const groupId = args[1];
+        let groupId = args[1];
         const message = args.slice(2).join(' ');
         if (!groupId || !message) {
-          return extra.reply('❌ Tumia: .gm send <groupId> <message>');
+          return extra.reply('❌ Tumia: .gm send <namba|groupId> <message>');
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         await sock.sendMessage(groupId, { text: message });
         const meta = await sock.groupMetadata(groupId);
@@ -593,15 +607,10 @@ module.exports = {
             '.gm groupstatus <namba|groupId|all> <text> — TEXT status\n' +
             '(reply picha/video) .gm groupstatus <namba|groupId|all> [caption] — IMAGE/VIDEO status\n\n' +
             '💡 "Namba" ni namba ya group kama inavyoonekana kwenye *.gm list* (mfano: 1, 2, 3).\n' +
+            '💡 Groups zaidi ya moja: tenganisha kwa comma, mfano *.gm groupstatus 1,3,5 Habari*.\n' +
             '💡 Au tumia *.gm groupstatus chagua <text>* kupata vitufe vya kubonyeza.\n' +
             '💡 Reply (jibu) picha au video moja kwa moja hapa kwenye DM, kisha andika command hii kama caption/reply.'
           );
-        }
-
-        try {
-          groupId = await resolveGroupId(sock, groupId);
-        } catch (e) {
-          return extra.reply(`❌ ${e.message}`);
         }
 
         const buildPayload = () => {
@@ -612,6 +621,48 @@ module.exports = {
           }
           return { text: captionOrText, backgroundColor: PURPLE_COLOR };
         };
+
+        // ══════════════════════════════════════
+        // GROUPS ZAIDI YA MOJA: .gm groupstatus 1,3,5 <text>
+        // (namba/groupId kadhaa zikitenganishwa na comma)
+        // ══════════════════════════════════════
+        if (groupId.toLowerCase() !== 'all' && groupId.includes(',')) {
+          const rawList = groupId.split(',').map(s => s.trim()).filter(Boolean);
+          let groupIds;
+          try {
+            groupIds = await Promise.all(rawList.map(r => resolveGroupId(sock, r)));
+          } catch (e) {
+            return extra.reply(`❌ ${e.message}`);
+          }
+
+          await extra.reply(`📤 Inatuma group status kwa groups *${groupIds.length}*... Subiri.`);
+
+          let success = 0;
+          let failed = 0;
+
+          for (const gid of groupIds) {
+            try {
+              await postGroupStatus(sock, gid, buildPayload());
+              success++;
+              await new Promise(r => setTimeout(r, 1500));
+            } catch (e) {
+              failed++;
+            }
+          }
+
+          return extra.reply(
+            `✅ *Group Status Imekamilika!*\n\n` +
+            `📨 Imefanikiwa: ${success}\n` +
+            `❌ Imeshindwa: ${failed}\n` +
+            `📊 Jumla: ${groupIds.length}`
+          );
+        }
+
+        try {
+          groupId = await resolveGroupId(sock, groupId);
+        } catch (e) {
+          return extra.reply(`❌ ${e.message}`);
+        }
 
         if (groupId.toLowerCase() === 'all') {
           const allGroups = await sock.groupFetchAllParticipating();
@@ -653,18 +704,19 @@ module.exports = {
       // AUTOREACT - Washa/Zima autoreact per-group
       // ══════════════════════════════════════
       if (opt === 'autoreact') {
-        const groupId = args[1];
+        let groupId = args[1];
         const val = args[2]?.toLowerCase();
         const modeArg = args[3]?.toLowerCase();
 
         if (!groupId || !val) {
           return extra.reply(
             '❌ Tumia:\n' +
-            '.gm autoreact <groupId|all> on/off [bot|all]\n\n' +
+            '.gm autoreact <namba|groupId|all> on/off [bot|all]\n\n' +
             '• *bot* — react ⏳ kwa commands tu (default)\n' +
             '• *all* — react emoji random kwa kila ujumbe'
           );
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const database = require('../../database');
         const isOn = val === 'on';
@@ -697,18 +749,19 @@ module.exports = {
       // RESTORE - Rudisha watu walioondoka/kutolewa
       // ══════════════════════════════════════
       if (opt === 'restore') {
-        const groupId = args[1];
+        let groupId = args[1];
         const target = args[2];
 
         if (!groupId) {
           return extra.reply(
             '❌ Tumia:\n' +
-            '.gm restore <groupId> — rudisha WOTE walioondoka\n' +
-            '.gm restore <groupId> <namba> — rudisha mtu mmoja\n' +
+            '.gm restore <namba|groupId> — rudisha WOTE walioondoka\n' +
+            '.gm restore <namba|groupId> <namba ya mtu> — rudisha mtu mmoja\n' +
             '.gm restore all — rudisha wote kwenye groups zote\n\n' +
             '⚠️ Inafanya kazi tu kwa watu walioondoka BAADA ya feature hii kuwekwa.'
           );
         }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const database = require('../../database');
 
@@ -817,8 +870,9 @@ module.exports = {
       // LEAVE - Bot itoke group
       // ══════════════════════════════════════
       if (opt === 'leave') {
-        const groupId = args[1];
-        if (!groupId) return extra.reply('❌ Tumia: .gm leave <groupId>');
+        let groupId = args[1];
+        if (!groupId) return extra.reply('❌ Tumia: .gm leave <namba|groupId>');
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
 
         const meta = await sock.groupMetadata(groupId);
         await sock.sendMessage(groupId, { text: '👋 Bot inaondoka. Kwa heri!' });
