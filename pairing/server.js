@@ -46,6 +46,8 @@ const {
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
+  adminGetOfflineSessions,
+  adminDeleteOfflineSessions,
   adminGetGroupInviteLink,
   adminLookupNumberAcrossAllInstances,
   restoreAllInstances,
@@ -358,6 +360,20 @@ const server = http.createServer(async (req, res) => {
 
       if (req.method === 'GET' && req.url === '/api/admin/users') {
         return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
+      }
+
+      // ── Volume cleanup: bots ambazo hazipo online (offline) — preview na
+      // futa. Kufuta hapa HAKUGUSI userStore/database — ni faili za session
+      // (Railway Volume) tu zinazoondolewa, ili kupunguza volume usage.
+      if (req.method === 'GET' && req.url === '/api/admin/offline-sessions') {
+        const result = await adminGetOfflineSessions();
+        return sendJson(res, 200, { ok: true, ...result });
+      }
+
+      if (req.method === 'POST' && req.url === '/api/admin/delete-offline-sessions') {
+        const body = await readJsonBody(req);
+        const result = await adminDeleteOfflineSessions(body.phoneNumbers);
+        return sendJson(res, 200, { ok: true, ...result });
       }
 
       // Number Lookup (global — si ya bot moja): tafuta namba yoyote KATIKA

@@ -1231,6 +1231,123 @@ async function adminSetBlocked(phoneNumber, blocked) {
   return userStore.setBlocked(normalizePhoneNumber(phoneNumber), blocked);
 }
 
+/**
+ * Jumla ya ukubwa (bytes) wa folder fulani, ikijumuisha subfolders zake
+ * zote — inatumika kuonyesha admin ni MB/GB ngapi zitaachiwa huru kabla
+ * hajafuta chochote.
+ */
+function getFolderSizeBytes(dirPath) {
+  let total = 0;
+  let entries;
+  try {
+    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  } catch (e) {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      total += getFolderSizeBytes(full);
+    } else {
+      try { total += fs.statSync(full).size; } catch (e) { /* faili limepotea kati-kati - ruka */ }
+    }
+  }
+  return total;
+}
+
+/**
+ * Admin: orodha ya session folders (pairing/sessions/<phone> — kwenye
+ * Railway Volume) za bots ambazo HAZIPO ONLINE sasa hivi (hazipo kwenye
+ * instances map ya process hii ikiwa 'connected'), pamoja na ukubwa wa kila
+ * moja kwenye disk. HAIFUTI CHOCHOTE — ni preview tu kwa admin dashboard,
+ * kabla ya kubonyeza "futa".
+ */
+async function adminGetOfflineSessions() {
+  let folders;
+  try {
+    folders = fs.readdirSync(SESSIONS_ROOT).filter((f) => f !== '.gitkeep');
+  } catch (e) {
+    return { sessions: [], totalBytes: 0 };
+  }
+
+  const allUsers = await userStore.getAllUsers();
+  const userByPhone = new Map(allUsers.map((u) => [u.phoneNumber, u]));
+
+  const sessions = [];
+  let totalBytes = 0;
+
+  for (const folder of folders) {
+    const phoneNumber = folder; // jina la folder ndilo namba (tarakimu tu — ona sanitizeFolderName)
+    const live = instances.get(phoneNumber);
+    if (live && live.status === 'connected') continue; // bado iko online - usiiguse
+
+    const sizeBytes = getFolderSizeBytes(path.join(SESSIONS_ROOT, folder));
+    totalBytes += sizeBytes;
+
+    const user = userByPhone.get(phoneNumber);
+    sessions.push({
+      phoneNumber,
+      sizeBytes,
+      liveStatus: live ? live.status : 'offline',
+      inDatabase: !!user,
+      status: user ? user.status : null,
+      pairedAt: user ? user.pairedAt : null,
+    });
+  }
+
+  sessions.sort((a, b) => b.sizeBytes - a.sizeBytes);
+  return { sessions, totalBytes };
+}
+
+/**
+ * Admin: futa session folders (disk — Railway Volume) za bots ZISIZOKUWA
+ * ONLINE sasa hivi. HAIGUSI userStore/database KABISA — rekodi za mteja
+ * (trial/paid/history/blocked) zinabaki pale pale; ni
+ * pairing/sessions/<phone> (creds za WhatsApp) tu zinazofutwa kwenye disk.
+ * Mteja atahitaji ku-"Pata Pairing Code" upya baada ya hapo, lakini
+ * subscription/trial yake haiathiriki.
+ *
+ * phoneNumbers: hiari — array ya namba MAALUM za kufuta (kutoka orodha ya
+ * adminGetOfflineSessions, mfano admin akichagua baadhi tu). Ikiachwa au
+ * ikiwa tupu, inafuta ZOTE zilizo offline.
+ */
+async function adminDeleteOfflineSessions(phoneNumbers) {
+  let folders;
+  try {
+    folders = fs.readdirSync(SESSIONS_ROOT).filter((f) => f !== '.gitkeep');
+  } catch (e) {
+    return { removed: 0, removedNumbers: [], freedBytes: 0 };
+  }
+
+  const wantedSet = Array.isArray(phoneNumbers) && phoneNumbers.length
+    ? new Set(phoneNumbers.map(normalizePhoneNumber))
+    : null;
+
+  const removedNumbers = [];
+  let freedBytes = 0;
+
+  for (const folder of folders) {
+    const phoneNumber = folder;
+    if (wantedSet && !wantedSet.has(phoneNumber)) continue;
+
+    const live = instances.get(phoneNumber);
+    if (live && live.status === 'connected') continue; // salama - bado online, ruka kabisa
+
+    const fullPath = path.join(SESSIONS_ROOT, folder);
+    freedBytes += getFolderSizeBytes(fullPath);
+
+    if (live?.sock) {
+      try { live.sock.end(undefined); } catch (e) { /* tayari imefungwa - sawa */ }
+    }
+    instances.delete(phoneNumber);
+
+    fs.rmSync(fullPath, { recursive: true, force: true });
+    removedNumbers.push(phoneNumber);
+  }
+
+  return { removed: removedNumbers.length, removedNumbers, freedBytes };
+}
+
 /** Admin "badilisha muda" — deltaDays may be negative (punguza) or positive (ongeza). */
 async function adminAdjustDays(phoneNumber, deltaDays) {
   return userStore.adjustActiveDays(normalizePhoneNumber(phoneNumber), Number(deltaDays) || 0);
@@ -1729,6 +1846,8 @@ module.exports = {
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
+  adminGetOfflineSessions,
+  adminDeleteOfflineSessions,
   adminGetGroupInviteLink,
   adminLookupNumberAcrossAllInstances,
   restoreAllInstances,
