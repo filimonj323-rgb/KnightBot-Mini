@@ -102,7 +102,7 @@ const pino = require('pino');
 // dynamic import(), BEFORE './handler' (and the ~130 command files it loads
 // via loadCommands()) are required — so any command file's top-level
 // `const { X } = global.__baileys` line resolves correctly.
-let makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion;
+let makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion;
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
 let handler; // populated by loadBaileysBridge()
@@ -240,7 +240,6 @@ async function loadBaileysBridge() {
   global.__baileys = baileys;
   ({
     default: makeWASocket,
-    useMultiFileAuthState,
     DisconnectReason,
     Browsers,
     fetchLatestBaileysVersion
@@ -248,10 +247,22 @@ async function loadBaileysBridge() {
   handler = require('./handler');
 }
 
+// Turso (libSQL)-backed session store — inachukua nafasi ya useMultiFileAuthState
+// (ambayo iliandika creds/keys kwenye ./session folder, na hivyo ilihitaji
+// Railway volume ili isipotee kwa kila deploy/restart). Lazima ipakiwe
+// BAADA ya loadBaileysBridge() kwa sababu inasoma initAuthCreds/
+// makeCacheableSignalKeyStore kutoka global.__baileys.
+const { initializeDatabase, useTursoAuthState, seedCredsFromLegacyImport } = require('./session-db');
+
 // Main connection function
 async function startBot() {
-  const sessionFolder = `./${config.sessionName}`;
-  const sessionFile = path.join(sessionFolder, 'creds.json');
+  // Huunda wa_sessions/wa_session_keys/wa_messages ikiwa hazipo bado —
+  // salama kuita kila boot (CREATE TABLE IF NOT EXISTS).
+  await initializeDatabase();
+
+  // sessionId ya Turso — jina moja thabiti kwa bot hii (hailingani na
+  // folda yoyote ya disk tena, kwa hiyo haihitaji Railway volume).
+  const sessionId = config.sessionName || 'default';
 
   // Check if sessionID is provided and process KnightBot! format session
   if (config.sessionID && config.sessionID.startsWith('KnightBot!')) {
@@ -266,14 +277,9 @@ async function startBot() {
       const compressedData = Buffer.from(cleanB64, 'base64');
       const decompressedData = zlib.gunzipSync(compressedData);
 
-      // Ensure session folder exists
-      if (!fs.existsSync(sessionFolder)) {
-        fs.mkdirSync(sessionFolder, { recursive: true });
-      }
-
-      // Write decompressed session data to creds.json
-      fs.writeFileSync(sessionFile, decompressedData, 'utf8');
-      console.log('📡 Session : 🔑 Retrieved from KnightBot Session');
+      // Andika creds moja kwa moja Turso badala ya creds.json kwenye disk.
+      await seedCredsFromLegacyImport(sessionId, decompressedData);
+      console.log('📡 Session : 🔑 Retrieved from KnightBot Session (Turso)');
 
     } catch (e) {
       console.error('📡 Session : ❌ Error processing KnightBot session:', e.message);
@@ -281,7 +287,7 @@ async function startBot() {
     }
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
+  const { state, saveCreds } = await useTursoAuthState(sessionId);
   const { version } = await fetchLatestBaileysVersion();
 
   // Use suppressed logger for socket
