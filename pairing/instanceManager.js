@@ -321,42 +321,6 @@ async function buildExpiryMessage(kind, token, extra = {}) {
   );
 }
 
-/**
- * Anatuma ujumbe wa reminder/expiry kwa mteja kutoka namba ya OWNER ya bot
- * kuu (index.js), si kutoka bot ndogo ya mteja mwenyewe — kwa kupiga
- * endpoint ya HTTP iliyowekwa kwenye index.js (REMINDER_SEND_PATH), kwa
- * sababu bot kuu na pairing server ni process/Railway service tofauti.
- * Ikishindikana (bot kuu haipo online, secret hailingani, n.k.) tunarudi
- * kwenye njia ya zamani (mteja kujitumia mwenyewe) ili mteja asikose
- * kabisa ujumbe wake wa malipo.
- */
-async function notifyCustomerViaMainBot(phoneNumber, text, fallbackSock) {
-  const url = cfg.MAIN_BOT_API_URL;
-  const secret = cfg.MAIN_BOT_API_SECRET;
-
-  if (url && secret) {
-    try {
-      await axios.post(`${url.replace(/\/$/, '')}/api/send-reminder?secret=${encodeURIComponent(secret)}`, {
-        to: phoneNumber,
-        text,
-      }, { timeout: 15000 });
-      return true;
-    } catch (e) {
-      console.error(`[ReminderRelay] imeshindwa kufikia bot kuu kwa ${phoneNumber}, narudi kwenye self-message:`, e.message);
-    }
-  }
-
-  if (fallbackSock) {
-    try {
-      await fallbackSock.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text });
-      return true;
-    } catch (e) {
-      console.error(`[ReminderRelay] fallback self-message imeshindwa kwa ${phoneNumber}:`, e.message);
-    }
-  }
-  return false;
-}
-
 let baileysBridgeLoaded = false;
 let makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason;
 let handler;
@@ -386,15 +350,6 @@ async function ensureBaileysBridge() {
   handler = require('../handler');
 
   baileysBridgeLoaded = true;
-}
-
-// Emoji pool for per-customer status auto-react (autoReactStatus). Kept
-// local to this file (not handler.js's STATUS_REACTIONS) so it stays fully
-// independent of the main/owner bot — see the file-level comment above.
-const STATUS_REACT_EMOJIS = ['❤️', '🔥', '👍', '😍', '🥰', '💯', '😊', '✨', '😂', '👌', '🤝', '💫'];
-
-function randomStatusReaction() {
-  return STATUS_REACT_EMOJIS[Math.floor(Math.random() * STATUS_REACT_EMOJIS.length)];
 }
 
 function normalizePhoneNumber(raw) {
@@ -490,7 +445,7 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
             ? 'Muda wa malipo yako umeisha.'
             : 'Muda wako wa majaribio (trial) umeisha.';
           buildExpiryMessage('expired', record.token, { reasonText }).then((text) => {
-            notifyCustomerViaMainBot(phoneNumber, text, sock);
+            sock.sendMessage(selfJid, { text }).catch(() => {});
           });
         }
         await userStore.markExpiryNotified(phoneNumber);
@@ -603,11 +558,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
                   // bridge) has always already completed.
                   const { normalizeJidWithLid } = require('../utils/jidHelper');
                   const deliverJid = normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
-                  // Random emoji per reaction — picked fresh from
-                  // STATUS_REACT_EMOJIS above (bot kuu's fixed/randomReact
-                  // toggle in handler.js is untouched by this).
                   await sock.sendMessage('status@broadcast', {
-                    react: { text: randomStatusReaction(), key: msg.key },
+                    react: { text: '❤️', key: msg.key },
                   }, { statusJidList: [deliverJid, sock.user.id] });
                 } catch (e) { /* status inaweza kuwa imeondolewa kabla ya react — si tatizo */ }
               }, delayMs);
@@ -1231,123 +1183,6 @@ async function adminSetBlocked(phoneNumber, blocked) {
   return userStore.setBlocked(normalizePhoneNumber(phoneNumber), blocked);
 }
 
-/**
- * Jumla ya ukubwa (bytes) wa folder fulani, ikijumuisha subfolders zake
- * zote — inatumika kuonyesha admin ni MB/GB ngapi zitaachiwa huru kabla
- * hajafuta chochote.
- */
-function getFolderSizeBytes(dirPath) {
-  let total = 0;
-  let entries;
-  try {
-    entries = fs.readdirSync(dirPath, { withFileTypes: true });
-  } catch (e) {
-    return 0;
-  }
-  for (const entry of entries) {
-    const full = path.join(dirPath, entry.name);
-    if (entry.isDirectory()) {
-      total += getFolderSizeBytes(full);
-    } else {
-      try { total += fs.statSync(full).size; } catch (e) { /* faili limepotea kati-kati - ruka */ }
-    }
-  }
-  return total;
-}
-
-/**
- * Admin: orodha ya session folders (pairing/sessions/<phone> — kwenye
- * Railway Volume) za bots ambazo HAZIPO ONLINE sasa hivi (hazipo kwenye
- * instances map ya process hii ikiwa 'connected'), pamoja na ukubwa wa kila
- * moja kwenye disk. HAIFUTI CHOCHOTE — ni preview tu kwa admin dashboard,
- * kabla ya kubonyeza "futa".
- */
-async function adminGetOfflineSessions() {
-  let folders;
-  try {
-    folders = fs.readdirSync(SESSIONS_ROOT).filter((f) => f !== '.gitkeep');
-  } catch (e) {
-    return { sessions: [], totalBytes: 0 };
-  }
-
-  const allUsers = await userStore.getAllUsers();
-  const userByPhone = new Map(allUsers.map((u) => [u.phoneNumber, u]));
-
-  const sessions = [];
-  let totalBytes = 0;
-
-  for (const folder of folders) {
-    const phoneNumber = folder; // jina la folder ndilo namba (tarakimu tu — ona sanitizeFolderName)
-    const live = instances.get(phoneNumber);
-    if (live && live.status === 'connected') continue; // bado iko online - usiiguse
-
-    const sizeBytes = getFolderSizeBytes(path.join(SESSIONS_ROOT, folder));
-    totalBytes += sizeBytes;
-
-    const user = userByPhone.get(phoneNumber);
-    sessions.push({
-      phoneNumber,
-      sizeBytes,
-      liveStatus: live ? live.status : 'offline',
-      inDatabase: !!user,
-      status: user ? user.status : null,
-      pairedAt: user ? user.pairedAt : null,
-    });
-  }
-
-  sessions.sort((a, b) => b.sizeBytes - a.sizeBytes);
-  return { sessions, totalBytes };
-}
-
-/**
- * Admin: futa session folders (disk — Railway Volume) za bots ZISIZOKUWA
- * ONLINE sasa hivi. HAIGUSI userStore/database KABISA — rekodi za mteja
- * (trial/paid/history/blocked) zinabaki pale pale; ni
- * pairing/sessions/<phone> (creds za WhatsApp) tu zinazofutwa kwenye disk.
- * Mteja atahitaji ku-"Pata Pairing Code" upya baada ya hapo, lakini
- * subscription/trial yake haiathiriki.
- *
- * phoneNumbers: hiari — array ya namba MAALUM za kufuta (kutoka orodha ya
- * adminGetOfflineSessions, mfano admin akichagua baadhi tu). Ikiachwa au
- * ikiwa tupu, inafuta ZOTE zilizo offline.
- */
-async function adminDeleteOfflineSessions(phoneNumbers) {
-  let folders;
-  try {
-    folders = fs.readdirSync(SESSIONS_ROOT).filter((f) => f !== '.gitkeep');
-  } catch (e) {
-    return { removed: 0, removedNumbers: [], freedBytes: 0 };
-  }
-
-  const wantedSet = Array.isArray(phoneNumbers) && phoneNumbers.length
-    ? new Set(phoneNumbers.map(normalizePhoneNumber))
-    : null;
-
-  const removedNumbers = [];
-  let freedBytes = 0;
-
-  for (const folder of folders) {
-    const phoneNumber = folder;
-    if (wantedSet && !wantedSet.has(phoneNumber)) continue;
-
-    const live = instances.get(phoneNumber);
-    if (live && live.status === 'connected') continue; // salama - bado online, ruka kabisa
-
-    const fullPath = path.join(SESSIONS_ROOT, folder);
-    freedBytes += getFolderSizeBytes(fullPath);
-
-    if (live?.sock) {
-      try { live.sock.end(undefined); } catch (e) { /* tayari imefungwa - sawa */ }
-    }
-    instances.delete(phoneNumber);
-
-    fs.rmSync(fullPath, { recursive: true, force: true });
-    removedNumbers.push(phoneNumber);
-  }
-
-  return { removed: removedNumbers.length, removedNumbers, freedBytes };
-}
-
 /** Admin "badilisha muda" — deltaDays may be negative (punguza) or positive (ongeza). */
 async function adminAdjustDays(phoneNumber, deltaDays) {
   return userStore.adjustActiveDays(normalizePhoneNumber(phoneNumber), Number(deltaDays) || 0);
@@ -1378,13 +1213,9 @@ async function getBillingForToken(token) {
  *   2) Muda tayari umekwisha → kumbusho la mara kwa mara (kila
  *      REMINDER_INTERVAL_HOURS) mpaka alipe.
  * Zote mbili zinatumia link ya malipo pekee (fupi, moja kwa moja
- * "💳 Malipo"), na zinatumwa kutoka namba ya OWNER ya bot kuu (kupitia
- * notifyCustomerViaMainBot — ona comment yake juu) badala ya mteja
- * kujitumia mwenyewe; hii inarudi kwenye njia ya zamani (self-message)
- * PEKEE kama bot kuu haifikiki wakati huo. Inafikia tu wateja ambao
- * socket yao iko live kwenye process hii (yaani hakuna redeploy tangu
- * waunganike mara ya mwisho) — mipaka ile ile ya model ya in-memory
- * instances iliyopo kwenye faili hii.
+ * "💳 Malipo"). Inafikia tu wateja ambao socket yao iko live kwenye
+ * process hii (yaani hakuna redeploy tangu waunganike mara ya mwisho) —
+ * mipaka ile ile ya model ya in-memory instances iliyopo kwenye faili hii.
  */
 function startReminderScheduler() {
   setInterval(async () => {
@@ -1392,11 +1223,12 @@ function startReminderScheduler() {
 
     for (const [phoneNumber, record] of instances.entries()) {
       if (record.status !== 'connected' || !record.sock || !record.token) continue;
+      const selfJid = `${phoneNumber}@s.whatsapp.net`;
 
       // (1) Onyo la mapema — muda bado upo lakini unakaribia kuisha.
       if (await userStore.isExpiryWarningDue(phoneNumber, warningHours)) {
         buildExpiryMessage('warning', record.token).then((text) => {
-          notifyCustomerViaMainBot(phoneNumber, text, record.sock);
+          record.sock.sendMessage(selfJid, { text }).catch(() => {});
         });
         await userStore.markExpiryWarningSent(phoneNumber);
         continue; // asipate onyo na kumbusho kwenye mzunguko mmoja
@@ -1407,7 +1239,7 @@ function startReminderScheduler() {
       if (!due) continue;
 
       buildExpiryMessage('reminder', record.token).then((text) => {
-        notifyCustomerViaMainBot(phoneNumber, text, record.sock);
+        record.sock.sendMessage(selfJid, { text }).catch(() => {});
       });
       await userStore.markReminderSent(phoneNumber);
     }
@@ -1631,6 +1463,36 @@ async function adminResetUserSession(rawPhoneNumber) {
 }
 
 /**
+ * Futa mteja KABISA — tofauti na adminResetUserSession (ambayo inamruhusu
+ * ku-pair upya), hii inamwondoa kabisa: inafunga socket, inafuta session
+ * folder DISKINI (kupata nafasi ya Volume), NA inafuta rekodi zake zote
+ * kwenye Turso (users/payments/tokens/settings/usage_daily) ili namba
+ * isionekane tena kwenye orodha ya admin. Haiwezi kutenduliwa — namba
+ * ikitaka kurudi itaanza upya kama mteja mpya kabisa (trial mpya, n.k.).
+ */
+async function adminDeleteUserCompletely(rawPhoneNumber) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+
+  const inst = instances.get(phoneNumber);
+  if (inst?.sock) {
+    try { inst.sock.end(undefined); } catch (e) { /* already closed — fine */ }
+  }
+  instances.delete(phoneNumber);
+
+  const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
+  fs.rmSync(sessionFolder, { recursive: true, force: true });
+
+  await db.query('DELETE FROM users WHERE phoneNumber = ?', [phoneNumber]);
+  await db.query('DELETE FROM payments WHERE phoneNumber = ?', [phoneNumber]);
+  await db.query('DELETE FROM tokens WHERE phoneNumber = ?', [phoneNumber]);
+  await db.query('DELETE FROM settings WHERE phoneNumber = ?', [phoneNumber]);
+  await db.query('DELETE FROM usage_daily WHERE phoneNumber = ?', [phoneNumber]);
+  await db.query('DELETE FROM pending_orders WHERE phoneNumber = ?', [phoneNumber]);
+
+  return { phoneNumber, deleted: true };
+}
+
+/**
  * Admin: invite link ya GROUP MOJA ya instance ya mteja fulani. Inaitwa moja
  * moja (per group, kwenye kitufe "Pata Link" cha kila group) badala ya
  * kuchukua links za groups zote kwa pamoja — kuepuka kupiga WhatsApp maombi
@@ -1846,8 +1708,7 @@ module.exports = {
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
-  adminGetOfflineSessions,
-  adminDeleteOfflineSessions,
+  adminDeleteUserCompletely,
   adminGetGroupInviteLink,
   adminLookupNumberAcrossAllInstances,
   restoreAllInstances,

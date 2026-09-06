@@ -46,8 +46,7 @@ const {
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
-  adminGetOfflineSessions,
-  adminDeleteOfflineSessions,
+  adminDeleteUserCompletely,
   adminGetGroupInviteLink,
   adminLookupNumberAcrossAllInstances,
   restoreAllInstances,
@@ -362,20 +361,6 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
       }
 
-      // ── Volume cleanup: bots ambazo hazipo online (offline) — preview na
-      // futa. Kufuta hapa HAKUGUSI userStore/database — ni faili za session
-      // (Railway Volume) tu zinazoondolewa, ili kupunguza volume usage.
-      if (req.method === 'GET' && req.url === '/api/admin/offline-sessions') {
-        const result = await adminGetOfflineSessions();
-        return sendJson(res, 200, { ok: true, ...result });
-      }
-
-      if (req.method === 'POST' && req.url === '/api/admin/delete-offline-sessions') {
-        const body = await readJsonBody(req);
-        const result = await adminDeleteOfflineSessions(body.phoneNumbers);
-        return sendJson(res, 200, { ok: true, ...result });
-      }
-
       // Number Lookup (global — si ya bot moja): tafuta namba yoyote KATIKA
       // GROUPS ZA BOT ZOTE zinazoendesha kwa sasa, si za instance moja tu —
       // kwa sababu namba fulani inaweza kuwa kwenye group ya mteja A wakati
@@ -437,6 +422,13 @@ const server = http.createServer(async (req, res) => {
 
         if (action === 'reset-session' && req.method === 'POST') {
           const result = await adminResetUserSession(phone);
+          return sendJson(res, 200, { ok: true, ...result });
+        }
+
+        // Futa mteja KABISA (session + rekodi zote za DB) — tofauti na
+        // reset-session, huyu haonekani tena kwenye orodha ya admin.
+        if (action === 'delete' && req.method === 'POST') {
+          const result = await adminDeleteUserCompletely(phone);
           return sendJson(res, 200, { ok: true, ...result });
         }
 
