@@ -148,7 +148,31 @@ function serveStatic(req, res, urlPath) {
   });
 }
 
+// Frontend sasa iko kwenye origin tofauti (GitHub Pages), siyo server hii
+// tena — browser inahitaji ruhusa ya CORS kabla ya kukubali majibu.
+// Weka ALLOWED_ORIGIN kwenye Railway env vars kuwa URL kamili ya GitHub
+// Pages yako, mfano: https://jina-lako.github.io — '*' ni default salama
+// kwa sababu hatutumii cookies/credentials, request zote zinatumia
+// Authorization: Bearer token badala yake.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+
+function applyCors(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
 const server = http.createServer(async (req, res) => {
+  applyCors(req, res);
+
+  // Preflight: browser inatuma OPTIONS kabla ya POST/GET yenye Authorization
+  // header, hasa kwa admin.html na dashboard.html. Lazima ijibiwe 204 pekee,
+  // bila kuendelea kwenye routing ya kawaida chini.
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
+  }
+
   try {
     if (req.method === 'POST' && req.url === '/api/pair') {
       const body = await readJsonBody(req);
