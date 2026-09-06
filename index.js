@@ -252,7 +252,12 @@ async function loadBaileysBridge() {
 // Railway volume ili isipotee kwa kila deploy/restart). Lazima ipakiwe
 // BAADA ya loadBaileysBridge() kwa sababu inasoma initAuthCreds/
 // makeCacheableSignalKeyStore kutoka global.__baileys.
-const { initializeDatabase, useTursoAuthState, seedCredsFromLegacyImport } = require('./session-db');
+const {
+  initializeDatabase,
+  useTursoAuthState,
+  seedCredsFromLegacyImport,
+  migrateDiskSessionIfPresent,
+} = require('./session-db');
 
 // Main connection function
 async function startBot() {
@@ -263,6 +268,17 @@ async function startBot() {
   // sessionId ya Turso — jina moja thabiti kwa bot hii (hailingani na
   // folda yoyote ya disk tena, kwa hiyo haihitaji Railway volume).
   const sessionId = config.sessionName || 'default';
+
+  // Uhamisho wa MARA-MOJA: kama Railway volume bado ina session ya zamani
+  // kwenye ./session (iliyoandikwa na useMultiFileAuthState kabla ya
+  // kuhamia Turso), ihamishe kwenda Turso sasa badala ya kulazimisha
+  // ku-scan QR/pairing code upya. Salama kuita kila boot — ni no-op ikiwa
+  // tayari imehamishwa au Turso tayari ina session hii. Weka
+  // LEGACY_SESSION_DIR kwenye env kama folda ya zamani si "./session".
+  await migrateDiskSessionIfPresent(
+    sessionId,
+    path.join(__dirname, process.env.LEGACY_SESSION_DIR || 'session')
+  );
 
   // Check if sessionID is provided and process KnightBot! format session
   if (config.sessionID && config.sessionID.startsWith('KnightBot!')) {

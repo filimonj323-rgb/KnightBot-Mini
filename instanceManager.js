@@ -80,7 +80,7 @@ async function ensureBaileysBridge() {
   // handler.js reads `global.__baileys` at require-time, and only needs to
   // be required once — require() caches the module, so calling this again
   // from index.js (if both run in one process) is harmless.
-  handler = require('../handler');
+  handler = require('./handler');
 
   baileysBridgeLoaded = true;
 }

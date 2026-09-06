@@ -18,11 +18,14 @@
 //
 // "API" (majina ya functions zinazotumika nje: initializeDatabase,
 // useTursoAuthState, deleteSession, deleteAllSessions,
-// seedCredsFromLegacyImport) ndiyo kiungo pekee ambacho index.js kinahitaji.
+// seedCredsFromLegacyImport, migrateDiskSessionIfPresent) ndiyo kiungo
+// pekee ambacho index.js kinahitaji.
 
 const { getClient, runBatch } = require('./lib/db');
 const pino = require('pino');
 const { createLogger } = require('./lib/logger');
+const fs = require('fs');
+const path = require('path');
 
 const logger = pino({ level: 'silent' }); // passed to Baileys' makeCacheableSignalKeyStore — must stay pino, not our wrapper
 const log = createLogger('session-db'); // structured logging for this module's own messages
@@ -202,6 +205,24 @@ async function loadCreds(sessionId) {
   }, `loadCreds(${sessionId})`);
 }
 
+/**
+ * Inaorodhesha session_id zote zilizopo kwenye Turso zenye prefix fulani
+ * (mfano "pairing_" kwa ajili ya wateja wa pairing/instanceManager.js).
+ * Inatumika kwenye auto-reconnect ya boot ili kupata namba ambazo tayari
+ * zimehamishwa Turso hata kama folda yao ya disk haipo tena (imeshahamishwa
+ * jina awali, au Railway volume mpya haina chochote).
+ */
+async function listSessionIds(prefix) {
+  return retryOperation(async () => {
+    const client = getClient();
+    const res = await client.execute({
+      sql: `SELECT session_id FROM wa_sessions WHERE session_id LIKE ?`,
+      args: [`${prefix}%`],
+    });
+    return res.rows.map((r) => r.session_id);
+  }, `listSessionIds(${prefix})`);
+}
+
 async function saveCredsRow(sessionId, credsData) {
   return retryOperation(async () => {
     const client = getClient();
@@ -290,6 +311,120 @@ async function deleteKeys(sessionId, keyIds) {
         args: [sessionId, ...chunk],
       });
     }, `deleteKeys(${sessionId}, batch ${i / MAX_KEYS_PER_BATCH})`);
+  }
+}
+
+// ── UHAMISHO: ./session (au pairing/sessions/<phone>) KWENYE VOLUME → TURSO ──
+// Baileys' useMultiFileAuthState() huandika creds.json + funguo nyingine kama
+// `${category}-${id}.json` (mfano "pre-key-3.json", "session-2557...-1@s...
+// .json"). Category zenyewe zina "-" ndani yake, kwa hiyo tunalinganisha na
+// orodha ya majina yanayojulikana (ndefu kwanza) badala ya kugawanya kwa "-".
+const KNOWN_KEY_CATEGORIES = [
+  'app-state-sync-version',
+  'app-state-sync-key',
+  'sender-key-memory',
+  'sender-key',
+  'pre-key',
+  'session',
+];
+
+function parseLegacyKeyFileName(fileName) {
+  if (!fileName.endsWith('.json')) return null;
+  const base = fileName.slice(0, -'.json'.length);
+  for (const category of KNOWN_KEY_CATEGORIES) {
+    if (base.startsWith(`${category}-`)) {
+      return { type: category, id: base.slice(category.length + 1) };
+    }
+  }
+  return null; // faili isiyotambulika (mfano app-state-sync-version bila id, faili potofu, n.k) — ruka salama
+}
+
+/**
+ * Kama Turso HAINA session hii bado, lakini kuna folda ya zamani kwenye disk
+ * (Railway volume, iliyoandikwa na useMultiFileAuthState kabla ya kuhamia
+ * Turso) yenye creds.json — inahamisha creds + funguo zake ZOTE kwenda Turso
+ * mara moja, kisha inabadilisha jina la folda ile (haiifuti) ili isijaribiwe
+ * tena. Matokeo yake: hakuna haja ya ku-scan QR/pairing code upya baada ya
+ * kubadili msimbo kutumia Turso — session ya zamani "inahamia" tu.
+ *
+ * Salama kuita kila boot (idempotent):
+ *  - Kama Turso tayari ina creds za sessionId hii → no-op (haiandiki juu).
+ *  - Kama folda ya disk haipo au haina creds.json → no-op.
+ *  - Kama uhamisho umeshafanyika awali, folda tayari imebadilishwa jina
+ *    (`<folder>.migrated-<timestamp>`) hivyo haitaonekana tena kwenye path
+ *    ya awali.
+ *
+ * @param {string} sessionId - jina la session kwenye Turso (config.sessionName || 'default')
+ * @param {string} diskFolder - path kamili ya folda ya zamani (mfano `${__dirname}/session`)
+ * @returns {Promise<boolean>} true ikiwa uhamisho umefanyika sasa hivi
+ */
+async function migrateDiskSessionIfPresent(sessionId, diskFolder) {
+  try {
+    const credsPath = path.join(diskFolder, 'creds.json');
+    if (!fs.existsSync(diskFolder) || !fs.existsSync(credsPath)) {
+      return false; // hakuna session ya zamani ya kuhamisha
+    }
+
+    await initializeDatabase();
+
+    const existing = await loadCreds(sessionId);
+    if (existing) {
+      log.info(
+        `[session-db] Turso tayari ina session "${sessionId}" — sikuhamishi kutoka disk (${diskFolder}). ` +
+        `Unaweza kuifuta folda hiyo mwenyewe ukishathibitisha bot inafanya kazi vizuri.`
+      );
+      return false;
+    }
+
+    log.info(`[session-db] Nimeona session ya zamani kwenye Railway volume (${diskFolder}) — ninaihamisha kwenda Turso...`);
+
+    // 1) Creds (sehemu MUHIMU zaidi — bila hii, huwezi kuepuka kulink upya)
+    const rawCreds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+    await saveCredsRow(sessionId, reviveBuffers(rawCreds));
+
+    // 2) Funguo nyingine zote (pre-key/session/sender-key/app-state-sync-*)
+    const keyMap = {};
+    let unrecognized = 0;
+    for (const file of fs.readdirSync(diskFolder)) {
+      if (file === 'creds.json') continue;
+      const parsed = parseLegacyKeyFileName(file);
+      if (!parsed) {
+        if (file.endsWith('.json')) unrecognized++;
+        continue;
+      }
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(diskFolder, file), 'utf-8'));
+        keyMap[`${parsed.type}--${parsed.id}`] = reviveBuffers(raw);
+      } catch (e) {
+        log.warn(`[session-db] Faili "${file}" haikusomeka wakati wa uhamisho, imerukwa: ${e.message}`);
+      }
+    }
+    const keyCount = Object.keys(keyMap).length;
+    if (keyCount > 0) {
+      await upsertKeys(sessionId, keyMap);
+    }
+
+    // 3) Badilisha jina la folda ya zamani (si kuifuta) — salama, na inazuia
+    //    uhamisho huu kujaribiwa tena boot ijayo.
+    let archivedPath = null;
+    try {
+      archivedPath = `${diskFolder}.migrated-${Date.now()}`;
+      fs.renameSync(diskFolder, archivedPath);
+    } catch (e) {
+      log.warn(`[session-db] Uhamisho umefanikiwa lakini kubadilisha jina la folda ya zamani kumeshindikana (si tatizo kubwa): ${e.message}`);
+    }
+
+    log.info(
+      `[session-db] ✅ Session "${sessionId}" imehamishwa kutoka Railway volume kwenda Turso ` +
+      `(creds + funguo ${keyCount}${unrecognized ? `, faili ${unrecognized} hazikutambulika zikarukwa` : ''}). ` +
+      `Hakuna haja ya kulink upya.` +
+      (archivedPath ? ` Folda ya zamani imehifadhiwa kama "${path.basename(archivedPath)}".` : '')
+    );
+
+    return true;
+  } catch (err) {
+    log.error(`[session-db] migrateDiskSessionIfPresent(${sessionId}, ${diskFolder}) error: ${err.message}`);
+    return false; // kushindwa hapa hakuzuii bot kuendelea na normal QR/pairing flow
   }
 }
 
@@ -729,4 +864,7 @@ module.exports = {
   saveMessageForRetry,
   getStoredMessage,
   seedCredsFromLegacyImport,
+  migrateDiskSessionIfPresent,
+  loadCreds,
+  listSessionIds,
 };
