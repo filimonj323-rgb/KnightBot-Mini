@@ -145,16 +145,6 @@
 
   /* ── Detail slide-over ── */
   #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 30; }
-  #cleanupOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 30; }
-  #cleanupPanel {
-    display: none; position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw);
-    background: var(--panel); border-left: 1px solid var(--border); z-index: 31;
-    overflow-y: auto; padding: 18px 18px 40px;
-  }
-  #cleanupPanel .dhead { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
-  #cleanupPanel h2 { font-size: 16px; margin: 0; }
-  #cleanupPanel .closeBtn { background: transparent; border: none; color: var(--muted); font-size: 18px; padding: 2px 6px; }
-
   #detail {
     display: none; position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100vw);
     background: var(--panel); border-left: 1px solid var(--border); z-index: 31;
@@ -207,7 +197,6 @@
 
   @media (max-width: 640px) {
     #detail { width: 100vw; }
-    #cleanupPanel { width: 100vw; }
     .content { padding: 14px 12px 60px; }
   }
 </style>
@@ -253,7 +242,6 @@
     <div class="toolbar">
       <button class="ghost" onclick="downloadBackup()">⬇️ Backup Kamili</button>
       <button class="danger" onclick="resetAllSessions()">🗑️ Futa Sessions Zote Chakavu</button>
-      <button class="danger" onclick="openCleanup()">🧹 Futa Bots Zisizo Online (Volume)</button>
       <button class="ghost" onclick="loadUsers()">↻ Refresh</button>
     </div>
 
@@ -294,6 +282,7 @@
     <div class="actrow">
       <button onclick="resendLink()">📤 Tuma Link Upya</button>
       <button class="danger" onclick="resetUserSession()">🔌 Futa Session (Force Re-pair)</button>
+      <button class="danger" onclick="deleteUserCompletely()">🗑️ Futa Kabisa (Ondoa kwenye Orodha)</button>
     </div>
     <div class="toast" id="dOverviewMsg"></div>
   </div>
@@ -403,39 +392,6 @@
     <div class="section-label">Matumizi — Ujumbe Ulioshughulikiwa (Siku 14 za Mwisho)</div>
     <div id="dUsageChart"></div>
   </div>
-</div>
-
-<!-- ── Volume Cleanup: futa session folders (disk) za bots zisizo online ── -->
-<div id="cleanupOverlay" onclick="closeCleanup()"></div>
-<div id="cleanupPanel">
-  <div class="dhead">
-    <div>
-      <h2>🧹 Futa Bots Zisizo Online</h2>
-      <div class="sub" style="font-size:11px;color:var(--muted);margin-top:2px;">
-        Inafuta session (creds za WhatsApp) kwenye Railway Volume tu — akaunti/trial/paid ya mteja HAIGUSWI, inabaki database.
-      </div>
-    </div>
-    <button class="closeBtn" onclick="closeCleanup()">✕</button>
-  </div>
-
-  <div class="kv"><span class="k">Jumla ya nafasi itakayoachiwa huru</span><span class="v" id="cleanupTotalSize">—</span></div>
-  <div class="kv"><span class="k">Idadi ya bots zisizo online</span><span class="v" id="cleanupTotalCount">—</span></div>
-
-  <div class="actrow" style="margin-top:12px;">
-    <button class="ghost" onclick="cleanupSelectAll()">☑️ Chagua Zote</button>
-    <button class="ghost" onclick="cleanupSelectNone()">⬜ Ondoa Zote</button>
-  </div>
-
-  <div class="group-list" id="cleanupList" style="margin-top:10px;max-height:420px;">
-    <div class="empty">Inapakia...</div>
-  </div>
-
-  <div class="actrow" style="margin-top:14px;">
-    <button class="danger" onclick="deleteSelectedOffline()">🗑️ Futa Zilizochaguliwa</button>
-    <button class="danger" onclick="deleteAllOffline()">🗑️ Futa ZOTE Zisizo Online</button>
-  </div>
-
-  <div class="toast" id="cleanupMsg"></div>
 </div>
 
 <script>
@@ -821,6 +777,19 @@
     }
   }
 
+  async function deleteUserCompletely() {
+    if (!confirm(`Futa ${CURRENT_PHONE} KABISA? Hii itafuta session NA rekodi zake zote (malipo, trial, mipangilio). HAIWEZI kutenduliwa — namba isipopairiwa tena kama mteja mpya kabisa.`)) return;
+    if (!confirm(`Uhakika? ${CURRENT_PHONE} ataondolewa kabisa kwenye orodha.`)) return;
+    try {
+      await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/delete`, { method: 'POST' });
+      showToast('dOverviewMsg', true, 'Mteja amefutwa kabisa.');
+      closeDetail();
+      loadUsers();
+    } catch (e) {
+      showToast('dOverviewMsg', false, e.message);
+    }
+  }
+
   function dSelectAllGroups() { document.querySelectorAll('.dGroupCb').forEach(cb => cb.checked = true); }
   function dSelectNoneGroups() { document.querySelectorAll('.dGroupCb').forEach(cb => cb.checked = false); }
 
@@ -1026,91 +995,7 @@
     }, 1000);
   }
 
-  // ── Volume Cleanup (bots zisizo online) ─────────────────────────────
-  function formatBytes(bytes) {
-    if (!bytes) return '0 MB';
-    const mb = bytes / (1024 * 1024);
-    if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
-    return mb.toFixed(1) + ' MB';
-  }
-
-  async function openCleanup() {
-    document.getElementById('cleanupOverlay').style.display = 'block';
-    document.getElementById('cleanupPanel').style.display = 'block';
-    document.getElementById('cleanupList').innerHTML = '<div class="empty">Inapakia...</div>';
-    document.getElementById('cleanupMsg').className = 'toast';
-    try {
-      const data = await api('/api/admin/offline-sessions');
-      renderCleanupList(data.sessions || [], data.totalBytes || 0);
-    } catch (e) {
-      document.getElementById('cleanupList').innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`;
-    }
-  }
-
-  function closeCleanup() {
-    document.getElementById('cleanupOverlay').style.display = 'none';
-    document.getElementById('cleanupPanel').style.display = 'none';
-  }
-
-  function renderCleanupList(sessions, totalBytes) {
-    document.getElementById('cleanupTotalSize').textContent = formatBytes(totalBytes);
-    document.getElementById('cleanupTotalCount').textContent = sessions.length;
-
-    if (!sessions.length) {
-      document.getElementById('cleanupList').innerHTML = '<div class="empty">Hakuna bots zisizo online kwa sasa. 🎉</div>';
-      return;
-    }
-
-    document.getElementById('cleanupList').innerHTML = sessions.map((s) => `
-      <div class="group-row">
-        <input type="checkbox" class="cleanupCb" value="${escapeAttr(s.phoneNumber)}" checked />
-        <div class="gn">
-          +${escapeHtml(s.phoneNumber)}
-          <div class="gc">
-            ${s.inDatabase ? (s.status || 'katika database') : '⚠️ haipo database (orodha chakavu)'} ·
-            ${formatBytes(s.sizeBytes)}
-          </div>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  function cleanupSelectAll() { document.querySelectorAll('.cleanupCb').forEach(cb => cb.checked = true); }
-  function cleanupSelectNone() { document.querySelectorAll('.cleanupCb').forEach(cb => cb.checked = false); }
-
-  async function deleteSelectedOffline() {
-    const phoneNumbers = Array.from(document.querySelectorAll('.cleanupCb:checked')).map(cb => cb.value);
-    if (!phoneNumbers.length) {
-      showToast('cleanupMsg', false, 'Hujachagua namba yoyote.');
-      return;
-    }
-    if (!confirm(`Futa session za bots ${phoneNumbers.length} zilizochaguliwa kwenye disk? (Database haitaguswa)`)) return;
-
-    try {
-      const data = await api('/api/admin/delete-offline-sessions', { method: 'POST', body: JSON.stringify({ phoneNumbers }) });
-      showToast('cleanupMsg', true, `✅ Zimefutwa: ${data.removed} — nafasi iliyoachiwa huru: ${formatBytes(data.freedBytes)}`);
-      await openCleanup();
-      await loadUsers();
-    } catch (e) {
-      showToast('cleanupMsg', false, e.message);
-    }
-  }
-
-  async function deleteAllOffline() {
-    if (!confirm('Futa session ZOTE za bots zisizo online kwenye disk? (Database haitaguswa, kila mmoja atalazimika ku-pair upya)')) return;
-
-    try {
-      const data = await api('/api/admin/delete-offline-sessions', { method: 'POST', body: JSON.stringify({}) });
-      showToast('cleanupMsg', true, `✅ Zimefutwa: ${data.removed} — nafasi iliyoachiwa huru: ${formatBytes(data.freedBytes)}`);
-      await openCleanup();
-      await loadUsers();
-    } catch (e) {
-      showToast('cleanupMsg', false, e.message);
-    }
-  }
-
   if (ADMIN_TOKEN) showApp();
-
 </script>
 </body>
 </html>
