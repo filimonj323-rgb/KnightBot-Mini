@@ -554,7 +554,8 @@ async function start() {
     console.log(`🌐 Pairing website inaendesha kwenye port ${PORT}`);
     startReminderScheduler();
     // Bring back every previously-paired customer's bot automatically —
-    // see the Volume requirement noted in restoreAllInstances()'s comment.
+    // sessions now live in Turso, so this works even without a Railway
+    // Volume (see restoreAllInstances()'s comment for details).
     restoreAllInstances();
   });
 }
