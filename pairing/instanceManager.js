@@ -28,6 +28,31 @@ const groupDb = require('../database');
 // the dashboard shows up instantly via WhatsApp and vice versa.
 const af = require('../utils/autoforward');
 
+// Turso (libSQL)-backed session store — SAME module the main bot
+// (index.js) uses, SAME Turso database (pairing/db.js's TURSO_DATABASE_URL/
+// TURSO_AUTH_TOKEN via lib/db.js's fallback to pairing/pairingConfig.js).
+// Each customer's WhatsApp session (creds + keys) is namespaced with a
+// "pairing_" prefix (see pairingSessionId() below) so it never collides
+// with the main bot's own single session row. This replaces
+// useMultiFileAuthState(sessionFolder) as the source of truth for auth
+// state — sessionFolder is now ONLY used as a small on-disk cache for
+// jidHelper.js's optional LID-mapping files, nothing auth-critical lives
+// there anymore, so a fresh Railway deploy without a Volume no longer
+// means customers have to re-pair.
+const {
+  initializeDatabase: initSessionDb,
+  useTursoAuthState,
+  migrateDiskSessionIfPresent,
+  deleteSession: deleteDbSession,
+  loadCreds: loadDbCreds,
+  listSessionIds: listDbSessionIds,
+} = require('../session-db');
+
+/** Turso session_id kwa namba fulani ya mteja — namespaced ili isigongane na session ya bot kuu. */
+function pairingSessionId(phoneNumber) {
+  return `pairing_${phoneNumber}`;
+}
+
 const SESSIONS_ROOT = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_ROOT)) fs.mkdirSync(SESSIONS_ROOT, { recursive: true });
 
@@ -344,6 +369,12 @@ async function ensureBaileysBridge() {
     DisconnectReason
   } = baileys);
 
+  // Huunda wa_sessions/wa_session_keys/wa_messages Turso ikiwa hazipo bado
+  // — salama kuita kila boot (CREATE TABLE IF NOT EXISTS). Session-db.js
+  // inahitaji baileys helpers (initAuthCreds n.k.) kutoka global.__baileys,
+  // ambayo tayari imewekwa hapo juu, hivyo ni salama kuiita sasa.
+  await initSessionDb();
+
   // handler.js reads `global.__baileys` at require-time, and only needs to
   // be required once — require() caches the module, so calling this again
   // from index.js (if both run in one process) is harmless.
@@ -389,7 +420,16 @@ function getInstanceStatus(phoneNumber) {
  * the link will never complete — which is the exact symptom this fixes.
  */
 async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) {
-  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
+  const sessionId = pairingSessionId(phoneNumber);
+
+  // Uhamisho wa MARA-MOJA: kama Railway volume bado ina session ya zamani
+  // ya mteja huyu (folda hii, iliyoandikwa na useMultiFileAuthState kabla
+  // ya kuhamia Turso), ihamishe kwenda Turso sasa badala ya kumlazimisha
+  // ku-pair upya. Salama kuita kila wakati — ni no-op ikiwa tayari
+  // imehamishwa au Turso tayari ina session hii.
+  await migrateDiskSessionIfPresent(sessionId, sessionFolder);
+
+  const { state, saveCreds } = await useTursoAuthState(sessionId);
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -490,11 +530,13 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         record.status = 'error';
         record.error = 'Imeshindwa kuunganisha baada ya majaribio kadhaa. Bofya "Pata Pairing Code" tena baada ya dakika chache.';
         instances.delete(phoneNumber);
-        // Futa auth-state chakavu ya jaribio hili lililoshindwa — bila hii,
-        // jaribio LIJALO linarithi creds mbovu na kuendelea kupata
-        // "connection closed" hata baada ya kubadilisha CUSTOM_PAIRING_CODE
-        // au kusubiri. Jaribio jipya lazima lianze na session tupu.
+        // Futa auth-state chakavu ya jaribio hili lililoshindwa (disk cache
+        // + Turso) — bila hii, jaribio LIJALO linarithi creds mbovu na
+        // kuendelea kupata "connection closed" hata baada ya kubadilisha
+        // CUSTOM_PAIRING_CODE au kusubiri. Jaribio jipya lazima lianze na
+        // session tupu.
         fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
+        deleteDbSession(sessionId).catch((e) => console.error(`[pairing:${phoneNumber}] imeshindwa kufuta Turso session chakavu:`, e.message));
         return;
       }
 
@@ -635,10 +677,12 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     } catch (e) {
       record.status = 'error';
       record.error = e.message;
-      // Futa session hii mara moja pia — usisubiri hadi reconnectAttempts
-      // ifike 6 kama request ya kwanza kabisa ya pairing code ndiyo
-      // iliyoshindwa (mfano "Connection Closed" kabla ya code kutolewa).
+      // Futa session hii mara moja pia (disk cache + Turso) — usisubiri
+      // hadi reconnectAttempts ifike 6 kama request ya kwanza kabisa ya
+      // pairing code ndiyo iliyoshindwa (mfano "Connection Closed" kabla
+      // ya code kutolewa).
       fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
+      deleteDbSession(sessionId).catch((err) => console.error(`[pairing:${phoneNumber}] imeshindwa kufuta Turso session chakavu:`, err.message));
       throw e;
     }
   } else if (!state.creds.registered && isReconnect) {
@@ -1459,16 +1503,18 @@ async function adminResetUserSession(rawPhoneNumber) {
   instances.delete(phoneNumber);
   const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
   fs.rmSync(sessionFolder, { recursive: true, force: true });
+  await deleteDbSession(pairingSessionId(phoneNumber));
   return { phoneNumber, reset: true };
 }
 
 /**
  * Futa mteja KABISA — tofauti na adminResetUserSession (ambayo inamruhusu
  * ku-pair upya), hii inamwondoa kabisa: inafunga socket, inafuta session
- * folder DISKINI (kupata nafasi ya Volume), NA inafuta rekodi zake zote
- * kwenye Turso (users/payments/tokens/settings/usage_daily) ili namba
- * isionekane tena kwenye orodha ya admin. Haiwezi kutenduliwa — namba
- * ikitaka kurudi itaanza upya kama mteja mpya kabisa (trial mpya, n.k.).
+ * folder DISKINI (cache ya LID-mapping tu sasa) NA session yake Turso
+ * (creds+keys), NA inafuta rekodi zake zote kwenye Turso
+ * (users/payments/tokens/settings/usage_daily) ili namba isionekane tena
+ * kwenye orodha ya admin. Haiwezi kutenduliwa — namba ikitaka kurudi
+ * itaanza upya kama mteja mpya kabisa (trial mpya, n.k.).
  */
 async function adminDeleteUserCompletely(rawPhoneNumber) {
   const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
@@ -1481,6 +1527,7 @@ async function adminDeleteUserCompletely(rawPhoneNumber) {
 
   const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
   fs.rmSync(sessionFolder, { recursive: true, force: true });
+  await deleteDbSession(pairingSessionId(phoneNumber));
 
   await db.query('DELETE FROM users WHERE phoneNumber = ?', [phoneNumber]);
   await db.query('DELETE FROM payments WHERE phoneNumber = ?', [phoneNumber]);
@@ -1602,47 +1649,75 @@ async function adminLookupNumberAcrossAllInstances(targetRaw) {
  * is what makes bots come back online BY THEMSELVES after a redeploy,
  * instead of everyone needing to open the pairing page and re-scan.
  *
- * IMPORTANT CAVEAT: this only has anything to restore if the folders under
- * pairing/sessions/ actually SURVIVED the redeploy. On Railway, the
- * filesystem is wiped on every deploy UNLESS pairing/sessions is a
- * persistent Volume — see the setup note in README/pairingConfig. Without
- * that Volume, this function will simply find zero folders and do nothing
- * (customers still have to re-pair), which is the exact behaviour being
- * reported.
+ * Sources candidates from TWO places so both old and new deploys work:
+ *  1. Folders under pairing/sessions/ — legacy on-disk sessions (Railway
+ *     volume) that haven't been migrated to Turso yet. Each one found here
+ *     gets migrated automatically (see migrateDiskSessionIfPresent, called
+ *     inside connectInstance) — no re-pairing needed.
+ *  2. Turso session_id rows already prefixed "pairing_" — customers whose
+ *     session already lives in Turso (either migrated on a previous boot,
+ *     or paired for the first time after this Turso-backed version shipped),
+ *     including ones whose disk folder no longer exists at all (fresh
+ *     Railway filesystem, no Volume).
  */
 async function restoreAllInstances() {
   await ensureBaileysBridge();
 
-  let folders;
+  const candidates = new Map(); // phoneNumber -> { sessionFolder }
+
+  let folders = [];
   try {
     folders = fs.readdirSync(SESSIONS_ROOT, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
   } catch (e) {
     console.error('[pairing] imeshindwa kusoma sessions folder kwa ajili ya auto-reconnect:', e.message);
-    return;
   }
-
-  if (!folders.length) {
-    console.log('[pairing] hakuna session zilizohifadhiwa — hakuna cha ku-auto-reconnect (ni kawaida ukiwa huna Volume, angalia pairingConfig.js).');
-    return;
-  }
-
-  console.log(`[pairing] inajaribu ku-auto-reconnect namba ${folders.length}...`);
-
-  let restored = 0;
   for (const folder of folders) {
     const phoneNumber = normalizePhoneNumber(folder);
     if (!phoneNumber) continue;
-    const sessionFolder = path.join(SESSIONS_ROOT, folder);
+    candidates.set(phoneNumber, path.join(SESSIONS_ROOT, folder));
+  }
 
+  try {
+    const dbSessionIds = await listDbSessionIds('pairing_');
+    for (const sessionId of dbSessionIds) {
+      const phoneNumber = sessionId.slice('pairing_'.length);
+      if (!phoneNumber || candidates.has(phoneNumber)) continue;
+      // Folda ya disk ya namba hii haipo (tayari imehamishwa awali, au
+      // Railway volume mpya kabisa) — bado tunahitaji sessionFolder kwa
+      // ajili ya jidHelper.js's LID-mapping cache, hivyo tunaijenga hapa.
+      candidates.set(phoneNumber, path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber)));
+    }
+  } catch (e) {
+    console.error('[pairing] imeshindwa kusoma session_id kutoka Turso kwa ajili ya auto-reconnect:', e.message);
+  }
+
+  if (!candidates.size) {
+    console.log('[pairing] hakuna session zilizohifadhiwa (disk wala Turso) — hakuna cha ku-auto-reconnect.');
+    return;
+  }
+
+  console.log(`[pairing] inajaribu ku-auto-reconnect namba ${candidates.size}...`);
+
+  let restored = 0;
+  for (const [phoneNumber, sessionFolder] of candidates) {
     try {
+      if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder, { recursive: true });
+
+      const sessionId = pairingSessionId(phoneNumber);
+      // Uhamisho wa mara-moja kabla ya kuangalia "registered" — bila hii,
+      // namba ambazo bado ziko disk TU (hazijawahi kufikia Turso) zisingeonekana
+      // "registered" mpaka connectInstance yenyewe ihame, jambo ambalo halijafika
+      // bado wakati wa ukaguzi huu.
+      await migrateDiskSessionIfPresent(sessionId, sessionFolder);
+
       // Peek at the saved creds WITHOUT opening a socket yet, so we skip
-      // folders that never finished pairing (no point reconnecting those —
+      // sessions that never finished pairing (no point reconnecting those —
       // and doing so with isReconnect=true would silently sit in "pairing"
       // status forever with no code shown).
-      const { state } = await useMultiFileAuthState(sessionFolder);
-      if (!state.creds.registered) continue;
+      const raw = await loadDbCreds(sessionId);
+      if (!raw?.creds?.registered) continue;
 
       const record = {
         phoneNumber,
@@ -1673,7 +1748,7 @@ async function restoreAllInstances() {
     }
   }
 
-  console.log(`[pairing] auto-reconnect: ${restored}/${folders.length} zimeanzishwa.`);
+  console.log(`[pairing] auto-reconnect: ${restored}/${candidates.size} zimeanzishwa.`);
 }
 
 module.exports = {
