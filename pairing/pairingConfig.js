@@ -41,12 +41,12 @@ module.exports = {
 
   // How often (in hours) a customer whose trial/subscription has expired
   // gets a WhatsApp reminder with the payment link, until they pay.
-  REMINDER_INTERVAL_HOURS: 12,
+  REMINDER_INTERVAL_HOURS: 78,
 
   // How many hours BEFORE trial/subscription expiry a customer gets a
   // one-time early warning ("muda unakaribia kuisha") with the payment
   // link, so they can pay before the bot actually stops responding.
-  TRIAL_WARNING_HOURS: 24,
+  TRIAL_WARNING_HOURS: 48,
 
   // ── ClickPesa (Dashboard -> Settings -> Developers -> Create Application) ──
   CLICKPESA_CLIENT_ID: 'IDJwwKwcQaNUPWx5OTCjFaCPOuaGjeTG',
