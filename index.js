@@ -102,7 +102,7 @@ const pino = require('pino');
 // dynamic import(), BEFORE './handler' (and the ~130 command files it loads
 // via loadCommands()) are required — so any command file's top-level
 // `const { X } = global.__baileys` line resolves correctly.
-let makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion, useMultiFileAuthState;
+let makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion, fetchLatestWaWebVersion, useMultiFileAuthState;
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
 let handler; // populated by loadBaileysBridge()
@@ -249,9 +249,55 @@ async function loadBaileysBridge() {
     DisconnectReason,
     Browsers,
     fetchLatestBaileysVersion,
+    fetchLatestWaWebVersion,
     useMultiFileAuthState
   } = baileys);
   handler = require('./handler');
+}
+
+// ── WA Web version resolution ────────────────────────────────────────────
+//
+// makeWASocket() needs to present a WhatsApp Web build number WhatsApp's
+// servers currently recognize. If we let it fall back to whatever is
+// bundled inside the library, that number silently goes stale between
+// library releases and between WhatsApp's own Web deploys — the socket
+// still connects and still gets as far as issuing a QR/pairing code, but
+// WhatsApp rejects the final "accept this new device" step, which is
+// exactly the "Couldn't link device — Something went wrong" screen.
+//
+// fetchLatestWaWebVersion() reads the live client_revision straight out of
+// web.whatsapp.com/sw.js — the same number the real WhatsApp Web site is
+// using right now — so it's the most current source available. It's
+// cached for an hour so we don't hit that endpoint on every reconnect.
+let cachedWaVersion = null;
+let cachedWaVersionAt = 0;
+const WA_VERSION_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function getWaVersion() {
+  const now = Date.now();
+  if (cachedWaVersion && (now - cachedWaVersionAt) < WA_VERSION_TTL_MS) {
+    console.log(`📌 WA Web version: ${cachedWaVersion.join('.')} (cached)`);
+    return cachedWaVersion;
+  }
+  try {
+    const { version, isLatest } = await fetchLatestWaWebVersion({});
+    cachedWaVersion = version;
+    cachedWaVersionAt = now;
+    console.log(`📌 WA Web version: ${version.join('.')} (live, isLatest=${isLatest})`);
+    return version;
+  } catch (err) {
+    console.warn(`⚠️ fetchLatestWaWebVersion imeshindwa, tunarudi kwa fetchLatestBaileysVersion: ${err.message}`);
+    try {
+      const { version } = await fetchLatestBaileysVersion();
+      cachedWaVersion = version;
+      cachedWaVersionAt = now;
+      console.log(`📌 WA Web version: ${version.join('.')} (baileys fallback)`);
+      return version;
+    } catch (err2) {
+      console.error(`❌ Version fetch imeshindwa kabisa, makeWASocket itatumia default yake ya ndani: ${err2.message}`);
+      return undefined;
+    }
+  }
 }
 
 // Main connection function
@@ -310,7 +356,7 @@ async function startBot() {
   }
 
   const { state, saveCreds } = await useTursoAuthState(sessionId);
-  const { version } = await fetchLatestBaileysVersion();
+  const version = await getWaVersion();
 
   // Use suppressed logger for socket
   const suppressedLogger = createSuppressedLogger('silent');

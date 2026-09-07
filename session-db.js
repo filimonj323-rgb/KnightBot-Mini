@@ -138,6 +138,40 @@ function replacer(key, value) {
   return value;
 }
 
+// ── UTHIBITISHO WA CREDS KABLA YA KUZITUMIA/KUZIHIFADHI ─────────────────
+// noiseKey/signedIdentityKey/signedPreKey ni Curve25519 keypairs (32 bytes
+// hasa kila moja) zinazohitajika kabla socket haijafunguliwa kabisa
+// (Noise handshake). Kama moja ya hizi ikiwa si Buffer halisi ya bytes 32
+// (mfano imebaki kama plain object {type:'Buffer',...} isiyo-revived vizuri,
+// au ni base64 string ghafi bila wrapper — muundo unaozalishwa na baadhi ya
+// "session ID exporter" za community ambazo si sawa na format ya
+// useMultiFileAuthState/session-db.js), makeWASocket() huanguka na
+// "RangeError: size is out of range... Received NaN" ndani ya
+// makeNoiseHandler — na kwa sababu creds hizo tayari zimehifadhiwa Turso,
+// bot inaingia crash-loop isiyoisha (kila boot inasoma tena data ile ile
+// mbovu). Ukaguzi huu unazuia hilo: creds mbovu HAZITUMIKI na
+// HAZIHIFADHIWI — badala yake tunarudi kwenye creds mpya (pairing/QR mpya),
+// jambo ambalo linaweza kutatuliwa na mtumiaji, tofauti na crash-loop.
+function isValid32ByteKey(buf) {
+  return Buffer.isBuffer(buf) && buf.length === 32;
+}
+
+function credsLooksValid(creds) {
+  if (!creds || typeof creds !== 'object') return false;
+  const nk = creds.noiseKey;
+  const sik = creds.signedIdentityKey;
+  const spk = creds.signedPreKey?.keyPair;
+  return (
+    isValid32ByteKey(nk?.private) &&
+    isValid32ByteKey(nk?.public) &&
+    isValid32ByteKey(sik?.private) &&
+    isValid32ByteKey(sik?.public) &&
+    isValid32ByteKey(spk?.private) &&
+    isValid32ByteKey(spk?.public) &&
+    typeof creds.registrationId === 'number'
+  );
+}
+
 async function retryOperation(operation, operationName = 'DB Operation') {
   let lastError;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -380,7 +414,17 @@ async function migrateDiskSessionIfPresent(sessionId, diskFolder) {
 
     // 1) Creds (sehemu MUHIMU zaidi — bila hii, huwezi kuepuka kulink upya)
     const rawCreds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
-    await saveCredsRow(sessionId, reviveBuffers(rawCreds));
+    const revivedCreds = reviveBuffers(rawCreds);
+    if (!credsLooksValid(revivedCreds)) {
+      log.error(
+        `[session-db] creds.json ya zamani kwenye "${diskFolder}" ina muundo usio sahihi ` +
+        `(noiseKey/signedIdentityKey si Buffer za bytes 32) — UHAMISHO UMESITISHWA ili kuepuka ` +
+        `kuandika Turso na data mbovu (ambayo ingesababisha crash-loop). Folda ya disk imeachwa jinsi ilivyo; ` +
+        `bot itaendelea na pairing/QR mpya badala yake.`
+      );
+      return false;
+    }
+    await saveCredsRow(sessionId, revivedCreds);
 
     // 2) Funguo nyingine zote (pre-key/session/sender-key/app-state-sync-*)
     const keyMap = {};
@@ -723,7 +767,17 @@ async function seedCredsFromLegacyImport(sessionId, decompressedJson) {
   // au creds ghafi bila wrapper, kutegemea chanzo cha export — zote mbili
   // zinashughulikiwa hapa.
   const credsObj = parsed && parsed.creds ? parsed.creds : parsed;
-  await saveCredsRow(sessionId, reviveBuffers(credsObj));
+  const revived = reviveBuffers(credsObj);
+  if (!credsLooksValid(revived)) {
+    log.error(
+      `[session-db] SESSION_ID/KnightBot! iliyotolewa kwa "${sessionId}" ina muundo usio sahihi ` +
+      `(noiseKey/signedIdentityKey si Buffer za bytes 32 — huenda exporter iliyoitengeneza haiendani na format hii). ` +
+      `IMEKATALIWA — Turso HAIJAANDIKWA ili kuepuka crash-loop. Pata SESSION_ID upya kutoka chanzo sahihi, au acha bot ipate pairing/QR mpya.`
+    );
+    return false;
+  }
+  await saveCredsRow(sessionId, revived);
+  return true;
 }
 
 async function useTursoAuthState(sessionId) {
@@ -732,7 +786,15 @@ async function useTursoAuthState(sessionId) {
   if (!entry) {
     const { initAuthCreds } = getBaileys();
     const fullState = await loadCreds(sessionId);
-    const creds = reviveBuffers(fullState?.creds) || initAuthCreds();
+    let creds = reviveBuffers(fullState?.creds);
+    if (creds && !credsLooksValid(creds)) {
+      log.error(
+        `[session-db] Creds za "${sessionId}" zilizopo Turso ni MBOVU (noiseKey/signedIdentityKey si Buffer sahihi za bytes 32) — ` +
+        `zinapuuzwa ili kuepuka crash-loop. Session mpya (pairing/QR) itahitajika.`
+      );
+      creds = null;
+    }
+    creds = creds || initAuthCreds();
 
     const keysCache = new Map();
 
