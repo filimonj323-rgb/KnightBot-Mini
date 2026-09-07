@@ -1,15 +1,23 @@
 /**
  * pairing/server.js
  *
- * Standalone entry point — run this SEPARATELY from index.js (the main bot).
- *   node pairing/server.js
+ * Sasa inaweza kutumika kwa njia MBILI:
  *
- * Serves a small website where a customer types their phone number, gets a
- * WhatsApp pairing code, and — once they enter it in WhatsApp
- * (Linked Devices > Link with phone number) — has a fully working bot
- * instance with every command from ./commands/*, automatically.
+ *   1) NDANI ya bot kuu (mfumo mpya, project MOJA Railway):
+ *        const { handlePairingRequest, initPairingServer } = require('./pairing/server');
+ *      index.js ndiyo inayofungua HTTP port moja na kuita handlePairingRequest(req,res)
+ *      kwa ombi zote zisizo za bot kuu (backup/reminder), na initPairingServer() mara
+ *      moja wakati wa boot.
  *
- * This file does not import or modify index.js in any way.
+ *   2) STANDALONE (kama zamani, project TOFAUTI Railway):
+ *        node pairing/server.js
+ *      Bado inafanya kazi peke yake bila index.js — angalia mwisho wa faili hii
+ *      (require.main === module).
+ *
+ * Kila mteja (session_id yake mwenyewe kwenye Turso) hana uhusiano na mteja
+ * mwingine wala na bot kuu — instanceManager.js inatenganisha kila mmoja kwa
+ * sessionId ya kipekee, kwa hiyo settings za mteja mmoja haziwezi kuathiri
+ * mwingine wala bot kuu.
  */
 
 const http = require('http');
@@ -162,7 +170,7 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-const server = http.createServer(async (req, res) => {
+async function handlePairingRequest(req, res) {
   applyCors(req, res);
 
   // Preflight: browser inatuma OPTIONS kabla ya POST/GET yenye Authorization
@@ -570,21 +578,45 @@ const server = http.createServer(async (req, res) => {
     console.error('[pairing/server] error:', e.message);
     sendJson(res, 400, { ok: false, error: e.message, details: e.details || null });
   }
-});
-
-async function start() {
-  await db.initSchema(); // must finish before we accept any requests
-  server.listen(PORT, () => {
-    console.log(`🌐 Pairing website inaendesha kwenye port ${PORT}`);
-    startReminderScheduler();
-    // Bring back every previously-paired customer's bot automatically —
-    // sessions now live in Turso, so this works even without a Railway
-    // Volume (see restoreAllInstances()'s comment for details).
-    restoreAllInstances();
-  });
 }
 
-start().catch((err) => {
-  console.error('❌ Imeshindwa kuanzisha server (angalia Turso credentials kwenye pairingConfig.js):', err.message);
-  process.exit(1);
-});
+// Kazi za mara-moja tu wakati wa boot: schema ya Turso, ratiba ya reminder,
+// na kurudisha bots zote za wateja walioshapaired kabla (baada ya restart).
+// Piga hii mara MOJA tu (index.js au standalone start() chini), kamwe kwa
+// kila ombi la HTTP.
+let _pairingInitialized = false;
+async function initPairingServer() {
+  if (_pairingInitialized) return;
+  _pairingInitialized = true;
+  await db.initSchema(); // must finish before we accept any requests
+  startReminderScheduler();
+  // Bring back every previously-paired customer's bot automatically —
+  // sessions live in Turso, so this works even without a Railway Volume
+  // (see restoreAllInstances()'s comment for details).
+  await restoreAllInstances();
+}
+
+module.exports = { handlePairingRequest, initPairingServer };
+
+// ── STANDALONE MODE ──────────────────────────────────────────────────────
+// Ikiwa faili hii inaendeshwa moja kwa moja (`node pairing/server.js`,
+// project TOFAUTI ya Railway), fungua server yake mwenyewe kama zamani.
+// Ikiwa imepachikwa (required) na index.js badala yake, sehemu hii chini
+// haiendeshwi kabisa — index.js ndiyo inayoshikilia port na kuita
+// handlePairingRequest/initPairingServer yenyewe.
+if (require.main === module) {
+  const server = http.createServer((req, res) => {
+    handlePairingRequest(req, res);
+  });
+
+  initPairingServer()
+    .then(() => {
+      server.listen(PORT, () => {
+        console.log(`🌐 Pairing website inaendesha kwenye port ${PORT} (standalone)`);
+      });
+    })
+    .catch((err) => {
+      console.error('❌ Imeshindwa kuanzisha server (angalia Turso credentials kwenye pairingConfig.js):', err.message);
+      process.exit(1);
+    });
+}
