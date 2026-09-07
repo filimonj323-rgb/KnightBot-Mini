@@ -628,6 +628,12 @@ cleanupPuppeteerCache();
     console.error('❌ Bot ilishindwa kuanza:', err);
     process.exit(1);
   });
+  // Website ya wateja (pairing/dashboard/admin) — schema ya Turso, ratiba
+  // ya reminder, na kurudisha bots za wateja waliopaired kabla. Haisubiriwi
+  // (no await ya block) ili kuchelewa kwake kusiathiri muunganiko wa bot kuu.
+  initPairingServer().catch(err => {
+    console.error('❌ Pairing server imeshindwa kuanza:', err && err.message ? err.message : err);
+  });
 })();
 
 // ===== KEEP-ALIVE PINGER: kuzuia InfinityFree isisimamishe family site =====
@@ -662,6 +668,13 @@ pingFamilySite(); // ping ya kwanza mara moja bot inapoanza (haisubiri random de
 // Sababu: InfinityFree ina ulinzi wa JS anti-bot unaozuia ombi la moja kwa moja
 // (fetch/curl) kwenda kwao. Badala ya bot ku-"omba" (pull) backup, sasa InfinityFree
 // (kupitia Cron Job yao) ndiyo inayotuma (push) ZIP moja kwa moja kwa bot hii.
+// pairing/server.js (website ya wateja — pairing code, dashboard, admin)
+// sasa inaendeshwa NDANI ya process hii moja, kwenye HTTP server moja moja
+// pamoja na backup/reminder endpoints hapa chini. Kila mteja anatenganishwa
+// kwa sessionId yake mwenyewe kwenye Turso (angalia pairing/instanceManager.js),
+// hivyo settings za mteja mmoja haziwezi kuathiri mwingine wala bot kuu hii.
+const { handlePairingRequest, initPairingServer } = require('./pairing/server');
+
 const http = require('http');
 
 const BACKUP_SECRET = process.env.BACKUP_SECRET || 'badilisha_hii_iwe_secret_ndefu_na_ngumu_kubashiri';
@@ -819,9 +832,17 @@ const backupServer = http.createServer((req, res) => {
     return;
   }
 
-  // Health check rahisi (Railway inaweza kuipiga ping)
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Bot iko hai.');
+  // Health check rahisi, TOFAUTI na website ya wateja (Railway inaweza
+  // kuipiga ping hii moja kwa moja ikitaka health check tu).
+  if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot iko hai.');
+    return;
+  }
+
+  // Kila kitu kingine (/, /api/pair, /admin.html, /dashboard.html, n.k.)
+  // ni cha website ya wateja (pairing) — tunakikabidhi hapa.
+  return handlePairingRequest(req, res);
 });
 
 backupServer.listen(HTTP_PORT, () => {
