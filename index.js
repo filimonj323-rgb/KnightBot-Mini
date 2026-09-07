@@ -296,7 +296,7 @@ async function startBot() {
     logger: suppressedLogger,
     printQRInTerminal: false,
     // Use a common desktop browser signature
-    browser: ['Chrome', 'Windows', '10.0'],
+    browser: ['Ubuntu', 'Chrome', '20.0.04'],
     auth: state,
     // Memory optimization: prevent loading old messages into RAM
     syncFullHistory: false,
