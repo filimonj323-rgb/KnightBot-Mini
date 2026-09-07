@@ -17,7 +17,7 @@ module.exports = {
   // From turso.tech dashboard/CLI after creating a database. Keeps all
   // users/payments/tokens/settings OUTSIDE Railway entirely.
   TURSO_DATABASE_URL: 'libsql://umoja-umojatech.aws-eu-west-1.turso.io',
-  TURSO_AUTH_TOKEN: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODc0NjI0OTMsImlkIjoiMDFhMDJkMGYtMjgwMS03YmViLTkxYmUtOWY1MDlkZjBlNzBmIiwia2lkIjoiV2drY1Fkc2hlZzNDR1JXQ01Heks3QWhPZC1GUzk4SEZ6QkMyRHh1MWJkNCIsInJpZCI6ImVjZjc2OTc1LTMyMmEtNGY3NS05M2VlLWMyZTdiNWI4NzI1NyJ9.vHMThKrw7TbImo2EtIL3Q9uFOeYtgR4iKCBPCdm1FHGAXKkLyv45P4KKUj2rmQhQUrtzD8VTD3izRxz6Vv03Cg',
+  TURSO_AUTH_TOKEN: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODc0NjI0OTMsImlkIjoiMDFhMDJkMGYtMjgwMS03YmViLTkxYmUtOWY1MDlkZjBlNzBmIiwia2lkIjoiV2drY1Fkc2hlZzNDR1JXQ01Heks3QWhPZC[...]
 
   // ── Admin dashboard login ────────────────────────────────────────────
   ADMIN_USERNAME: 'mbowe1',
