@@ -314,7 +314,16 @@ async function startBot() {
   // kuandika WhatsApp > Linked Devices > Link with phone number — huna
   // haja ya kamera wala simu ya pili. Ikiwa PAIR_NUMBER haipo, tabia ya
   // zamani (QR kwenye logs) inaendelea kama kawaida.
-  let pairingCodeRequested = false;
+  //
+  // MUHIMU: hii inafuata muundo ULE ULE unaotumika (na umethibitika
+  // kufanya kazi) kwenye pairing/instanceManager.js — kusubiri sekunde 3
+  // TU baada ya socket kuundwa, bila kusubiri 'connecting' event wala
+  // sendPresenceUpdate. Toleo la awali lililokuwa likisubiri
+  // 'connecting' + presence + 1.5s lilikuwa likigongana na QR ambayo
+  // Baileys inaendelea kuizalisha wakati huo huo — hivyo pairing code
+  // iliyotolewa ilikuwa tayari "chakavu" (imepitwa na hali mpya ya
+  // connection) kufikia mtumiaji anapoiandika kwenye simu, na kusababisha
+  // "couldn't link a device".
   if (process.env.PAIR_NUMBER && !state.creds.registered) {
     // Herufi 8 hasa (A-Z, 0-9) ndizo tu WhatsApp inazokubali kama custom
     // code — sawa na uthibitisho unaotumika kwenye pairing/instanceManager.js.
@@ -326,23 +335,16 @@ async function startBot() {
       console.warn(`⚠️ customPairingCode ("${config.customPairingCode}") si sahihi — inahitajika herufi 8 hasa (A-Z, 0-9). Kutumia random code badala yake.`);
     }
 
-    sock.ev.on('connection.update', async (update) => {
-      if (update.connection === 'connecting' && !pairingCodeRequested && !state.creds.registered) {
-        pairingCodeRequested = true;
-        try {
-          // Lazimisha WA ione socket "haipo mtandaoni" kabla ya kuomba code,
-          // vinginevyo simu haipati notification ya "tap to link".
-          await sock.sendPresenceUpdate('unavailable').catch(() => {});
-          await new Promise((r) => setTimeout(r, 1500));
-          const rawCode = await sock.requestPairingCode(process.env.PAIR_NUMBER, customCode || undefined);
+    setTimeout(() => {
+      if (state.creds.registered) return; // ime-link tayari kabla hatujafika hapa — usiombe code bure
+      sock.requestPairingCode(process.env.PAIR_NUMBER, customCode || undefined)
+        .then((rawCode) => {
           const code = rawCode.match(/.{1,4}/g).join('-');
           console.log('\n\n🔑🔑🔑 PAIRING CODE: ' + code + ' 🔑🔑🔑');
           console.log('👉 Fungua WhatsApp > Linked Devices > Link with phone number, andika code hii.\n\n');
-        } catch (e) {
-          console.error('❌ Imeshindwa kupata pairing code:', e.message);
-        }
-      }
-    });
+        })
+        .catch((e) => console.error('❌ Imeshindwa kupata pairing code:', e.message));
+    }, 3000);
   }
 
   // Watchdog for inactive socket (Baileys bug fix)
@@ -378,7 +380,7 @@ async function startBot() {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
+    if (qr && !process.env.PAIR_NUMBER) {
       console.log('\n\n📱 Scan this QR code with WhatsApp:\n');
       qrcode.generate(qr, { small: true });
     }
