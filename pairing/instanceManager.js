@@ -507,6 +507,16 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       if (loggedOut) {
         record.status = 'disconnected';
         instances.delete(phoneNumber);
+        // Mtumiaji ame-unlink device kwenye WhatsApp yake (Linked Devices >
+        // ondoa) — session hii haiwezi kutumika tena kabisa (WhatsApp
+        // imeshaifuta upande wao). Ikiachwa Turso, inabaki milele bila
+        // kazi na inaweza kuchangia kufikia pairing-request limit ya
+        // WhatsApp kwenye majaribio ya baadaye ya namba hiyo hiyo. Futa
+        // mara moja badala ya kusubiri admin agundue.
+        fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
+        deleteDbSession(sessionId)
+          .then(() => console.log(`[pairing:${phoneNumber}] mtumiaji ame-unlink device — session imefutwa Turso kiotomatiki.`))
+          .catch((e) => console.error(`[pairing:${phoneNumber}] imeshindwa kufuta Turso session baada ya unlink:`, e.message));
         return;
       }
 
@@ -1683,7 +1693,23 @@ async function restoreAllInstances() {
     const dbSessionIds = await listDbSessionIds('pairing_');
     for (const sessionId of dbSessionIds) {
       const phoneNumber = sessionId.slice('pairing_'.length);
-      if (!phoneNumber || candidates.has(phoneNumber)) continue;
+      // Namba halisi za simu (na country code) ni digits 8-15 tu. Turso
+      // ilishawahi kuwa na session_id zilizoharibika (mf. kuunganishwa mara
+      // kwa mara na muda/timestamp) zenye urefu wa mamia ya digits — hizi
+      // ndizo zilizokuwa zikisababisha "Buffer.alloc NaN" mara kwa mara
+      // kwenye auto-reconnect. Badala ya kuziruka tu, ZIFUTE kiotomatiki
+      // hapa ili zisirudi tena kwenye orodha ya candidates ijayo.
+      if (!/^\d{8,15}$/.test(phoneNumber)) {
+        console.warn(`[pairing] session chakavu imegunduliwa (siyo namba halali): "${sessionId}" — inafutwa Turso kiotomatiki...`);
+        try {
+          await deleteDbSession(sessionId);
+          console.log(`[pairing] session chakavu "${sessionId}" imefutwa Turso.`);
+        } catch (e) {
+          console.error(`[pairing] imeshindwa kufuta session chakavu "${sessionId}":`, e.message);
+        }
+        continue;
+      }
+      if (candidates.has(phoneNumber)) continue;
       // Folda ya disk ya namba hii haipo (tayari imehamishwa awali, au
       // Railway volume mpya kabisa) — bado tunahitaji sessionFolder kwa
       // ajili ya jidHelper.js's LID-mapping cache, hivyo tunaijenga hapa.
