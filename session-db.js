@@ -802,6 +802,17 @@ async function useTursoAuthState(sessionId) {
     // hii ina funguo tayari kwenye jedwali jipya? Hii ni COUNT nyepesi, si
     // upakuaji wa data yenyewe.
     const existingKeyCount = await countKeys(sessionId);
+    // Session MPYA kabisa (existingKeyCount === 0, hakuna legacy keys
+    // za kuhamisha): DB HAINA funguo yoyote kwa hakika. Kwa hiyo, kwa
+    // maisha yote ya process hii, keysCache pekee ni "chanzo cha ukweli"
+    // — HAKUNA haja ya kupiga Turso kila keyStore.get() inapokosa cache
+    // (kila kitu tulichoandika kinaonekana kwenye keysCache MARA MOJA,
+    // kabla hata hakijafika DB). Hii inazuia round-trips za Turso
+    // zisizo na maana wakati wa PAIRING HANDSHAKE (Baileys ina-await
+    // keys.get() kwa kila prekey/session inayohitajika kabla ya kukamilisha
+    // ku-link — round-trips hizo ndizo zilizokuwa zikisababisha simu
+    // ku"load" muda mrefu baada ya kuandika pairing code).
+    const dbHasNoKeys = existingKeyCount === 0;
     if (fullState?.keys && Object.keys(fullState.keys).length > 0 && existingKeyCount === 0) {
       const legacyKeys = reviveBuffers(fullState.keys);
       await migrateLegacyKeysIfNeeded(sessionId, legacyKeys);
@@ -813,7 +824,7 @@ async function useTursoAuthState(sessionId) {
     const keyWriter = createThrottledKeyWriter(sessionId);
     const credsWriter = createThrottledCredsWriter(sessionId, () => entry.creds);
 
-    entry = { creds, keysCache, keyWriter, credsWriter };
+    entry = { creds, keysCache, keyWriter, credsWriter, dbHasNoKeys };
     sessionRuntimeCache.set(sessionId, entry);
 
     startKeysStatsLogger(sessionId, entry.keysCache);
@@ -821,7 +832,7 @@ async function useTursoAuthState(sessionId) {
     startMessagePruner(sessionId);
   }
 
-  const { creds, keysCache, keyWriter, credsWriter } = entry;
+  const { creds, keysCache, keyWriter, credsWriter, dbHasNoKeys } = entry;
 
   const keyStore = {
     get: async (type, ids) => {
@@ -839,7 +850,11 @@ async function useTursoAuthState(sessionId) {
       }
 
       if (missing.length > 0) {
-        const fetched = await getKeysByIds(sessionId, missing.map((m) => m.key));
+        // Kama tayari tunajua DB haina funguo yoyote za session hii
+        // (dbHasNoKeys), usipige Turso hata kidogo — cache ndiyo ukweli
+        // kamili. Hii ndiyo inayozuia ucheleweshaji wa "loading" wakati wa
+        // pairing handshake.
+        const fetched = dbHasNoKeys ? {} : await getKeysByIds(sessionId, missing.map((m) => m.key));
         for (const { id, key } of missing) {
           if (Object.prototype.hasOwnProperty.call(fetched, key)) {
             keysCache.set(key, fetched[key]);

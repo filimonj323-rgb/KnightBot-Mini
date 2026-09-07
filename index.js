@@ -302,6 +302,14 @@ async function getWaVersion() {
 
 // Main connection function
 async function startBot() {
+  // fetchLatestWaWebVersion() ni HTTP request halisi kwenda
+  // web.whatsapp.com — mara nyingi ndiyo sehemu ya POLE ZAIDI ya mchakato
+  // mzima wa kuanza. Tunaianzisha HAPA MARA MOJA (bila await) ili
+  // ifanye kazi SAMBAMBA na Turso init/uhamisho/seeding zote zinazofuata
+  // hapa chini — tunaingia kwenye Promise hii tu pale inapohitajika kabisa
+  // (karibu na makeWASocket()), sio kabla.
+  const waVersionPromise = getWaVersion();
+
   // Huunda wa_sessions/wa_session_keys/wa_messages Turso ikiwa hazipo bado —
   // salama kuita kila boot (CREATE TABLE IF NOT EXISTS).
   await initializeDatabase();
@@ -355,8 +363,17 @@ async function startBot() {
     }
   }
 
-  const { state, saveCreds } = await useTursoAuthState(sessionId);
-  const version = await getWaVersion();
+  // useTursoAuthState() yenyewe (maombi ya mwisho ya Turso kwa creds+keys)
+  // na waVersionPromise (iliyokwisha-anza sekunde kadhaa zilizopita hapo
+  // juu) zinasubiriwa hapa SAMBAMBA — kwa wakati huu waVersionPromise mara
+  // nyingi tayari imekamilika (imekuwa ikiendelea nyuma wakati wa Turso
+  // init/uhamisho/seeding), hivyo hii kimsingi hairuhusu ucheleweshaji wa
+  // ziada kabisa.
+
+  const [{ state, saveCreds }, version] = await Promise.all([
+    useTursoAuthState(sessionId),
+    waVersionPromise,
+  ]);
 
   // Use suppressed logger for socket
   const suppressedLogger = createSuppressedLogger('silent');
