@@ -102,7 +102,7 @@ const pino = require('pino');
 // dynamic import(), BEFORE './handler' (and the ~130 command files it loads
 // via loadCommands()) are required — so any command file's top-level
 // `const { X } = global.__baileys` line resolves correctly.
-let makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion;
+let makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion, useMultiFileAuthState;
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
 let handler; // populated by loadBaileysBridge()
@@ -242,43 +242,20 @@ async function loadBaileysBridge() {
     default: makeWASocket,
     DisconnectReason,
     Browsers,
-    fetchLatestBaileysVersion
+    fetchLatestBaileysVersion,
+    useMultiFileAuthState
   } = baileys);
   handler = require('./handler');
 }
 
-// Turso (libSQL)-backed session store — inachukua nafasi ya useMultiFileAuthState
-// (ambayo iliandika creds/keys kwenye ./session folder, na hivyo ilihitaji
-// Railway volume ili isipotee kwa kila deploy/restart). Lazima ipakiwe
-// BAADA ya loadBaileysBridge() kwa sababu inasoma initAuthCreds/
-// makeCacheableSignalKeyStore kutoka global.__baileys.
-const {
-  initializeDatabase,
-  useTursoAuthState,
-  seedCredsFromLegacyImport,
-  migrateDiskSessionIfPresent,
-} = require('./session-db');
-
 // Main connection function
 async function startBot() {
-  // Huunda wa_sessions/wa_session_keys/wa_messages ikiwa hazipo bado —
-  // salama kuita kila boot (CREATE TABLE IF NOT EXISTS).
-  await initializeDatabase();
-
-  // sessionId ya Turso — jina moja thabiti kwa bot hii (hailingani na
-  // folda yoyote ya disk tena, kwa hiyo haihitaji Railway volume).
-  const sessionId = config.sessionName || 'default';
-
-  // Uhamisho wa MARA-MOJA: kama Railway volume bado ina session ya zamani
-  // kwenye ./session (iliyoandikwa na useMultiFileAuthState kabla ya
-  // kuhamia Turso), ihamishe kwenda Turso sasa badala ya kulazimisha
-  // ku-scan QR/pairing code upya. Salama kuita kila boot — ni no-op ikiwa
-  // tayari imehamishwa au Turso tayari ina session hii. Weka
-  // LEGACY_SESSION_DIR kwenye env kama folda ya zamani si "./session".
-  await migrateDiskSessionIfPresent(
-    sessionId,
-    path.join(__dirname, process.env.LEGACY_SESSION_DIR || 'session')
-  );
+  // Folda ya session kwenye diski ya container hii — HAIHITAJI Railway
+  // Volume kwa sababu SESSION_ID (env var) ndiyo "chanzo cha ukweli" cha
+  // kudumu: kila boot tunaandika upya creds.json kutoka SESSION_ID kabla
+  // ya kufungua socket. Ukipoteza folda hii kwa restart/redeploy, haina
+  // tatizo — itajengwa upya papo hapo kutoka SESSION_ID.
+  const sessionDir = path.join(__dirname, config.sessionName || 'session');
 
   // Check if sessionID is provided and process KnightBot! format session
   if (config.sessionID && config.sessionID.startsWith('KnightBot!')) {
@@ -292,10 +269,15 @@ async function startBot() {
       const cleanB64 = b64data.replace('...', '');
       const compressedData = Buffer.from(cleanB64, 'base64');
       const decompressedData = zlib.gunzipSync(compressedData);
+      const parsed = JSON.parse(decompressedData.toString('utf8'));
+      const credsObj = parsed && parsed.creds ? parsed.creds : parsed;
 
-      // Andika creds moja kwa moja Turso badala ya creds.json kwenye disk.
-      await seedCredsFromLegacyImport(sessionId, decompressedData);
-      console.log('📡 Session : 🔑 Retrieved from KnightBot Session (Turso)');
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(sessionDir, 'creds.json'),
+        JSON.stringify(credsObj, null, 2)
+      );
+      console.log('📡 Session : 🔑 Retrieved from KnightBot Session (disk)');
 
     } catch (e) {
       console.error('📡 Session : ❌ Error processing KnightBot session:', e.message);
@@ -303,7 +285,7 @@ async function startBot() {
     }
   }
 
-  const { state, saveCreds } = await useTursoAuthState(sessionId);
+  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const { version } = await fetchLatestBaileysVersion();
 
   // Use suppressed logger for socket
