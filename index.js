@@ -110,6 +110,12 @@ const { groqReply } = require('./utils/groqChat');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const {
+  initializeDatabase,
+  useTursoAuthState,
+  seedCredsFromLegacyImport,
+  migrateDiskSessionIfPresent,
+} = require('./session-db');
 const os = require('os');
 
 // Remove Puppeteer cache (if some dependency downloaded Chromium into ~/.cache/puppeteer)
@@ -250,12 +256,30 @@ async function loadBaileysBridge() {
 
 // Main connection function
 async function startBot() {
-  // Folda ya session kwenye diski ya container hii — HAIHITAJI Railway
-  // Volume kwa sababu SESSION_ID (env var) ndiyo "chanzo cha ukweli" cha
-  // kudumu: kila boot tunaandika upya creds.json kutoka SESSION_ID kabla
-  // ya kufungua socket. Ukipoteza folda hii kwa restart/redeploy, haina
-  // tatizo — itajengwa upya papo hapo kutoka SESSION_ID.
+  // Huunda wa_sessions/wa_session_keys/wa_messages Turso ikiwa hazipo bado —
+  // salama kuita kila boot (CREATE TABLE IF NOT EXISTS).
+  await initializeDatabase();
+
+  // sessionId ya Turso — jina moja thabiti kwa bot hii (haihitaji Railway
+  // Volume kabisa: creds+keys zinaishi Turso, si diskini tena).
+  const sessionId = config.sessionName || 'default';
+
+  // Folda ya session kwenye diski ya container hii inatumika TU kama
+  // "staging area" ya muda kwa ajili ya uhamisho wa mara-moja hapa chini —
+  // baada ya uhamisho huo, HAITUMIKI TENA kwa lolote. Kupoteza folda hii
+  // kwa restart/redeploy si tatizo tena.
   const sessionDir = path.join(__dirname, config.sessionName || 'session');
+
+  // Uhamisho wa MARA-MOJA: kama Railway volume bado ina session ya zamani
+  // kwenye ./session (iliyoandikwa na useMultiFileAuthState kabla ya
+  // kuhamia Turso), ihamishe kwenda Turso sasa badala ya kulazimisha
+  // ku-scan QR/pairing code upya. Salama kuita kila boot — ni no-op ikiwa
+  // tayari imehamishwa au Turso tayari ina session hii. Weka
+  // LEGACY_SESSION_DIR kwenye env kama folda ya zamani si "./session".
+  await migrateDiskSessionIfPresent(
+    sessionId,
+    path.join(__dirname, process.env.LEGACY_SESSION_DIR || (config.sessionName || 'session'))
+  );
 
   // Check if sessionID is provided and process KnightBot! format session
   if (config.sessionID && config.sessionID.startsWith('KnightBot!')) {
@@ -272,12 +296,12 @@ async function startBot() {
       const parsed = JSON.parse(decompressedData.toString('utf8'));
       const credsObj = parsed && parsed.creds ? parsed.creds : parsed;
 
-      fs.mkdirSync(sessionDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(sessionDir, 'creds.json'),
-        JSON.stringify(credsObj, null, 2)
-      );
-      console.log('📡 Session : 🔑 Retrieved from KnightBot Session (disk)');
+      // Andika moja kwa moja Turso — si tena creds.json diskini. Hii
+      // inachukua kipaumbele juu ya uhamisho wa disk hapo juu (env var ya
+      // wazi inashinda), na inafanya kazi hata kama Turso tayari ina
+      // creds nyingine (overwrite makusudi).
+      await seedCredsFromLegacyImport(sessionId, decompressedData);
+      console.log('📡 Session : 🔑 Retrieved from KnightBot Session (Turso)');
 
     } catch (e) {
       console.error('📡 Session : ❌ Error processing KnightBot session:', e.message);
@@ -285,7 +309,7 @@ async function startBot() {
     }
   }
 
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+  const { state, saveCreds } = await useTursoAuthState(sessionId);
   const { version } = await fetchLatestBaileysVersion();
 
   // Use suppressed logger for socket
