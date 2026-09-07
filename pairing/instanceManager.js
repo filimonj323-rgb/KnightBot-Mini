@@ -197,9 +197,14 @@ async function shortenUrl(longUrl) {
  * awali inasoma kutoka DB moja kwa moja (hakuna ombi jipya kwa TinyURL).
  */
 async function getShortLinks(token) {
-  const res = await db.query('SELECT shortDashUrl, shortPayUrl FROM tokens WHERE token = ?', [token]);
+  const res = await db.query('SELECT shortDashUrl, shortPayUrl, shortBaseUrl FROM tokens WHERE token = ?', [token]);
   const row = res.rows[0] || {};
-  if (row.shortDashUrl && row.shortPayUrl) {
+  // Cache inatumika TU kama domain (PUBLIC_BASE_URL) haijabadilika tangu
+  // ilipofupishwa mara ya mwisho. Ukibadilisha PAIRING_BASE_URL (mfano
+  // umehama Railway service au domain), shortBaseUrl ya zamani haitalingana
+  // na PUBLIC_BASE_URL ya sasa, hivyo linki inafupishwa upya moja kwa moja
+  // badala ya kuendelea kurudisha TinyURL inayoelekeza domain iliyokufa.
+  if (row.shortDashUrl && row.shortPayUrl && row.shortBaseUrl === PUBLIC_BASE_URL) {
     return { dash: row.shortDashUrl, pay: row.shortPayUrl };
   }
 
@@ -207,7 +212,7 @@ async function getShortLinks(token) {
   const longPay = paymentUrl(token);
   const [dash, pay] = await Promise.all([shortenUrl(longDash), shortenUrl(longPay)]);
 
-  await db.query('UPDATE tokens SET shortDashUrl = ?, shortPayUrl = ? WHERE token = ?', [dash, pay, token]);
+  await db.query('UPDATE tokens SET shortDashUrl = ?, shortPayUrl = ?, shortBaseUrl = ? WHERE token = ?', [dash, pay, PUBLIC_BASE_URL, token]);
   return { dash, pay };
 }
 

@@ -54,7 +54,7 @@ module.exports = {
   CLICKPESA_BASE_URL: 'https://api.clickpesa.com',
 
   // ── Pairing website base URL (used in WhatsApp dashboard-link messages) ──
-  PAIRING_BASE_URL: 'https://filimonj323-rgb.github.io/Mr.It_bot_pairing_site', // GitHub Pages yako halisi
+  PAIRING_BASE_URL: 'https://botkuusite.up.railway.app', // Railway service halisi (index.js + dashboard.html + /api/dashboard vyote kwenye service hii moja)
 
   // ── Bot kuu (index.js) — inatumika ili reminders za malipo zitumwe
   // kutoka namba ya OWNER (config.ownerNumber kwenye root config.js), si
