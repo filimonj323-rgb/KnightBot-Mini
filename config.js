@@ -15,6 +15,10 @@ module.exports = {
     newsletterJid: '',
     updateZipUrl: '',
 
+    // Custom pairing code kwa PAIR_NUMBER (bot kuu) — herufi 8 hasa (A-Z, 0-9).
+    // Weka null kutumia random code ya WhatsApp badala yake.
+    customPairingCode: 'UMOJASTA',
+
     // Sticker Configuration
     packname: 'MR.IT MEDIATOR',
 

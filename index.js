@@ -316,6 +316,16 @@ async function startBot() {
   // zamani (QR kwenye logs) inaendelea kama kawaida.
   let pairingCodeRequested = false;
   if (process.env.PAIR_NUMBER && !state.creds.registered) {
+    // Herufi 8 hasa (A-Z, 0-9) ndizo tu WhatsApp inazokubali kama custom
+    // code — sawa na uthibitisho unaotumika kwenye pairing/instanceManager.js.
+    // Isipokidhi hilo, tunarudi kwenye random code ya WhatsApp badala ya
+    // kuvunja pairing kabisa.
+    const rawCustomCode = String(config.customPairingCode || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const customCode = rawCustomCode.length === 8 ? rawCustomCode : null;
+    if (config.customPairingCode && !customCode) {
+      console.warn(`⚠️ customPairingCode ("${config.customPairingCode}") si sahihi — inahitajika herufi 8 hasa (A-Z, 0-9). Kutumia random code badala yake.`);
+    }
+
     sock.ev.on('connection.update', async (update) => {
       if (update.connection === 'connecting' && !pairingCodeRequested && !state.creds.registered) {
         pairingCodeRequested = true;
@@ -324,7 +334,7 @@ async function startBot() {
           // vinginevyo simu haipati notification ya "tap to link".
           await sock.sendPresenceUpdate('unavailable').catch(() => {});
           await new Promise((r) => setTimeout(r, 1500));
-          const rawCode = await sock.requestPairingCode(process.env.PAIR_NUMBER);
+          const rawCode = await sock.requestPairingCode(process.env.PAIR_NUMBER, customCode || undefined);
           const code = rawCode.match(/.{1,4}/g).join('-');
           console.log('\n\n🔑🔑🔑 PAIRING CODE: ' + code + ' 🔑🔑🔑');
           console.log('👉 Fungua WhatsApp > Linked Devices > Link with phone number, andika code hii.\n\n');
