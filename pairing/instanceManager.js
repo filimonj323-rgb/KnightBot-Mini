@@ -157,7 +157,7 @@ async function getInstanceSettings(phoneNumber) {
 // Base URL used to build the dashboard link sent to customers over WhatsApp.
 // Edit PAIRING_BASE_URL in pairing/pairingConfig.js to your public domain,
 // e.g. "https://your-app.up.railway.app".
-const PUBLIC_BASE_URL = (cfg.PAIRING_BASE_URL || 'https://pairingpage.up.railway.app').replace(/\/+$/, '');
+const PUBLIC_BASE_URL = (cfg.PAIRING_BASE_URL || 'https://filimonj323-rgb.github.io/Mr.It_bot_pairing_site',).replace(/\/+$/, '');
 
 function dashboardUrl(token) {
   return `${PUBLIC_BASE_URL}/dashboard.html?token=${token}`;
