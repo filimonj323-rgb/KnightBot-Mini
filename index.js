@@ -115,6 +115,7 @@ const {
   useTursoAuthState,
   seedCredsFromLegacyImport,
   migrateDiskSessionIfPresent,
+  deleteSession,
 } = require('./session-db');
 const os = require('os');
 
@@ -486,6 +487,24 @@ async function startBot() {
 
       if (shouldReconnect) {
         setTimeout(() => startBot(), 3000);
+      } else {
+        // loggedOut: mtumiaji ame-unlink kifaa kwenye WhatsApp yake (Linked
+        // Devices > ondoa) — WhatsApp imeshaifuta session hii upande wao
+        // KABISA. Creds zilizopo Turso bado zinasema "registered: true"
+        // ingawa si za kweli tena — zikiachwa hivyo, jaribio LOLOTE
+        // lijalo la kuungana (restart, redeploy, crash-recovery)
+        // lingesoma creds hizo hizo chakavu: haliwezi kuungana (WhatsApp
+        // inakataa) WALA haliwezi kuomba pairing code mpya (kwa sababu
+        // state.creds.registered bado ingeonekana true kimakosa) — bot
+        // inakwama kabisa milele mpaka mtu afute Turso kwa mkono. Kufuta
+        // session hapa mara moja kunahakikisha jaribio lijalo linaanza na
+        // session TUPU — pairing code mpya itaombwa kama kawaida, bila
+        // mgongano wowote.
+        console.log('🔌 Kifaa kime-unlink (logged out) — nafuta session chakavu ya Turso na kuanza upya na session tupu...');
+        deleteSession(sessionId)
+          .then(() => console.log(`[session] Session "${sessionId}" imefutwa Turso baada ya unlink.`))
+          .catch((e) => console.error('❌ Imeshindwa kufuta Turso session baada ya unlink:', e.message))
+          .finally(() => setTimeout(() => startBot(), 3000));
       }
     } else if (connection === 'open') {
       console.log('\n✅ Bot connected successfully!');
