@@ -326,6 +326,33 @@ async function startBot() {
   // Bind store to socket
   store.bind(sock.ev);
 
+  // ── PAIRING CODE (badala ya QR) ──────────────────────────────────────
+  // Weka PAIR_NUMBER kwenye Railway Variables (namba yako ya WhatsApp,
+  // mfano 255700000000, bila + wala 0 mwanzoni) ili upate herufi 8 za
+  // kuandika WhatsApp > Linked Devices > Link with phone number — huna
+  // haja ya kamera wala simu ya pili. Ikiwa PAIR_NUMBER haipo, tabia ya
+  // zamani (QR kwenye logs) inaendelea kama kawaida.
+  let pairingCodeRequested = false;
+  if (process.env.PAIR_NUMBER && !state.creds.registered) {
+    sock.ev.on('connection.update', async (update) => {
+      if (update.connection === 'connecting' && !pairingCodeRequested && !state.creds.registered) {
+        pairingCodeRequested = true;
+        try {
+          // Lazimisha WA ione socket "haipo mtandaoni" kabla ya kuomba code,
+          // vinginevyo simu haipati notification ya "tap to link".
+          await sock.sendPresenceUpdate('unavailable').catch(() => {});
+          await new Promise((r) => setTimeout(r, 1500));
+          const rawCode = await sock.requestPairingCode(process.env.PAIR_NUMBER);
+          const code = rawCode.match(/.{1,4}/g).join('-');
+          console.log('\n\n🔑🔑🔑 PAIRING CODE: ' + code + ' 🔑🔑🔑');
+          console.log('👉 Fungua WhatsApp > Linked Devices > Link with phone number, andika code hii.\n\n');
+        } catch (e) {
+          console.error('❌ Imeshindwa kupata pairing code:', e.message);
+        }
+      }
+    });
+  }
+
   // Watchdog for inactive socket (Baileys bug fix)
   let lastActivity = Date.now();
   const INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
