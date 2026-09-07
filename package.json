@@ -24,7 +24,7 @@
     "@bochilteam/scraper-tiktok": "^5.0.0",
     "@bochilteam/scraper-facebook": "^5.0.0",
     "@vitalets/google-translate-api": "^9.2.1",
-    "@itsliaaa/baileys": "^0.3.0-rc.9",
+    "@itsliaaa/baileys": "0.3.18-final",
     "axios": "^1.7.2",
     "better-sqlite3": "^11.3.0",
     "@libsql/client": "^0.14.0",
