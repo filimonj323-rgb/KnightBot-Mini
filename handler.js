@@ -7,7 +7,7 @@ const database = require('./database');
 const { loadCommands } = require('./utils/commandLoader');
 const { addMessage } = require('./utils/groupstats');
 const autoForwardDb = require('./utils/autoforward');
-const { jidDecode, jidEncode, downloadMediaMessage } = global.__baileys;
+const { jidDecode, jidEncode, downloadMediaMessage, downloadContentFromMessage } = global.__baileys;
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -559,6 +559,106 @@ const isSystemJid = (jid) => {
          jid.includes('@newsletter.');
 };
 
+// Auto View-Once — captures every incoming view-once photo/video/voice-note
+// automatically, no `.viewonce` command needed. ON BY DEFAULT for the main
+// bot and for every newly linked pairing customer (config.autoViewOnce /
+// sock.instanceSettings.autoViewOnce, same opt-out pattern as autoViewStatus
+// — see pairing/instanceManager.js's AUTOMATION_KEYS).
+//
+// - Inside a GROUP: revealed privately to the bot owner's own inbox
+//   (this instance's own number, sock.user.id) instead of exposing it back
+//   into the group — keeps the reveal invisible to the original sender.
+// - Inside a DM: revealed directly in that same chat.
+const handleAutoViewOnce = async (sock, msg) => {
+  try {
+    if (!msg.message || msg.key.fromMe) return;
+
+    const chatId = msg.key.remoteJid;
+    if (isSystemJid(chatId)) return;
+
+    const effectiveConfig = sock.instanceSettings
+      ? { ...config, ...sock.instanceSettings }
+      : config;
+    if (effectiveConfig.autoViewOnce === false) return;
+
+    const rawContent = msg.message;
+    let actualMsg = null;
+    let mtype = null;
+
+    if (rawContent.viewOnceMessageV2Extension?.message) {
+      actualMsg = rawContent.viewOnceMessageV2Extension.message;
+      mtype = Object.keys(actualMsg)[0];
+    } else if (rawContent.viewOnceMessageV2?.message) {
+      actualMsg = rawContent.viewOnceMessageV2.message;
+      mtype = Object.keys(actualMsg)[0];
+    } else if (rawContent.viewOnceMessage?.message) {
+      actualMsg = rawContent.viewOnceMessage.message;
+      mtype = Object.keys(actualMsg)[0];
+    } else if (rawContent.imageMessage?.viewOnce) {
+      actualMsg = { imageMessage: rawContent.imageMessage };
+      mtype = 'imageMessage';
+    } else if (rawContent.videoMessage?.viewOnce) {
+      actualMsg = { videoMessage: rawContent.videoMessage };
+      mtype = 'videoMessage';
+    } else if (rawContent.audioMessage?.viewOnce) {
+      actualMsg = { audioMessage: rawContent.audioMessage };
+      mtype = 'audioMessage';
+    }
+
+    if (!actualMsg || !mtype) return; // not a view-once message
+
+    const downloadType =
+      mtype === 'imageMessage' ? 'image' : mtype === 'videoMessage' ? 'video' : 'audio';
+
+    const mediaStream = await downloadContentFromMessage(actualMsg[mtype], downloadType);
+    let buffer = Buffer.from([]);
+    for await (const chunk of mediaStream) {
+      buffer = Buffer.concat([buffer, chunk]);
+    }
+
+    const caption = actualMsg[mtype]?.caption || '';
+    const isGroup = chatId.endsWith('@g.us');
+
+    let destJid = chatId;
+    let sendOptions = { quoted: msg };
+    let note = '';
+
+    if (isGroup) {
+      // This instance's own owner inbox — works the same for the main bot
+      // and every paired customer, since each is logged in as its own
+      // owner's number (same identity handler.js's isOwner() uses).
+      destJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+      sendOptions = {};
+
+      const sender = msg.key.participant || msg.key.remoteJid;
+      const groupMetadata = await getGroupMetadata(sock, chatId).catch(() => null);
+      const groupName = groupMetadata?.subject || chatId;
+      note = `👁️ *View-Once Imekamatwa*\n📍 Group: ${groupName}\n👤 Kutoka: @${sender.split('@')[0]}\n\n`;
+    }
+
+    const payload = {};
+    if (downloadType === 'image') {
+      payload.image = buffer;
+      payload.caption = (note + caption).trim() || undefined;
+    } else if (downloadType === 'video') {
+      payload.video = buffer;
+      payload.mimetype = 'video/mp4';
+      payload.caption = (note + caption).trim() || undefined;
+    } else {
+      payload.audio = buffer;
+      payload.ptt = true;
+      payload.mimetype = 'audio/ogg; codecs=opus';
+      if (isGroup && note) {
+        await sock.sendMessage(destJid, { text: note.trim() }).catch(() => {});
+      }
+    }
+
+    await sock.sendMessage(destJid, payload, sendOptions);
+  } catch (error) {
+    console.error('Error in auto view-once handler:', error);
+  }
+};
+
 // Main message handler
 // Scopes group-settings reads/writes (antilink/antipromo/n.k) to this sock's
 // owner — see database.js's runWithOwnerScope() for why. Pairing customers
@@ -574,6 +674,11 @@ const handleMessageImpl = async (sock, msg) => {
     if (!msg.message) return;
     
     const from = msg.key.remoteJid;
+
+    // Auto View-Once — fire-and-continue, must never block normal command
+    // processing below (menu, antilink, antipromo, n.k).
+    handleAutoViewOnce(sock, msg).catch((e) => console.error('handleAutoViewOnce error:', e.message));
+
 
     // Per-customer overrides (prefix / bot name) set via the pairing
     // dashboard, if any — falls back to the shared config.js when a
@@ -1856,6 +1961,7 @@ function setupAutoStatusViewer(sock) {
 
 module.exports = {
   handleMessage,
+  handleAutoViewOnce,
   handleGroupUpdate,
   handleAntilink,
   handleAntigroupmention,
