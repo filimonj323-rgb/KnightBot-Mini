@@ -15,6 +15,39 @@ const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
 const NodeCache = require('node-cache');
+
+// Random status-reaction emoji pool — mirrors handler.js's
+// setupAutoStatusViewer() (STATUS_REACTIONS / randomReaction()) so every
+// paired customer instance reacts to statuses with a varied emoji instead
+// of always the same one.
+const STATUS_REACTIONS = ['🔥', '👍', '😍', '🥰', '💯', '😊', '✨', '❤️'];
+function randomReaction() {
+  return STATUS_REACTIONS[Math.floor(Math.random() * STATUS_REACTIONS.length)];
+}
+
+// Live LID→PN lookup via Baileys' own signal repository
+// (sock.signalRepository.lidMapping.getPNForLID) — same helper handler.js
+// uses in its own setupAutoStatusViewer(). This queries the socket's live
+// in-memory store directly, so it works EVEN THOUGH pairing instances use
+// useTursoAuthState() instead of useMultiFileAuthState(): Baileys never
+// gets a chance to write its on-disk lid-mapping-*.json cache for a
+// Turso-backed session, so utils/jidHelper.js's normalizeJidWithLid()
+// (which only reads that on-disk cache) almost always falls through to the
+// raw @lid JID for these instances — the react message then "sends"
+// successfully but WhatsApp silently drops it because it's addressed to an
+// unresolved LID, not the customer's actual phone-number JID. This is the
+// root cause of pairing customers' statuses showing "viewed" but never
+// getting the reaction, while the main bot (handler.js, file-based auth)
+// works fine. Trying the live lookup first fixes that for pairing too.
+async function resolveLidLive(sock, lidJid) {
+  try {
+    const pnJid = await sock.signalRepository?.lidMapping?.getPNForLID?.(lidJid);
+    return pnJid || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 const mediaDownloader = require('./mediaDownloader');
 const userStore = require('./userStore');
 const cfg = require('./pairingConfig');
@@ -621,9 +654,18 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
                   // callback runs, connectInstance() (and therefore the
                   // bridge) has always already completed.
                   const { normalizeJidWithLid } = require('../utils/jidHelper');
-                  const deliverJid = normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
+                  // Jaribio 1: live lookup kwenye signal repository ya Baileys
+                  // (haitegemei faili za disk, hivyo inafanya kazi hata kwa
+                  // session za Turso ambazo hazina lid-mapping-*.json).
+                  // Jaribio 2: cache ya disk (itakuwa tupu mara nyingi kwa
+                  // pairing instances, lakini bado ni fallback salama).
+                  let deliverJid = posterJid;
+                  if (posterJid.endsWith('@lid') || posterJid.endsWith('@hosted.lid')) {
+                    const livePn = await resolveLidLive(sock, posterJid);
+                    deliverJid = livePn || normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
+                  }
                   await sock.sendMessage('status@broadcast', {
-                    react: { text: '❤️', key: msg.key },
+                    react: { text: randomReaction(), key: msg.key },
                   }, { statusJidList: [deliverJid, sock.user.id] });
                 } catch (e) { /* status inaweza kuwa imeondolewa kabla ya react — si tatizo */ }
               }, delayMs);
