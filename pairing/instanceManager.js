@@ -133,7 +133,7 @@ async function getInstanceSettings(phoneNumber) {
   // autoForwardMessages, autoViewStatus and autoReactStatus default to ON
   // (see DEFAULT_ON_AUTOMATION_KEYS above) — UNLIKE the rest of
   // AUTOMATION_KEYS, which all default OFF until a customer opts in.
-  const out = { autoForwardMessages: true, autoViewStatus: true, autoReactStatus: true, autoViewOnce: true };
+  const out = { autoForwardMessages: true, autoViewStatus: true, autoReactStatus: true };
   if (row.prefix) out.prefix = row.prefix;
   if (row.botName) out.botName = row.botName;
   if (row.automation) {
@@ -147,7 +147,6 @@ async function getInstanceSettings(phoneNumber) {
         }
       });
       if (parsed.autoForwardMessages === false) out.autoForwardMessages = false;
-      if (parsed.autoViewOnce === false) out.autoViewOnce = false;
     } catch (e) {
       // Corrupt/empty JSON — treat as no automation overrides set.
     }
@@ -462,12 +461,6 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   // handler.js can prefer them over the shared config.js — see the
   // settingsIndex comment above for why this can't just mutate config.js.
   sock.instanceSettings = await getInstanceSettings(phoneNumber);
-  // Namespaces this customer's group-settings (antilink/antipromo/n.k) in
-  // database.js (groups.json) so toggling a protection for a group on THIS
-  // customer's dashboard never leaks onto another customer's bot that also
-  // happens to be a member of the same physical group — see handler.js's
-  // withOwnerScope() and database.js's runWithOwnerScope().
-  sock.pairingOwnerId = phoneNumber;
 
   sock.ev.on('creds.update', saveCreds);
 
@@ -951,7 +944,6 @@ async function getSettingsForToken(token) {
   const automation = {};
   AUTOMATION_KEYS.forEach((k) => { automation[k] = !!custom[k]; });
   automation.autoForwardMessages = custom.autoForwardMessages !== false; // default true
-  automation.autoViewOnce = custom.autoViewOnce !== false; // default true
 
   return {
     prefix: custom.prefix || '',
@@ -1019,10 +1011,6 @@ async function updateAutomationForToken(token, payload) {
   // `false` from the dashboard checkbox turns it off; omitting the field
   // entirely must not silently disable a customer's forwarding rules.
   automation.autoForwardMessages = (payload || {}).autoForwardMessages !== false;
-  // Auto View-Once — same "default true, explicit opt-out only" treatment.
-  // No dashboard checkbox exists for this yet, so payload will never
-  // include it; that must NOT silently switch it off on every save.
-  automation.autoViewOnce = (payload || {}).autoViewOnce !== false;
 
   const current = await getInstanceSettings(phoneNumber); // keeps prefix/botName intact
   await db.query(
@@ -1051,18 +1039,18 @@ async function getProtectionForToken(token) {
   Object.keys(PROTECTION_FEATURES).forEach((f) => { result[f] = { enabled: false, groupIds: [] }; });
 
   try {
+    // Scope every read to THIS customer's own bot (phoneNumber) so a
+    // group that also has another instance (main bot or a different
+    // customer) as a member never shows/affects that other instance's
+    // setting — see the instanceId note on groupDb.getGroupSettings.
     const phoneNumber = await getPhoneNumberByToken(token);
     const groups = await listGroups(token);
-    // Scoped to this customer (see sock.pairingOwnerId above) so reading
-    // another customer's toggle for a shared group is impossible.
-    groupDb.runWithOwnerScope(phoneNumber, () => {
-      Object.keys(PROTECTION_FEATURES).forEach((feature) => {
-        const dbField = PROTECTION_FEATURES[feature];
-        const groupIds = groups
-          .filter((g) => !!groupDb.getGroupSettings(g.id)[dbField])
-          .map((g) => g.id);
-        result[feature] = { enabled: groupIds.length > 0, groupIds };
-      });
+    Object.keys(PROTECTION_FEATURES).forEach((feature) => {
+      const dbField = PROTECTION_FEATURES[feature];
+      const groupIds = groups
+        .filter((g) => !!groupDb.getGroupSettings(g.id, phoneNumber)[dbField])
+        .map((g) => g.id);
+      result[feature] = { enabled: groupIds.length > 0, groupIds };
     });
   } catch (e) {
     // Bot haijaunganishwa au imeshindwa kupakia groups — onesha ulinzi tupu
@@ -1077,25 +1065,27 @@ async function getProtectionForToken(token) {
  * feature on. Requires a live connection (needs the current groups list) —
  * throws a clear Swahili error otherwise, same as other dashboard actions
  * that need the bot online.
+ *
+ * Writes are scoped to THIS customer's phoneNumber (instanceId) so that if
+ * a group happens to have more than one of our bots as a member, flipping
+ * a toggle here can only ever change THIS customer's own bot behaviour in
+ * that group — it never touches the main bot's or another customer's
+ * setting for the same physical group.
  */
 async function updateProtectionForToken(token, features) {
   if (!Array.isArray(features)) throw new Error('Data ya ulinzi si sahihi.');
 
   const phoneNumber = await getPhoneNumberByToken(token);
   const groups = await listGroups(token);
-  // Scoped to this customer — writes land under `${phoneNumber}::${groupId}`,
-  // never under the plain groupId another customer's bot also reads/writes.
-  groupDb.runWithOwnerScope(phoneNumber, () => {
-    for (const entry of features) {
-      const dbField = PROTECTION_FEATURES[entry.feature];
-      if (!dbField) continue;
-      const selected = new Set(Array.isArray(entry.groupIds) ? entry.groupIds : []);
-      for (const g of groups) {
-        const shouldEnable = !!entry.enabled && selected.has(g.id);
-        groupDb.updateGroupSettings(g.id, { [dbField]: shouldEnable });
-      }
+  for (const entry of features) {
+    const dbField = PROTECTION_FEATURES[entry.feature];
+    if (!dbField) continue;
+    const selected = new Set(Array.isArray(entry.groupIds) ? entry.groupIds : []);
+    for (const g of groups) {
+      const shouldEnable = !!entry.enabled && selected.has(g.id);
+      groupDb.updateGroupSettings(g.id, { [dbField]: shouldEnable }, phoneNumber);
     }
-  });
+  }
 
   return getProtectionForToken(token);
 }
