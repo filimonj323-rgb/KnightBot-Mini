@@ -620,6 +620,15 @@ const handleAutoViewOnce = async (sock, msg) => {
       // keys za ujumbe uliopokewa ili tuone jinsi WhatsApp inatuma
       // view-once kwenye instance hii. Ondoa log hii baada ya kupata sababu.
       console.log('[AutoViewOnce][DEBUG] not detected as view-once. rawContent keys:', Object.keys(rawContent || {}), '| top-level msg.message keys:', Object.keys(msg.message || {}));
+      // Kama kuna imageMessage/videoMessage/audioMessage lakini haikutambuliwa
+      // kama view-once, chapisha fields zake zote (bila data nzito ya
+      // binary) ili tuone jina halisi la flag ya view-once kwenye fork hii.
+      for (const key of ['imageMessage', 'videoMessage', 'audioMessage']) {
+        if (rawContent?.[key]) {
+          const { jpegThumbnail, mediaKey, fileEncSha256, fileSha256, thumbnailDirectPath, ...rest } = rawContent[key];
+          console.log(`[AutoViewOnce][DEBUG] ${key} fields (bila binary data):`, JSON.stringify(rest));
+        }
+      }
       return;
     }
 
