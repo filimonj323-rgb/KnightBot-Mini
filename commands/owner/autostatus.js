@@ -14,6 +14,7 @@ const DEFAULTS = {
   view: false,
   react: false,
   reaction: '❤️',
+  randomReact: true,
   autoReply: false,
 };
 
@@ -64,13 +65,16 @@ module.exports = {
           `📱 *AutoStatus*\n\n` +
           `View: *${cfg.view ? 'ON' : 'OFF'}* – Bot views status immediately\n` +
           `React: *${cfg.react ? 'ON' : 'OFF'}* – Bot reacts to status\n` +
-          `Reaction: ${cfg.reaction}` +
+          `Random reaction: *${cfg.randomReact ? 'ON' : 'OFF'}* – ${cfg.randomReact ? 'chagua emoji tofauti kila status kutoka pool' : 'tumia emoji moja fixed'}\n` +
+          `Fixed reaction: ${cfg.reaction}` +
           privacyNote + `\n\n*Usage:*\n` +
           `  .autostatus view on\n` +
           `  .autostatus view off\n` +
           `  .autostatus react on\n` +
           `  .autostatus react off\n` +
-          `  .autostatus reaction 💚\n` +
+          `  .autostatus random on\n` +
+          `  .autostatus random off\n` +
+          `  .autostatus reaction 💚  (tumika tu wakati random ni OFF)\n` +
           `  .autostatus readreceipts on  (so status poster sees the view)`
         );
       }
@@ -104,6 +108,20 @@ module.exports = {
           return extra.reply('❌ AutoStatus *react* is OFF.');
         }
         return extra.reply('Usage: .autostatus react <on/off>');
+      }
+
+      if (sub === 'random') {
+        if (val === 'on') {
+          cfg.randomReact = true;
+          save(cfg);
+          return extra.reply('✅ Random reaction ni ON. Bot itachagua emoji tofauti kila status kutoka pool ya STATUS_REACTIONS.');
+        }
+        if (val === 'off') {
+          cfg.randomReact = false;
+          save(cfg);
+          return extra.reply(`❌ Random reaction ni OFF. Bot itatumia emoji fixed: ${cfg.reaction}`);
+        }
+        return extra.reply('Usage: .autostatus random <on/off>');
       }
 
       if (sub === 'reaction') {
