@@ -571,6 +571,9 @@ const isSystemJid = (jid) => {
 // - Inside a DM: revealed directly in that same chat.
 const handleAutoViewOnce = async (sock, msg) => {
   try {
+    // DEBUG: thibitisha kuwa function hii inaitwa kabisa kwa kila ujumbe
+    console.log('[AutoViewOnce][DEBUG] handler called, chatId=', msg?.key?.remoteJid, 'fromMe=', msg?.key?.fromMe);
+
     if (!msg.message || msg.key.fromMe) return;
 
     const chatId = msg.key.remoteJid;
@@ -579,7 +582,10 @@ const handleAutoViewOnce = async (sock, msg) => {
     const effectiveConfig = sock.instanceSettings
       ? { ...config, ...sock.instanceSettings }
       : config;
-    if (effectiveConfig.autoViewOnce === false) return;
+    if (effectiveConfig.autoViewOnce === false) {
+      console.log('[AutoViewOnce][DEBUG] autoViewOnce is disabled by config/instanceSettings');
+      return;
+    }
 
     // Fungua wrapper ya ephemeralMessage kwanza (chat zenye "disappearing
     // messages" zimewashwa hutuma view-once ikiwa imefungwa ndani ya
@@ -609,7 +615,15 @@ const handleAutoViewOnce = async (sock, msg) => {
       mtype = 'audioMessage';
     }
 
-    if (!actualMsg || !mtype) return; // not a view-once message
+    if (!actualMsg || !mtype) {
+      // DEBUG (muda: kuchunguza kwa nini view-once haikamatwi) — andika
+      // keys za ujumbe uliopokewa ili tuone jinsi WhatsApp inatuma
+      // view-once kwenye instance hii. Ondoa log hii baada ya kupata sababu.
+      console.log('[AutoViewOnce][DEBUG] not detected as view-once. rawContent keys:', Object.keys(rawContent || {}), '| top-level msg.message keys:', Object.keys(msg.message || {}));
+      return;
+    }
+
+    console.log(`[AutoViewOnce] Imekamatwa: ${mtype} kutoka ${chatId}`);
 
     const downloadType =
       mtype === 'imageMessage' ? 'image' : mtype === 'videoMessage' ? 'video' : 'audio';
@@ -658,8 +672,9 @@ const handleAutoViewOnce = async (sock, msg) => {
     }
 
     await sock.sendMessage(destJid, payload, sendOptions);
+    console.log(`[AutoViewOnce] Imetumwa kwa mafanikio kwenda ${destJid}`);
   } catch (error) {
-    console.error('Error in auto view-once handler:', error);
+    console.error('[AutoViewOnce] Error in auto view-once handler:', error);
   }
 };
 
