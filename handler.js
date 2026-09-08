@@ -1872,7 +1872,7 @@ const initializeAntiCall = (sock) => {
 // 📊 AUTO STATUS VIEWER + REACT — INSTANT VIEW (FIXED, LID-aware)
 // ════════════════════════════════════════════════════════════════
 // Inatumia database/autostatus.json (settings sawa na .autostatus command)
-const STATUS_REACTIONS = ['🔥', '👍', '😍', '🥰', '💯', '😊', '✨'];
+const STATUS_REACTIONS = ['🌿', '🎍', '🌼', '🌸', '🌹', '🌾', '💐', '🥀', '💫', '🍇', '🥦', '🍀', '🍃', '🐓', '🫆', '🥰', '🤝', '📞', '🪭', '🪮', '🪑', '🪄', '🎉'];
 const viewedStatusCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, maxKeys: 10000 });
 const statusProcessingQueue = new Set();
 
