@@ -35,6 +35,11 @@ module.exports = {
     autoReact: false,
     autoReactMode: 'bot',
     autoDownload: false,
+    // Auto View-Once — reveals every incoming view-once photo/video/voice
+    // note automatically (no `.viewonce` command needed). ON by default;
+    // set to false here (main bot) or via the pairing dashboard (customer
+    // instances) to disable. See handler.js's handleAutoViewOnce().
+    autoViewOnce: true,
 
     // Group Settings Defaults
     defaultGroupSettings: {
