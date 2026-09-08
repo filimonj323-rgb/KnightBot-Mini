@@ -461,6 +461,12 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   // handler.js can prefer them over the shared config.js — see the
   // settingsIndex comment above for why this can't just mutate config.js.
   sock.instanceSettings = await getInstanceSettings(phoneNumber);
+  // Namespaces this customer's group-settings (antilink/antipromo/n.k) in
+  // database.js (groups.json) so toggling a protection for a group on THIS
+  // customer's dashboard never leaks onto another customer's bot that also
+  // happens to be a member of the same physical group — see handler.js's
+  // withOwnerScope() and database.js's runWithOwnerScope().
+  sock.pairingOwnerId = phoneNumber;
 
   sock.ev.on('creds.update', saveCreds);
 
@@ -1039,13 +1045,18 @@ async function getProtectionForToken(token) {
   Object.keys(PROTECTION_FEATURES).forEach((f) => { result[f] = { enabled: false, groupIds: [] }; });
 
   try {
+    const phoneNumber = await getPhoneNumberByToken(token);
     const groups = await listGroups(token);
-    Object.keys(PROTECTION_FEATURES).forEach((feature) => {
-      const dbField = PROTECTION_FEATURES[feature];
-      const groupIds = groups
-        .filter((g) => !!groupDb.getGroupSettings(g.id)[dbField])
-        .map((g) => g.id);
-      result[feature] = { enabled: groupIds.length > 0, groupIds };
+    // Scoped to this customer (see sock.pairingOwnerId above) so reading
+    // another customer's toggle for a shared group is impossible.
+    groupDb.runWithOwnerScope(phoneNumber, () => {
+      Object.keys(PROTECTION_FEATURES).forEach((feature) => {
+        const dbField = PROTECTION_FEATURES[feature];
+        const groupIds = groups
+          .filter((g) => !!groupDb.getGroupSettings(g.id)[dbField])
+          .map((g) => g.id);
+        result[feature] = { enabled: groupIds.length > 0, groupIds };
+      });
     });
   } catch (e) {
     // Bot haijaunganishwa au imeshindwa kupakia groups — onesha ulinzi tupu
@@ -1064,16 +1075,21 @@ async function getProtectionForToken(token) {
 async function updateProtectionForToken(token, features) {
   if (!Array.isArray(features)) throw new Error('Data ya ulinzi si sahihi.');
 
+  const phoneNumber = await getPhoneNumberByToken(token);
   const groups = await listGroups(token);
-  for (const entry of features) {
-    const dbField = PROTECTION_FEATURES[entry.feature];
-    if (!dbField) continue;
-    const selected = new Set(Array.isArray(entry.groupIds) ? entry.groupIds : []);
-    for (const g of groups) {
-      const shouldEnable = !!entry.enabled && selected.has(g.id);
-      groupDb.updateGroupSettings(g.id, { [dbField]: shouldEnable });
+  // Scoped to this customer — writes land under `${phoneNumber}::${groupId}`,
+  // never under the plain groupId another customer's bot also reads/writes.
+  groupDb.runWithOwnerScope(phoneNumber, () => {
+    for (const entry of features) {
+      const dbField = PROTECTION_FEATURES[entry.feature];
+      if (!dbField) continue;
+      const selected = new Set(Array.isArray(entry.groupIds) ? entry.groupIds : []);
+      for (const g of groups) {
+        const shouldEnable = !!entry.enabled && selected.has(g.id);
+        groupDb.updateGroupSettings(g.id, { [dbField]: shouldEnable });
+      }
     }
-  }
+  });
 
   return getProtectionForToken(token);
 }
