@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
+const { AsyncLocalStorage } = require('async_hooks');
 
 const DB_PATH = path.join(__dirname, 'database');
 const GROUPS_DB = path.join(DB_PATH, 'groups.json');
@@ -51,19 +52,48 @@ const writeDB = (filePath, data) => {
   }
 };
 
+// Owner scoping — lets multiple bot instances (the main bot + every
+// pairing/instanceManager.js customer) share this same JSON store without
+// one customer's group toggle (antipromo/antilink/n.k) leaking onto another
+// customer's bot that also happens to be a member of the same physical
+// WhatsApp group. A groupId is globally unique, but it is NOT unique to one
+// owner — two different linked numbers can both be in the same group.
+//
+// runWithOwnerScope(ownerId, fn) marks every getGroupSettings/
+// updateGroupSettings call made (directly or via any command it triggers)
+// during fn's execution as belonging to `ownerId`. Using AsyncLocalStorage
+// (not a plain module variable) keeps this correct even when several
+// customers' messages are being handled concurrently.
+//
+// Passing ownerId=null (or never calling runWithOwnerScope at all — e.g. the
+// main bot in index.js) keeps the ORIGINAL unscoped groupId key, so existing
+// data for the main bot is untouched. Only pairing/instanceManager.js passes
+// a real ownerId (the customer's phone number), which is what actually fixes
+// the cross-customer leak.
+const ownerScopeStorage = new AsyncLocalStorage();
+
+const runWithOwnerScope = (ownerId, fn) => ownerScopeStorage.run(ownerId || null, fn);
+
+const scopedGroupKey = (groupId) => {
+  const owner = ownerScopeStorage.getStore();
+  return owner ? `${owner}::${groupId}` : groupId;
+};
+
 // Group Settings
 const getGroupSettings = (groupId) => {
+  const key = scopedGroupKey(groupId);
   const groups = readDB(GROUPS_DB);
-  if (!groups[groupId]) {
-    groups[groupId] = { ...config.defaultGroupSettings };
+  if (!groups[key]) {
+    groups[key] = { ...config.defaultGroupSettings };
     writeDB(GROUPS_DB, groups);
   }
-  return groups[groupId];
+  return groups[key];
 };
 
 const updateGroupSettings = (groupId, settings) => {
+  const key = scopedGroupKey(groupId);
   const groups = readDB(GROUPS_DB);
-  groups[groupId] = { ...groups[groupId], ...settings };
+  groups[key] = { ...groups[key], ...settings };
   return writeDB(GROUPS_DB, groups);
 };
 
@@ -165,6 +195,7 @@ const isModerator = (userId) => {
 module.exports = {
   getGroupSettings,
   updateGroupSettings,
+  runWithOwnerScope,
   getUser,
   updateUser,
   getWarnings,
