@@ -503,6 +503,13 @@
         </div>
         <label class="switch"><input type="checkbox" id="tg_autoForwardMessages"><span class="slider"></span></label>
       </div>
+      <div class="toggle-row">
+        <div>
+          <span class="toggle-label">👁️‍🗨️ Auto View-Once</span>
+          <div class="toggle-hint">Fungua view-once (picha/video/sauti) kiotomatiki. Kwenye group inatumwa faragha kwenye inbox yako; kwenye DM inafunguliwa papo hapo.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="tg_autoViewOnce"><span class="slider"></span></label>
+      </div>
 
       <div class="msg" id="autoMsgBox"></div>
 
@@ -620,6 +627,15 @@
 </div>
 
 <script>
+  // ── Backend base URL ──────────────────────────────────────────────────
+  // This file lives on GitHub Pages (a static-only host) while the actual
+  // server (server.js + /api/dashboard/... routes) runs on Railway — two
+  // different origins. Every fetch() below is prefixed with API_BASE so
+  // requests reach Railway instead of 404-ing against GitHub Pages itself.
+  // EDIT this to your Railway service's URL (same value as
+  // pairing/pairingConfig.js's PAIRING_BASE_URL / MAIN_BOT_API_URL).
+  const API_BASE = 'https://botkuusite.up.railway.app';
+
   const params = new URLSearchParams(window.location.search);
   const token = params.get('token');
 
@@ -771,7 +787,7 @@
 
   async function loadGroups() {
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groups');
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/groups');
       const data = await res.json();
       if (!data.ok) {
         renderStatusGroups([]);
@@ -824,7 +840,7 @@
     postBtn.textContent = 'Inatuma...';
 
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/groupstatus', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/groupstatus', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -955,7 +971,7 @@
     bSendBtn.textContent = 'Inatuma...';
 
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/broadcast', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/broadcast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1042,7 +1058,7 @@
     dlSearchBtn.textContent = 'Inatafuta...';
 
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/media-preview', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/media-preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input }),
@@ -1113,7 +1129,7 @@
 
   async function loadSettings() {
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings');
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/settings');
       const data = await res.json();
       if (!data.ok) return;
       setPrefix.value = data.prefix || '';
@@ -1132,7 +1148,7 @@
     setClearBtn.disabled = true;
 
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prefix, botName }),
@@ -1160,15 +1176,15 @@
   /* =========================================================
      SECTION 4b — Automation toggles (auto view status, n.k.)
      ========================================================= */
-  const autoToggleIds = ['autoViewStatus', 'autoReactStatus', 'autoTyping', 'autoRecording', 'autoReactMessages', 'autoForwardMessages'];
+  const autoToggleIds = ['autoViewStatus', 'autoReactStatus', 'autoTyping', 'autoRecording', 'autoReactMessages', 'autoForwardMessages', 'autoViewOnce'];
   // These default ON for every customer (server treats "not set" as true) —
   // every other toggle here defaults OFF until a customer opts in.
-  const DEFAULT_ON_TOGGLE_IDS = ['autoViewStatus', 'autoReactStatus', 'autoForwardMessages'];
+  const DEFAULT_ON_TOGGLE_IDS = ['autoViewStatus', 'autoReactStatus', 'autoForwardMessages', 'autoViewOnce'];
   const autoMsgBox = document.getElementById('autoMsgBox');
 
   async function loadAutomation() {
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings');
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/settings');
       const data = await res.json();
       if (!data.ok) return;
       const auto = data.automation || {};
@@ -1193,7 +1209,7 @@
     });
 
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings/automation', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/settings/automation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1282,7 +1298,7 @@
       card.querySelector('.afRuleToggle').addEventListener('change', async (ev) => {
         const enabled = ev.target.checked;
         try {
-          const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward/toggle', {
+          const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/autoforward/toggle', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sourceGroupId, enabled }),
@@ -1302,7 +1318,7 @@
 
       card.querySelector('.afRuleRemove').addEventListener('click', async () => {
         try {
-          const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward/remove', {
+          const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/autoforward/remove', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sourceGroupId }),
@@ -1324,7 +1340,7 @@
   async function loadAutoForward() {
     renderAfGroupSelects();
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward');
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/autoforward');
       const data = await res.json();
       if (!data.ok) return;
       renderAfRules(data.rules);
@@ -1357,7 +1373,7 @@
     afSaveBtn.textContent = 'Inahifadhi...';
 
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/autoforward', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/autoforward', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1442,7 +1458,7 @@
 
   async function loadProtection() {
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings');
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/settings');
       const data = await res.json();
       if (!data.ok) return;
       const protection = data.protection || {};
@@ -1478,7 +1494,7 @@
     };
 
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/settings/protection', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/settings/protection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1512,7 +1528,7 @@
 
   async function loadBilling() {
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/billing');
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/billing');
       const data = await res.json();
       if (!data.ok) {
         billingStatusText.textContent = '❌ ' + data.error;
@@ -1549,7 +1565,7 @@
     billingMsgBox.style.whiteSpace = 'normal';
     document.querySelectorAll('.planBtn').forEach(b => b.disabled = true);
     try {
-      const res = await fetch('/api/dashboard/' + encodeURIComponent(token) + '/pay', {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ days, paymentPhoneNumber: payPhoneInput.value.trim() }),
