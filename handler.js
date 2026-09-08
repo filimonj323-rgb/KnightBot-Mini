@@ -581,7 +581,11 @@ const handleAutoViewOnce = async (sock, msg) => {
       : config;
     if (effectiveConfig.autoViewOnce === false) return;
 
-    const rawContent = msg.message;
+    // Fungua wrapper ya ephemeralMessage kwanza (chat zenye "disappearing
+    // messages" zimewashwa hutuma view-once ikiwa imefungwa ndani ya
+    // ephemeralMessage.message, si moja kwa moja kwenye msg.message) —
+    // bila hii, view-once kwenye chat za namna hiyo hazikamatwi kabisa.
+    const rawContent = msg.message.ephemeralMessage?.message || msg.message;
     let actualMsg = null;
     let mtype = null;
 
