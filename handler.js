@@ -596,7 +596,7 @@ const handleMessage = async (sock, msg) => {
 
       const reactJid = msg.key.remoteJid;
       const groupReactSettings = reactJid?.endsWith('@g.us')
-        ? database.getGroupSettings(reactJid)
+        ? database.getGroupSettings(reactJid, database.getInstanceId(sock))
         : null;
 
       // Washa kama: (dashboard "Auto React Messages") AU (global config.autoReact) AU (per-group autoreact imewashwa)
@@ -675,7 +675,7 @@ const handleMessage = async (sock, msg) => {
     // Anti-group mention protection (check BEFORE prefix check, as these are non-command messages)
     if (isGroup) {
       // Debug logging to confirm we're trying to call the handler
-      const groupSettings = database.getGroupSettings(from);
+      const groupSettings = database.getGroupSettings(from, database.getInstanceId(sock));
       // Debug log removed
       if (groupSettings.antigroupmention) {
         // Debug log removed
@@ -775,7 +775,7 @@ const handleMessage = async (sock, msg) => {
     
     // Check antiall protection (owner only feature)
     if (isGroup) {
-      const groupSettings = database.getGroupSettings(from);
+      const groupSettings = database.getGroupSettings(from, database.getInstanceId(sock));
       if (groupSettings.antiall) {
         const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
         const senderIsOwner = isOwner(sender, sock);
@@ -872,7 +872,7 @@ const handleMessage = async (sock, msg) => {
     // Anti-group mention protection (check BEFORE prefix check, as these are non-command messages)
     if (isGroup) {
       // Debug logging to confirm we're trying to call the handler
-      const groupSettings = database.getGroupSettings(from);
+      const groupSettings = database.getGroupSettings(from, database.getInstanceId(sock));
       if (groupSettings.antigroupmention) {
         // Debug log removed
       }
@@ -885,7 +885,7 @@ const handleMessage = async (sock, msg) => {
     
     // AutoSticker feature - convert images/videos to stickers automatically
     if (isGroup) { // Process all messages in groups (including bot's own messages)
-      const groupSettings = database.getGroupSettings(from);
+      const groupSettings = database.getGroupSettings(from, database.getInstanceId(sock));
       if (groupSettings.autosticker) {
         const mediaMessage = content?.imageMessage || content?.videoMessage;
         
@@ -1081,7 +1081,7 @@ const handleGroupUpdate = async (sock, update) => {
       return;
     }
     
-    const groupSettings = database.getGroupSettings(id);
+    const groupSettings = database.getGroupSettings(id, database.getInstanceId(sock));
     
     if (!groupSettings.welcome && !groupSettings.goodbye) return;
     
@@ -1400,7 +1400,7 @@ const handleAntilink = async (sock, msg, groupMetadata) => {
     const from = msg.key.remoteJid;
     const sender = msg.key.participant || msg.key.remoteJid;
     
-    const groupSettings = database.getGroupSettings(from);
+    const groupSettings = database.getGroupSettings(from, database.getInstanceId(sock));
     if (!groupSettings.antilink) return;
     
     const body = msg.message?.conversation || 
@@ -1462,7 +1462,7 @@ const handleAntigroupmention = async (sock, msg, groupMetadata) => {
     const from = msg.key.remoteJid;
     const sender = msg.key.participant || msg.key.remoteJid;
     
-    const groupSettings = database.getGroupSettings(from);
+    const groupSettings = database.getGroupSettings(from, database.getInstanceId(sock));
     
     // Debug logging to confirm handler is being called
     if (groupSettings.antigroupmention) {
@@ -1604,7 +1604,7 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
     const from = msg.key.remoteJid;
     const sender = msg.key.participant || msg.key.remoteJid;
 
-    const groupSettings = database.getGroupSettings(from);
+    const groupSettings = database.getGroupSettings(from, database.getInstanceId(sock));
     if (!groupSettings.antipromo) return;
 
     // Usimguse admin au owner
