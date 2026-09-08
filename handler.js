@@ -560,7 +560,13 @@ const isSystemJid = (jid) => {
 };
 
 // Main message handler
-const handleMessage = async (sock, msg) => {
+// Scopes group-settings reads/writes (antilink/antipromo/n.k) to this sock's
+// owner — see database.js's runWithOwnerScope() for why. Pairing customers
+// get sock.pairingOwnerId set by pairing/instanceManager.js; the main bot
+// (index.js) never sets it, so it keeps its original unscoped behavior.
+const withOwnerScope = (sock, fn) => database.runWithOwnerScope(sock?.pairingOwnerId, fn);
+
+const handleMessageImpl = async (sock, msg) => {
   try {
     // Debug logging to see all messages
     // Debug log removed
@@ -1071,6 +1077,8 @@ const handleMessage = async (sock, msg) => {
   }
 };
 
+const handleMessage = (sock, msg) => withOwnerScope(sock, () => handleMessageImpl(sock, msg));
+
 // Group participant update handler
 const handleGroupUpdate = async (sock, update) => {
   try {
@@ -1395,7 +1403,7 @@ const handleGroupUpdate = async (sock, update) => {
 };
 
 // Antilink handler
-const handleAntilink = async (sock, msg, groupMetadata) => {
+const handleAntilinkImpl = async (sock, msg, groupMetadata) => {
   try {
     const from = msg.key.remoteJid;
     const sender = msg.key.participant || msg.key.remoteJid;
@@ -1454,6 +1462,8 @@ const handleAntilink = async (sock, msg, groupMetadata) => {
     console.error('Error in antilink handler:', error);
   }
 };
+
+const handleAntilink = (sock, msg, groupMetadata) => withOwnerScope(sock, () => handleAntilinkImpl(sock, msg, groupMetadata));
 
 
 // Anti-group mention handler
@@ -1599,7 +1609,7 @@ const handleAntigroupmention = async (sock, msg, groupMetadata) => {
 };
 
 // Anti-promo handler - inazuia matangazo (picha/video/sticker/view-once + ujumbe mrefu)
-const handleAntipromo = async (sock, msg, groupMetadata) => {
+const handleAntipromoImpl = async (sock, msg, groupMetadata) => {
   try {
     const from = msg.key.remoteJid;
     const sender = msg.key.participant || msg.key.remoteJid;
@@ -1706,6 +1716,8 @@ const handleAntipromo = async (sock, msg, groupMetadata) => {
     console.error('Error in antipromo handler:', error);
   }
 };
+
+const handleAntipromo = (sock, msg, groupMetadata) => withOwnerScope(sock, () => handleAntipromoImpl(sock, msg, groupMetadata));
 
 
 
