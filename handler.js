@@ -220,6 +220,7 @@ const normalizeJidWithLid = (jid) => {
     
     let user = decoded.user;
     let server = decoded.server === 'c.us' ? 's.whatsapp.net' : decoded.server;
+    const wasLid = server === 'lid' || server === 'hosted.lid';
     
     const mapToPn = () => {
       const pnUser = getLidMappingValue(user, 'lidToPn');
@@ -231,10 +232,21 @@ const normalizeJidWithLid = (jid) => {
       return false;
     };
     
+    let mapped = false;
     if (server === 'lid' || server === 'hosted.lid') {
-      mapToPn();
+      mapped = mapToPn();
     } else if (server === 's.whatsapp.net' || server === 'hosted') {
-      mapToPn();
+      mapped = mapToPn();
+    }
+
+    // Started as a @lid JID and we don't (yet) know its real phone number
+    // — do NOT fabricate an @s.whatsapp.net JID from the raw LID number.
+    // It isn't a phone number: WhatsApp accepts sends to it without error,
+    // but the message (e.g. a status reaction) silently never reaches the
+    // real person. Returning the original @lid JID keeps the caller aware
+    // that resolution failed, instead of masking it as a false success.
+    if (wasLid && !mapped) {
+      return jid;
     }
     
     if (server === 'hosted') {
@@ -1864,6 +1876,22 @@ const STATUS_REACTIONS = ['🔥', '👍', '😍', '🥰', '💯', '😊', '✨']
 const viewedStatusCache = new NodeCache({ stdTTL: 86400, checkperiod: 3600, maxKeys: 10000 });
 const statusProcessingQueue = new Set();
 
+// Live LID→PN lookup via Baileys' own signal repository
+// (sock.signalRepository.lidMapping.getPNForLID) — queries the socket's
+// live in-memory store directly, so it can know a mapping that hasn't been
+// flushed to our on-disk lid-mapping-*.json cache yet. Not guaranteed to
+// have an answer (Baileys only learns a LID↔PN pair once it has actually
+// seen one for that contact), so callers should still fall back to
+// normalizeJidWithLid()'s disk cache when this returns null.
+async function resolveLidLive(sock, lidJid) {
+  try {
+    const pnJid = await sock.signalRepository?.lidMapping?.getPNForLID?.(lidJid);
+    return pnJid || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function randomReaction() {
   return STATUS_REACTIONS[Math.floor(Math.random() * STATUS_REACTIONS.length)];
 }
@@ -1926,9 +1954,21 @@ function setupAutoStatusViewer(sock) {
               const reaction = cfg.randomReact ? randomReaction() : cfg.reaction;
 
               // ⚠️ Baileys rc: participant inaweza kuja kama @lid.
-              // WhatsApp inahitaji phone-number JID (@s.whatsapp.net) kwenye statusJidList,
-              // hivyo tunatumia normalizeJidWithLid iliyopo tayari kwenye faili hili.
-              const deliverJid = normalizeJidWithLid(posterJid) || posterJid;
+              // WhatsApp inahitaji phone-number JID (@s.whatsapp.net) kwenye statusJidList.
+              // Jaribio 1: live lookup moja kwa moja kwenye signal repository ya
+              // Baileys (inaweza kuwa na taarifa mpya zaidi kuliko faili yetu ya
+              // diski). Jaribio 2: cache yetu ya diski (lid-mapping-*.json).
+              let deliverJid = posterJid;
+              if (posterJid.endsWith('@lid') || posterJid.endsWith('@hosted.lid')) {
+                const livePn = await resolveLidLive(sock, posterJid);
+                deliverJid = livePn || normalizeJidWithLid(posterJid) || posterJid;
+              }
+              // Bado @lid ikimaanisha jaribio zote mbili hazikufahamu namba
+              // halisi ya simu bado — hii ndiyo sababu kubwa logs zinasema
+              // "reacted" lakini kwenye status halisi inaonekana "viewed" tu:
+              // ujumbe unatumwa kwa @lid isiyo sahihi, WhatsApp haitupi error,
+              // lakini reaction haifikii mtu husika.
+              const resolved = deliverJid.endsWith('@s.whatsapp.net') || deliverJid.endsWith('@hosted');
 
               await sock.sendMessage('status@broadcast', {
                 react: {
@@ -1938,7 +1978,11 @@ function setupAutoStatusViewer(sock) {
               }, {
                 statusJidList: [deliverJid, sock.user.id]
               });
-              console.log(`✅ Status +${posterNum} → ${cfg.view ? 'viewed ✅' : ''} reacted ${reaction} (delay ${Math.round(delayMs / 1000)}s, deliverJid: ${deliverJid})`);
+              if (resolved) {
+                console.log(`✅ Status +${posterNum} → ${cfg.view ? 'viewed ✅' : ''} reacted ${reaction} (delay ${Math.round(delayMs / 1000)}s, deliverJid: ${deliverJid})`);
+              } else {
+                console.log(`⚠️ Status +${posterNum} → react ${reaction} imetumwa lakini LID yake bado haijafahamika (deliverJid: ${deliverJid}) — huenda isionekane kwenye status halisi. Kawaida inajirekebisha bot ikishaona ujumbe mwingine kutoka kwake.`);
+              }
             } catch (delayedErr) {
               console.error(`❌ Delayed react error (+${posterNum}):`, delayedErr.message);
             }
