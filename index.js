@@ -106,6 +106,11 @@ let makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion, fetchLa
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
 let handler; // populated by loadBaileysBridge()
+// Rejea ya sock kuu ya bot — inatumika na SIGTERM/SIGINT handler chini ili
+// kufunga connection vizuri wakati Railway inapoanza deploy mpya (bila hii,
+// container ya zamani inashikilia connection mpaka OS iikate kwa nguvu,
+// ikisababisha "mgongano wa connection statusCode 440" na container mpya).
+let mainSock = null;
 const { groqReply } = require('./utils/groqChat');
 const fs = require('fs');
 const path = require('path');
@@ -392,6 +397,7 @@ async function startBot() {
     markOnlineOnConnect: false,
     getMessage: async () => undefined // Don't load messages from store
   });
+  mainSock = sock; // rejea ya kimataifa kwa ajili ya SIGTERM/SIGINT shutdown
 
   // Bind store to socket
   store.bind(sock.ev);
@@ -997,5 +1003,35 @@ process.on('unhandledRejection', (err) => {
   }
   console.error('Unhandled Rejection:', err);
 });
+
+// Kufunga vizuri wakati Railway (au yeyote) anatuma SIGTERM/SIGINT — mfano
+// wakati wa deploy mpya. Bila hii, container ya zamani inaendelea kushikilia
+// connection za WhatsApp (bot kuu + kila mteja wa pairing) mpaka OS
+// iikate kwa nguvu, ambayo huchukua sekunde chache za ziada na kusababisha
+// "mgongano wa connection (statusCode 440)" dhidi ya container mpya
+// inayoanza wakati huo huo na creds zilezile. Kuzifunga papo hapo hapunguza
+// muda wa overlap kati ya container mbili.
+let shuttingDown = false;
+const gracefulShutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} imepokewa — kufunga sockets zote kabla ya kuzima...`);
+  try {
+    mainSock?.ws?.close?.();
+    mainSock?.end?.(new Error('shutdown'));
+  } catch (e) {
+    // Silent
+  }
+  try {
+    const instanceManager = require('./pairing/instanceManager');
+    await instanceManager.shutdownAllInstances();
+  } catch (e) {
+    console.error('[shutdown] imeshindwa kufunga pairing instances:', e.message);
+  }
+  process.exit(0);
+};
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 // Export store for use in commands
 module.exports = { store };
