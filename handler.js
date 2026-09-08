@@ -1897,7 +1897,7 @@ function randomReaction() {
 }
 
 const AUTOSTATUS_DB = path.join(__dirname, 'database', 'autostatus.json');
-const AUTOSTATUS_DEFAULTS = { view: true, react: true, reaction: '❤️', randomReact: false, autoReply: false };
+const AUTOSTATUS_DEFAULTS = { view: true, react: true, reaction: '❤️', randomReact: true, autoReply: false };
 
 const getAutoStatusCfg = () => {
   try {
