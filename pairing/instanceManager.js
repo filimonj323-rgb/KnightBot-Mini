@@ -133,7 +133,7 @@ async function getInstanceSettings(phoneNumber) {
   // autoForwardMessages, autoViewStatus and autoReactStatus default to ON
   // (see DEFAULT_ON_AUTOMATION_KEYS above) — UNLIKE the rest of
   // AUTOMATION_KEYS, which all default OFF until a customer opts in.
-  const out = { autoForwardMessages: true, autoViewStatus: true, autoReactStatus: true };
+  const out = { autoForwardMessages: true, autoViewStatus: true, autoReactStatus: true, autoViewOnce: true };
   if (row.prefix) out.prefix = row.prefix;
   if (row.botName) out.botName = row.botName;
   if (row.automation) {
@@ -147,6 +147,7 @@ async function getInstanceSettings(phoneNumber) {
         }
       });
       if (parsed.autoForwardMessages === false) out.autoForwardMessages = false;
+      if (parsed.autoViewOnce === false) out.autoViewOnce = false;
     } catch (e) {
       // Corrupt/empty JSON — treat as no automation overrides set.
     }
@@ -950,6 +951,7 @@ async function getSettingsForToken(token) {
   const automation = {};
   AUTOMATION_KEYS.forEach((k) => { automation[k] = !!custom[k]; });
   automation.autoForwardMessages = custom.autoForwardMessages !== false; // default true
+  automation.autoViewOnce = custom.autoViewOnce !== false; // default true
 
   return {
     prefix: custom.prefix || '',
@@ -1017,6 +1019,10 @@ async function updateAutomationForToken(token, payload) {
   // `false` from the dashboard checkbox turns it off; omitting the field
   // entirely must not silently disable a customer's forwarding rules.
   automation.autoForwardMessages = (payload || {}).autoForwardMessages !== false;
+  // Auto View-Once — same "default true, explicit opt-out only" treatment.
+  // No dashboard checkbox exists for this yet, so payload will never
+  // include it; that must NOT silently switch it off on every save.
+  automation.autoViewOnce = (payload || {}).autoViewOnce !== false;
 
   const current = await getInstanceSettings(phoneNumber); // keeps prefix/botName intact
   await db.query(
