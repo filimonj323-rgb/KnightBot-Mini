@@ -583,30 +583,17 @@ const isSystemJid = (jid) => {
 // - Inside a DM: revealed directly in that same chat.
 const handleAutoViewOnce = async (sock, msg) => {
   try {
-    console.log('[VO-DEBUG] handleAutoViewOnce IMEITWA. fromMe=', msg.key?.fromMe, 'remoteJid=', msg.key?.remoteJid);
     if (!msg.message || msg.key.fromMe) return;
 
     const chatId = msg.key.remoteJid;
-    if (isSystemJid(chatId)) { console.log('[VO-DEBUG] imesimama: isSystemJid=true'); return; }
+    if (isSystemJid(chatId)) return;
 
     const effectiveConfig = sock.instanceSettings
       ? { ...config, ...sock.instanceSettings }
       : config;
-    console.log('[VO-DEBUG] effectiveConfig.autoViewOnce =', effectiveConfig.autoViewOnce, ' sock.instanceSettings?', !!sock.instanceSettings);
-    if (effectiveConfig.autoViewOnce === false) { console.log('[VO-DEBUG] imesimama: autoViewOnce=false'); return; }
+    if (effectiveConfig.autoViewOnce === false) return;
 
-    // FIX: fungua safu ya ephemeralMessage (disappearing messages) KWANZA.
-    // Bila hii, meseji za view-once zinazotumwa kwenye chat yenye
-    // disappearing messages ON (default kwa chat nyingi mpya za WhatsApp)
-    // huja zikiwa `msg.message.ephemeralMessage.message.viewOnceMessageV2...`
-    // badala ya moja kwa moja `msg.message.viewOnceMessageV2...` — ukaguzi
-    // hapo chini ulikuwa unashindwa kupata wrapper na function ilikuwa
-    // inarudi kimya kimya bila kufanya lolote (hakuna error console-ni),
-    // ndiyo sababu auto-unlock ilionekana "haifanyi kazi kabisa".
-    let rawContent = msg.message;
-    if (rawContent.ephemeralMessage?.message) {
-      rawContent = rawContent.ephemeralMessage.message;
-    }
+    const rawContent = msg.message;
     let actualMsg = null;
     let mtype = null;
 
@@ -630,8 +617,7 @@ const handleAutoViewOnce = async (sock, msg) => {
       mtype = 'audioMessage';
     }
 
-    console.log('[VO-DEBUG] rawContent keys =', Object.keys(rawContent), ' | mtype iliyopatikana =', mtype);
-    if (!actualMsg || !mtype) { console.log('[VO-DEBUG] imesimama: hakuna view-once iliyotambuliwa katika keys hizo juu'); return; } // not a view-once message
+    if (!actualMsg || !mtype) return; // not a view-once message
 
     const downloadType =
       mtype === 'imageMessage' ? 'image' : mtype === 'videoMessage' ? 'video' : 'audio';
@@ -679,9 +665,7 @@ const handleAutoViewOnce = async (sock, msg) => {
       }
     }
 
-    console.log('[VO-DEBUG] karibu kutuma kwenda destJid =', destJid, ' downloadType=', downloadType, ' bufferBytes=', buffer.length);
     await sock.sendMessage(destJid, payload, sendOptions);
-    console.log('[VO-DEBUG] IMETUMWA KIKAMILIFU kwenda', destJid);
   } catch (error) {
     console.error('Error in auto view-once handler:', error);
   }
