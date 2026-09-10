@@ -595,26 +595,39 @@ const handleAutoViewOnce = async (sock, msg) => {
     if (effectiveConfig.autoViewOnce === false) return;
 
     const rawContent = msg.message;
+
+    // WhatsApp/Baileys mara nyingi hufunika view-once ndani ya safu za
+    // ephemeralMessage (disappearing messages ikiwa imewashwa kwenye chat)
+    // au documentWithCaptionMessage kabla ya kufikia viewOnceMessage* halisi.
+    // Bila kufungua hizi kwanza, `actualMsg` inabaki null kimya kimya (hakuna
+    // error) na auto-reveal haifanyiki — kasoro hii ndiyo iliyosababisha
+    // AutoViewOnce kutofanya kazi kabisa (DM na group). Muundo huu wa
+    // kufungua umetolewa kutoka silva-md-bot's antivv reveal logic.
+    const unwrapped =
+      rawContent.ephemeralMessage?.message ||
+      rawContent.documentWithCaptionMessage?.message ||
+      rawContent;
+
     let actualMsg = null;
     let mtype = null;
 
-    if (rawContent.viewOnceMessageV2Extension?.message) {
-      actualMsg = rawContent.viewOnceMessageV2Extension.message;
+    if (unwrapped.viewOnceMessageV2Extension?.message) {
+      actualMsg = unwrapped.viewOnceMessageV2Extension.message;
       mtype = Object.keys(actualMsg)[0];
-    } else if (rawContent.viewOnceMessageV2?.message) {
-      actualMsg = rawContent.viewOnceMessageV2.message;
+    } else if (unwrapped.viewOnceMessageV2?.message) {
+      actualMsg = unwrapped.viewOnceMessageV2.message;
       mtype = Object.keys(actualMsg)[0];
-    } else if (rawContent.viewOnceMessage?.message) {
-      actualMsg = rawContent.viewOnceMessage.message;
+    } else if (unwrapped.viewOnceMessage?.message) {
+      actualMsg = unwrapped.viewOnceMessage.message;
       mtype = Object.keys(actualMsg)[0];
-    } else if (rawContent.imageMessage?.viewOnce) {
-      actualMsg = { imageMessage: rawContent.imageMessage };
+    } else if (unwrapped.imageMessage?.viewOnce) {
+      actualMsg = { imageMessage: unwrapped.imageMessage };
       mtype = 'imageMessage';
-    } else if (rawContent.videoMessage?.viewOnce) {
-      actualMsg = { videoMessage: rawContent.videoMessage };
+    } else if (unwrapped.videoMessage?.viewOnce) {
+      actualMsg = { videoMessage: unwrapped.videoMessage };
       mtype = 'videoMessage';
-    } else if (rawContent.audioMessage?.viewOnce) {
-      actualMsg = { audioMessage: rawContent.audioMessage };
+    } else if (unwrapped.audioMessage?.viewOnce) {
+      actualMsg = { audioMessage: unwrapped.audioMessage };
       mtype = 'audioMessage';
     }
 
