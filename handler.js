@@ -631,7 +631,21 @@ const handleAutoViewOnce = async (sock, msg) => {
       mtype = 'audioMessage';
     }
 
-    if (!actualMsg || !mtype) return; // not a view-once message
+    if (!actualMsg || !mtype) {
+      // UCHUNGUZI WA MUDA: chapisha muundo wa ujumbe pale tu inapokuwa na
+      // dalili za media au view-once lakini haikutambuliwa — ili tuone kwa
+      // uhakika ni funguo (keys) gani WhatsApp inatuma badala ya kukisia.
+      // ONDOA block hii baada ya kupata sababu halisi.
+      const topKeys = Object.keys(rawContent);
+      const looksRelevant = topKeys.some(k =>
+        /view|ephemeral|document|image|video|audio/i.test(k)
+      );
+      if (looksRelevant) {
+        console.log('[antivv-debug] Ujumbe haukutambuliwa kama view-once. Top keys:', topKeys);
+        console.log('[antivv-debug] rawContent (JSON):', JSON.stringify(rawContent, null, 2).slice(0, 2000));
+      }
+      return; // not a view-once message
+    }
 
     const downloadType =
       mtype === 'imageMessage' ? 'image' : mtype === 'videoMessage' ? 'video' : 'audio';
