@@ -5,6 +5,23 @@
 const fs = require('fs');
 const path = require('path');
 
+function registerRegistryCommands(commands, modulePath, label) {
+  try {
+    const list = require(modulePath);
+    for (const cmd of list) {
+      if (!cmd?.name) continue;
+      commands.set(cmd.name, cmd);
+      cmd.aliases?.forEach((alias) => commands.set(alias, cmd));
+    }
+  } catch (error) {
+    console.error(`Error loading ${label} commands:`, error.message);
+  }
+}
+
+function registerEconomyCommands(commands) {
+  registerRegistryCommands(commands, './economyCommands', 'economy');
+}
+
 // Load all commands
 const loadCommands = () => {
   const commands = new Map();
@@ -40,8 +57,9 @@ const loadCommands = () => {
     }
   });
   
+  registerEconomyCommands(commands);
   return commands;
 };
 
-module.exports = { loadCommands };
+module.exports = { loadCommands, registerEconomyCommands };
 
