@@ -583,15 +583,17 @@ const isSystemJid = (jid) => {
 // - Inside a DM: revealed directly in that same chat.
 const handleAutoViewOnce = async (sock, msg) => {
   try {
+    console.log('[VO-DEBUG] handleAutoViewOnce IMEITWA. fromMe=', msg.key?.fromMe, 'remoteJid=', msg.key?.remoteJid);
     if (!msg.message || msg.key.fromMe) return;
 
     const chatId = msg.key.remoteJid;
-    if (isSystemJid(chatId)) return;
+    if (isSystemJid(chatId)) { console.log('[VO-DEBUG] imesimama: isSystemJid=true'); return; }
 
     const effectiveConfig = sock.instanceSettings
       ? { ...config, ...sock.instanceSettings }
       : config;
-    if (effectiveConfig.autoViewOnce === false) return;
+    console.log('[VO-DEBUG] effectiveConfig.autoViewOnce =', effectiveConfig.autoViewOnce, ' sock.instanceSettings?', !!sock.instanceSettings);
+    if (effectiveConfig.autoViewOnce === false) { console.log('[VO-DEBUG] imesimama: autoViewOnce=false'); return; }
 
     // FIX: fungua safu ya ephemeralMessage (disappearing messages) KWANZA.
     // Bila hii, meseji za view-once zinazotumwa kwenye chat yenye
@@ -628,7 +630,8 @@ const handleAutoViewOnce = async (sock, msg) => {
       mtype = 'audioMessage';
     }
 
-    if (!actualMsg || !mtype) return; // not a view-once message
+    console.log('[VO-DEBUG] rawContent keys =', Object.keys(rawContent), ' | mtype iliyopatikana =', mtype);
+    if (!actualMsg || !mtype) { console.log('[VO-DEBUG] imesimama: hakuna view-once iliyotambuliwa katika keys hizo juu'); return; } // not a view-once message
 
     const downloadType =
       mtype === 'imageMessage' ? 'image' : mtype === 'videoMessage' ? 'video' : 'audio';
@@ -676,7 +679,9 @@ const handleAutoViewOnce = async (sock, msg) => {
       }
     }
 
+    console.log('[VO-DEBUG] karibu kutuma kwenda destJid =', destJid, ' downloadType=', downloadType, ' bufferBytes=', buffer.length);
     await sock.sendMessage(destJid, payload, sendOptions);
+    console.log('[VO-DEBUG] IMETUMWA KIKAMILIFU kwenda', destJid);
   } catch (error) {
     console.error('Error in auto view-once handler:', error);
   }
