@@ -38,6 +38,29 @@ async function fetchDSEStocks() {
   const $ = cheerio.load(html);
   const rows = [];
 
+  // Tarehe ya data — dse.co.tz inaonyesha "Market Summary : <tarehe>" juu
+  // ya jedwali. Hii ndiyo tarehe HALISI ya bei zilizopo chini (mara nyingi
+  // siku ya mwisho ya biashara iliyofunga, si lazima "leo" — angalia
+  // comment ya juu ya faili). Tunaitoa hapa ili isionekane kama "live".
+  let summaryDate = null;
+  $('*').each((_, el) => {
+    if (summaryDate) return;
+    const text = $(el).text().trim();
+    const match = text.match(/Market Summary\s*:?\s*$/i);
+    if (match) {
+      // Tarehe kwa kawaida iko kwenye element inayofuata (h1/h2/span) yenye
+      // muundo "September 08, 2026".
+      const next = $(el).next().text().trim();
+      if (/\d{4}/.test(next)) summaryDate = next;
+    }
+  });
+  // Fallback: tafuta moja kwa moja muundo "Mwezi DD, YYYY" popote kwenye page.
+  if (!summaryDate) {
+    const bodyText = $('body').text();
+    const m = bodyText.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}/);
+    if (m) summaryDate = m[0];
+  }
+
   // SELECTOR: tunatafuta table yoyote ambayo mstari wake wa kwanza una
   // "Symbol" NA "MCAP" — hii ndiyo jedwali la "Equity Watch" kwenye
   // Market Summary. Tunaepuka kutegemea class/id maalum kwa sababu
@@ -90,8 +113,8 @@ async function fetchDSEStocks() {
     return { symbol, open, prevClose, close, high, low, volume, mcap, change, changePct };
   });
 
-  cache = { data: stocks, at: Date.now() };
-  return stocks;
+  cache = { data: { stocks, date: summaryDate }, at: Date.now() };
+  return cache.data;
 }
 
 module.exports = {
@@ -104,7 +127,8 @@ module.exports = {
   async execute(sock, msg, args) {
     const jid = msg.key.remoteJid;
     try {
-      const stocks = await fetchDSEStocks();
+      const { stocks, date } = await fetchDSEStocks();
+      const dateLabel = date ? `📅 Tarehe ya bei: *${date}*` : '📅 Tarehe ya bei: haikupatikana kwenye page (angalia dse.co.tz moja kwa moja)';
       const symbol = (args[0] || '').toUpperCase();
 
       if (symbol) {
@@ -126,12 +150,14 @@ module.exports = {
           {
             text:
               `${emoji} *${stock.symbol} — DSE*\n\n` +
+              `${dateLabel}\n` +
               `💰 *Bei (Close):* TZS ${stock.close.toLocaleString()}\n` +
               `${emoji} *Mabadiliko:* ${stock.change >= 0 ? '+' : ''}${stock.change.toFixed(0)} (${stock.changePct.toFixed(2)}%)\n` +
               `📊 *Open:* ${stock.open.toLocaleString()}   *Prev Close:* ${stock.prevClose.toLocaleString()}\n` +
               `📈 *High:* ${stock.high.toLocaleString()}   📉 *Low:* ${stock.low.toLocaleString()}\n` +
               `📦 *Volume:* ${stock.volume.toLocaleString()}\n` +
               `🏦 *Market Cap:* TZS ${stock.mcap} Bilioni\n\n` +
+              `_Hii ni bei ya mwisho kufunga (closing), si "live" — DSE inafunga bei kila siku ya biashara._\n` +
               `_Chanzo: dse.co.tz — kwa matumizi binafsi (si kusambaza kibiashara)_`,
           },
           { quoted: msg }
@@ -150,7 +176,7 @@ module.exports = {
         jid,
         {
           text:
-            `📊 *DSE — Muhtasari wa Soko*\n\n${lines}\n\n` +
+            `📊 *DSE — Muhtasari wa Soko*\n${dateLabel}\n\n${lines}\n\n` +
             `_Tumia: .dse <symbol> kwa maelezo zaidi (mfano: .dse CRDB)_\n` +
             `_Chanzo: dse.co.tz_`,
         },
