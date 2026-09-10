@@ -584,15 +584,32 @@ const isSystemJid = (jid) => {
 // - Inside a DM: revealed directly in that same chat.
 const handleAutoViewOnce = async (sock, msg) => {
   try {
-    if (!msg.message || msg.key.fromMe) return;
+    // UCHUNGUZI WA MUDA: chapisha kabla ya return yoyote ya mapema, ili tuone
+    // kama function hii inaitwa kabisa na ni check gani inayoizuia. ONDOA
+    // block hii baada ya kupata sababu halisi.
+    console.log('[antivv-debug] handleAutoViewOnce called. fromMe:', msg.key?.fromMe,
+      '| hasMessage:', !!msg.message,
+      '| chatId:', msg.key?.remoteJid,
+      '| topKeys:', msg.message ? Object.keys(msg.message) : null);
+
+    if (!msg.message || msg.key.fromMe) {
+      console.log('[antivv-debug] → imesimama: !msg.message au fromMe');
+      return;
+    }
 
     const chatId = msg.key.remoteJid;
-    if (isSystemJid(chatId)) return;
+    if (isSystemJid(chatId)) {
+      console.log('[antivv-debug] → imesimama: isSystemJid');
+      return;
+    }
 
     const effectiveConfig = sock.instanceSettings
       ? { ...config, ...sock.instanceSettings }
       : config;
-    if (effectiveConfig.autoViewOnce === false) return;
+    if (effectiveConfig.autoViewOnce === false) {
+      console.log('[antivv-debug] → imesimama: effectiveConfig.autoViewOnce === false');
+      return;
+    }
 
     const rawContent = msg.message;
 
@@ -632,18 +649,11 @@ const handleAutoViewOnce = async (sock, msg) => {
     }
 
     if (!actualMsg || !mtype) {
-      // UCHUNGUZI WA MUDA: chapisha muundo wa ujumbe pale tu inapokuwa na
-      // dalili za media au view-once lakini haikutambuliwa — ili tuone kwa
-      // uhakika ni funguo (keys) gani WhatsApp inatuma badala ya kukisia.
-      // ONDOA block hii baada ya kupata sababu halisi.
-      const topKeys = Object.keys(rawContent);
-      const looksRelevant = topKeys.some(k =>
-        /view|ephemeral|document|image|video|audio/i.test(k)
-      );
-      if (looksRelevant) {
-        console.log('[antivv-debug] Ujumbe haukutambuliwa kama view-once. Top keys:', topKeys);
-        console.log('[antivv-debug] rawContent (JSON):', JSON.stringify(rawContent, null, 2).slice(0, 2000));
-      }
+      // UCHUNGUZI WA MUDA: chapisha muundo kamili wa ujumbe pale detection
+      // inaposhindwa, ili tuone kwa uhakika muundo halisi. ONDOA baada ya
+      // kupata sababu halisi.
+      console.log('[antivv-debug] Haikutambuliwa kama view-once. rawContent (JSON):',
+        JSON.stringify(rawContent, null, 2).slice(0, 3000));
       return; // not a view-once message
     }
 
