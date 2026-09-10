@@ -140,6 +140,23 @@ function buildTable(rows, headers, widths) {
   return out;
 }
 
+// Header ya kisasa yenye bracket-style, mfano « 『 TITLE 』 »
+function buildHeader(title) {
+  return `⎯⎯⎯ 『 *${title}* 』 ⎯⎯⎯`;
+}
+
+// Footer ya branding, mtindo wa box border.
+function buildFooter() {
+  return (
+    `┌─────────────────\n` +
+    `│ 🛠️ *MR.IT MEDIATOR*\n` +
+    `└─────────────────\n` +
+    `   _for easy access of data and analysis.._\n` +
+    `   _system developer and automation.._\n` +
+    `   🔗 *DSE INVESTOR:* https://investor.dse.co.tz/login`
+  );
+}
+
 module.exports = {
   name: 'dse',
   aliases: ['hisatz', 'tzstock', 'dsestock'],
@@ -151,7 +168,7 @@ module.exports = {
     const jid = msg.key.remoteJid;
     try {
       const { stocks, date } = await fetchDSEStocks();
-      const dateLabel = date ? `📅 Tarehe ya bei: *${date}*` : '📅 Tarehe ya bei: haikupatikana kwenye page (angalia dse.co.tz moja kwa moja)';
+      const dateLabel = date ? `📅 *${date}*` : '📅 _Tarehe haipatikani (tazama dse.co.tz)_';
       const symbol = (args[0] || '').toUpperCase();
 
       if (symbol) {
@@ -172,8 +189,8 @@ module.exports = {
           jid,
           {
             text:
-              `${emoji} *${stock.symbol} — DSE*\n\n` +
-              `${dateLabel}\n` +
+              `${buildHeader(stock.symbol + ' — DSE')}\n\n` +
+              `${emoji} ${dateLabel}\n\n` +
               `💰 *Bei (Close):* TZS ${stock.close.toLocaleString()}\n` +
               `${emoji} *Mabadiliko:* ${stock.change >= 0 ? '+' : ''}${stock.change.toFixed(0)} (${stock.changePct.toFixed(2)}%)\n` +
               `📊 *Open:* ${stock.open.toLocaleString()}   *Prev Close:* ${stock.prevClose.toLocaleString()}\n` +
@@ -183,8 +200,8 @@ module.exports = {
               `📖 *Order Book (Touchline):*\n` +
               `   🟢 Bid (Nunua): ${stock.bid ? 'TZS ' + stock.bid.toLocaleString() : 'Hakuna bid leo'}\n` +
               `   🔴 Offer (Uza): ${stock.offer ? 'TZS ' + stock.offer.toLocaleString() : 'Hakuna offer leo'}\n\n` +
-              `_Hii ni bei ya mwisho kufunga (closing) + touchline ya order book, si "live" — DSE inafunga bei kila siku ya biashara. Kwa bei za live na order book kamili (depth), unahitaji akaunti kwenye investor.dse.co.tz (Hisa Kiganjani Web) au app ya Hisa Kiganjani._\n` +
-              `_Chanzo: dse.co.tz — kwa matumizi binafsi (si kusambaza kibiashara)_`,
+              `_Hii ni bei ya mwisho kufunga (closing) + touchline ya order book, si "live". Kwa bei za live na order book kamili (depth), ingia kwenye DSE INVESTOR._\n\n` +
+              `${buildFooter()}`,
           },
           { quoted: msg }
         );
@@ -204,9 +221,9 @@ module.exports = {
         jid,
         {
           text:
-            `📊 *DSE — Muhtasari wa Soko*\n${dateLabel}\n\n${table}\n\n` +
-            `_Tumia: .dse <symbol> kwa maelezo zaidi (mfano: .dse CRDB)_\n` +
-            `_Chanzo: dse.co.tz_`,
+            `${buildHeader('DSE MARKET SUMMARY')}\n${dateLabel}\n\n${table}\n\n` +
+            `_Tumia: .dse <symbol> kwa maelezo zaidi (mfano: .dse CRDB)_\n\n` +
+            `${buildFooter()}`,
         },
         { quoted: msg }
       );

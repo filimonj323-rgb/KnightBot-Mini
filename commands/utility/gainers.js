@@ -63,6 +63,23 @@ function buildTable(rows, headers, widths) {
   return out;
 }
 
+// Header ya kisasa yenye bracket-style, mfano « 『 TITLE 』 »
+function buildHeader(title) {
+  return `⎯⎯⎯ 『 *${title}* 』 ⎯⎯⎯`;
+}
+
+// Footer ya branding, mtindo wa box border.
+function buildFooter() {
+  return (
+    `┌─────────────────\n` +
+    `│ 🛠️ *MR.IT MEDIATOR*\n` +
+    `└─────────────────\n` +
+    `   _for easy access of data and analysis.._\n` +
+    `   _system developer and automation.._\n` +
+    `   🔗 *DSE INVESTOR:* https://investor.dse.co.tz/login`
+  );
+}
+
 module.exports = {
   name: 'gainers',
   aliases: ['losers', 'topmovers', 'gainerslosers'],
@@ -105,12 +122,12 @@ module.exports = {
         : '_Hakuna washukaji leo_';
 
       const text =
-        `📊 *DSE — Wapandaji na Washukaji (Top ${topN})*\n\n` +
+        `${buildHeader(`DSE TOP ${topN} MOVERS`)}\n\n` +
         `🟢 *Wapandaji (Gainers)*\n${gainersBlock}\n\n` +
         `🔴 *Washukaji (Losers)*\n${losersBlock}\n\n` +
         (flat.length ? `⏺ *Bila mabadiliko:* ${flat.map((s) => s.symbol).join(', ')}\n\n` : '') +
-        `_Tumia: .gainers <namba> kuonyesha zaidi/pungufu (mfano: .gainers 10)_\n` +
-        `_Chanzo: dse.co.tz — kwa matumizi binafsi (si kusambaza kibiashara)_`;
+        `_Tumia: .gainers <namba> kuonyesha zaidi/pungufu (mfano: .gainers 10)_\n\n` +
+        `${buildFooter()}`;
 
       return await sock.sendMessage(jid, { text }, { quoted: msg });
     } catch (err) {
