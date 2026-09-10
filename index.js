@@ -556,8 +556,14 @@ async function startBot() {
 
   // Messages handler - Process only new messages
   sock.ev.on('messages.upsert', ({ messages, type }) => {
-    // Only process "notify" type (new messages), skip "append" (old messages from history)
-    if (type !== 'notify') return;
+    // "notify" = kawaida ujumbe mpya. "append" pia hutokea kwa ujumbe halisi
+    // wa sasa (siyo history ya zamani tu) — mfano ujumbe kutoka WhatsApp
+    // Business, multi-device sync, au fromMe kutoka simu iliyounganishwa —
+    // silva-md-bot iligundua hili na kuacha kufiltisha kwa type kabisa.
+    // Tunaruhusu 'notify' na 'append'; MESSAGE_AGE_LIMIT (dakika 5) na
+    // processedMessages dedup chini vinaendelea kuzuia history ya zamani
+    // kuchakatwa upya baada ya reconnect.
+    if (type !== 'notify' && type !== 'append') return;
 
     // Process messages in the array
     for (const msg of messages) {
