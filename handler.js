@@ -6,6 +6,7 @@ const config = require('./config');
 const database = require('./database');
 const { loadCommands } = require('./utils/commandLoader');
 const { addMessage } = require('./utils/groupstats');
+const { tryAutoLevelUp, formatLevelUpMessage } = require('./utils/economy');
 const autoForwardDb = require('./utils/autoforward');
 const { jidDecode, jidEncode, downloadMediaMessage, downloadContentFromMessage } = global.__baileys;
 const fs = require('fs');
@@ -813,6 +814,26 @@ const handleMessageImpl = async (sock, msg) => {
     // Track group message statistics
     if (isGroup) {
       addMessage(from, sender);
+
+      // Auto level-up when enough XP (economy ranks)
+      if (!msg.key.fromMe) {
+        try {
+          const levelResult = tryAutoLevelUp(from, sender);
+          if (levelResult.leveled) {
+            await sock.sendMessage(from, {
+              text: formatLevelUpMessage(
+                levelResult.before,
+                levelResult.after,
+                levelResult.role,
+                levelResult.diamondsEarned
+              ),
+              mentions: [sender],
+            }, { quoted: msg });
+          }
+        } catch (e) {
+          // ignore autolevel errors
+        }
+      }
     }
     
     // Return early for non-group messages with no recognizable content
