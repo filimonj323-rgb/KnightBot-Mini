@@ -122,6 +122,7 @@ const {
   migrateDiskSessionIfPresent,
   deleteSession,
 } = require('./session-db');
+const { initializeDatabase: initializeGroupDatabase } = require('./database');
 const os = require('os');
 
 // Remove Puppeteer cache (if some dependency downloaded Chromium into ~/.cache/puppeteer)
@@ -319,6 +320,13 @@ async function startBot() {
   // Huunda wa_sessions/wa_session_keys/wa_messages Turso ikiwa hazipo bado —
   // salama kuita kila boot (CREATE TABLE IF NOT EXISTS).
   await initializeDatabase();
+
+  // Inarejesha database/groups.json, users.json, warnings.json, mods.json
+  // kutoka Turso (kama zipo) KABLA ya socket kuanza kupokea ujumbe — hivyo
+  // antilink/antitag/warnings/moderators havipotei bot inaporedeploy kwenye
+  // hosting yenye disk inayofutika. Ikiwa Turso haipatikani, inaendelea na
+  // faili za ndani pekee (haizuii boot).
+  await initializeGroupDatabase();
 
   // sessionId ya Turso — jina moja thabiti kwa bot hii (haihitaji Railway
   // Volume kabisa: creds+keys zinaishi Turso, si diskini tena).
@@ -556,14 +564,8 @@ async function startBot() {
 
   // Messages handler - Process only new messages
   sock.ev.on('messages.upsert', ({ messages, type }) => {
-    // "notify" = kawaida ujumbe mpya. "append" pia hutokea kwa ujumbe halisi
-    // wa sasa (siyo history ya zamani tu) — mfano ujumbe kutoka WhatsApp
-    // Business, multi-device sync, au fromMe kutoka simu iliyounganishwa —
-    // silva-md-bot iligundua hili na kuacha kufiltisha kwa type kabisa.
-    // Tunaruhusu 'notify' na 'append'; MESSAGE_AGE_LIMIT (dakika 5) na
-    // processedMessages dedup chini vinaendelea kuzuia history ya zamani
-    // kuchakatwa upya baada ya reconnect.
-    if (type !== 'notify' && type !== 'append') return;
+    // Only process "notify" type (new messages), skip "append" (old messages from history)
+    if (type !== 'notify') return;
 
     // Process messages in the array
     for (const msg of messages) {
