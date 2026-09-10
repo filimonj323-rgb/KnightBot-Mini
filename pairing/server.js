@@ -589,6 +589,15 @@ async function initPairingServer() {
   if (_pairingInitialized) return;
   _pairingInitialized = true;
   await db.initSchema(); // must finish before we accept any requests
+  // Inarejesha database/groups.json, users.json, warnings.json, mods.json
+  // kutoka Turso — muhimu hasa ikiwa faili hii inaendeshwa STANDALONE (deploy
+  // tofauti na index.js — angalia comment ya "STANDALONE MODE" chini): bila
+  // hii, mchakato huu (na kila instance ya pairing inayoendesha ndani yake)
+  // usingepata mipangilio ya group iliyohifadhiwa kabla ya redeploy ya mwisho.
+  // Salama kuita hata ikiwa index.js tayari imeiita (haifanyi kazi mara ya
+  // pili bure — CREATE TABLE IF NOT EXISTS + soma tu).
+  const groupDb = require('../database');
+  await groupDb.initializeDatabase();
   startReminderScheduler();
   // Bring back every previously-paired customer's bot automatically —
   // sessions live in Turso, so this works even without a Railway Volume
