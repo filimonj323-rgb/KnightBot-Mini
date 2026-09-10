@@ -593,7 +593,18 @@ const handleAutoViewOnce = async (sock, msg) => {
       : config;
     if (effectiveConfig.autoViewOnce === false) return;
 
-    const rawContent = msg.message;
+    // FIX: fungua safu ya ephemeralMessage (disappearing messages) KWANZA.
+    // Bila hii, meseji za view-once zinazotumwa kwenye chat yenye
+    // disappearing messages ON (default kwa chat nyingi mpya za WhatsApp)
+    // huja zikiwa `msg.message.ephemeralMessage.message.viewOnceMessageV2...`
+    // badala ya moja kwa moja `msg.message.viewOnceMessageV2...` — ukaguzi
+    // hapo chini ulikuwa unashindwa kupata wrapper na function ilikuwa
+    // inarudi kimya kimya bila kufanya lolote (hakuna error console-ni),
+    // ndiyo sababu auto-unlock ilionekana "haifanyi kazi kabisa".
+    let rawContent = msg.message;
+    if (rawContent.ephemeralMessage?.message) {
+      rawContent = rawContent.ephemeralMessage.message;
+    }
     let actualMsg = null;
     let mtype = null;
 
