@@ -101,6 +101,10 @@ async function fetchDSEStocks() {
     const close = num(cells[3]);
     const high = num(cells[4]);
     const low = num(cells[5]);
+    // Order book ya kiwango cha juu (touchline): Bid = bei bora ya
+    // kununua iliyopo sokoni, Offer = bei bora ya kuuza iliyopo sokoni.
+    const bid = num(cells[9]);
+    const offer = num(cells[10]);
     const volume = num(cells[11]);
     const mcap = cells[12] || cells[cells.length - 1] || 'N/A';
 
@@ -110,11 +114,30 @@ async function fetchDSEStocks() {
     const change = prevClose ? close - prevClose : 0;
     const changePct = prevClose ? (change / prevClose) * 100 : 0;
 
-    return { symbol, open, prevClose, close, high, low, volume, mcap, change, changePct };
+    return { symbol, open, prevClose, close, high, low, bid, offer, volume, mcap, change, changePct };
   });
 
   cache = { data: { stocks, date: summaryDate }, at: Date.now() };
   return cache.data;
+}
+
+// Table ya monospace inayoonekana sawa kwenye WhatsApp (ndani ya ```code```).
+// KUMBUKA: usiweke emoji ndani ya cells — upana wao si sawa na herufi za
+// kawaida kwenye monospace, hivyo vinavuruga alignment ya columns.
+function padCol(str, width) {
+  str = String(str);
+  return str.length >= width ? str.slice(0, width) : str + ' '.repeat(width - str.length);
+}
+
+function buildTable(rows, headers, widths) {
+  let out = '```\n';
+  out += headers.map((h, i) => padCol(h, widths[i])).join(' ') + '\n';
+  out += widths.map((w) => '-'.repeat(w)).join(' ') + '\n';
+  rows.forEach((r) => {
+    out += r.map((c, i) => padCol(c, widths[i])).join(' ') + '\n';
+  });
+  out += '```';
+  return out;
 }
 
 module.exports = {
@@ -157,26 +180,31 @@ module.exports = {
               `📈 *High:* ${stock.high.toLocaleString()}   📉 *Low:* ${stock.low.toLocaleString()}\n` +
               `📦 *Volume:* ${stock.volume.toLocaleString()}\n` +
               `🏦 *Market Cap:* TZS ${stock.mcap} Bilioni\n\n` +
-              `_Hii ni bei ya mwisho kufunga (closing), si "live" — DSE inafunga bei kila siku ya biashara._\n` +
+              `📖 *Order Book (Touchline):*\n` +
+              `   🟢 Bid (Nunua): ${stock.bid ? 'TZS ' + stock.bid.toLocaleString() : 'Hakuna bid leo'}\n` +
+              `   🔴 Offer (Uza): ${stock.offer ? 'TZS ' + stock.offer.toLocaleString() : 'Hakuna offer leo'}\n\n` +
+              `_Hii ni bei ya mwisho kufunga (closing) + touchline ya order book, si "live" — DSE inafunga bei kila siku ya biashara. Kwa bei za live na order book kamili (depth), unahitaji akaunti kwenye investor.dse.co.tz (Hisa Kiganjani Web) au app ya Hisa Kiganjani._\n` +
               `_Chanzo: dse.co.tz — kwa matumizi binafsi (si kusambaza kibiashara)_`,
           },
           { quoted: msg }
         );
       }
 
-      // Hakuna symbol — onyesha muhtasari wa soko zima
-      const lines = stocks
-        .map((s) => {
-          const arrow = s.change > 0 ? '▲' : s.change < 0 ? '▼' : '⏺';
-          return `${arrow} *${s.symbol}*: ${s.close.toLocaleString()} (${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(2)}%)`;
-        })
-        .join('\n');
+      // Hakuna symbol — onyesha muhtasari wa soko zima kama table
+      const headers = ['SYM', 'PRICE', 'CHG%'];
+      const widths = [10, 9, 8];
+      const rows = stocks.map((s) => [
+        s.symbol,
+        s.close.toLocaleString(),
+        `${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(2)}%`,
+      ]);
+      const table = buildTable(rows, headers, widths);
 
       return await sock.sendMessage(
         jid,
         {
           text:
-            `📊 *DSE — Muhtasari wa Soko*\n${dateLabel}\n\n${lines}\n\n` +
+            `📊 *DSE — Muhtasari wa Soko*\n${dateLabel}\n\n${table}\n\n` +
             `_Tumia: .dse <symbol> kwa maelezo zaidi (mfano: .dse CRDB)_\n` +
             `_Chanzo: dse.co.tz_`,
         },
