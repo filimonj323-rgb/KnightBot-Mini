@@ -1,0 +1,25 @@
+{
+  "_readme": "Data hii inasasishwa KWA MKONO. Chanzo: ripoti za kifedha za kampuni (dse.co.tz/listed/company -> Financial Statements) au tovuti kama stockanalysis.com. Sasisha kila robo mwaka/mwaka baada ya ripoti mpya. 'eps'=Earnings Per Share (TZS), 'bvps'=Book Value Per Share (TZS), 'dps'=Dividend Per Share ya mwaka (TZS, weka 0 kama hakuna gawio), 'roe'=Return on Equity (%, hiari).",
+  "CRDB": {
+    "name": "CRDB Bank Plc",
+    "sector": "Benki",
+    "eps": 293.46,
+    "bvps": 1147.17,
+    "dps": 90.0,
+    "roe": 29.11,
+    "sharesOutstanding": 2610000000,
+    "asOf": "TTM (hadi robo ya 2 2026)",
+    "source": "Ripoti za kifedha za CRDB / stockanalysis.com"
+  },
+  "MBP": {
+    "name": "Maendeleo Bank Plc",
+    "sector": "Benki",
+    "eps": 167.67,
+    "bvps": 902.7,
+    "dps": 0,
+    "roe": 20.35,
+    "sharesOutstanding": 30050000,
+    "asOf": "TTM (hadi robo ya 2 2026)",
+    "source": "Ripoti za kifedha za MBP / stockanalysis.com"
+  }
+}
