@@ -18,7 +18,7 @@
  */
 
 const path = require('path');
-const fundamentals = require('../../data/fundamentals.json');
+const fundamentals = require('../../utils/data/fundamentals.json');
 const { analyzeStock } = require('../../utils/stockAnalysis');
 const { fetchDSEStocks } = require('./dse.js');
 
