@@ -70,6 +70,28 @@ function buildFooter() {
   );
 }
 
+// ─────────────────────────────────────────────
+// Box/frame ya monospace kwa tables (values) — inatumia ``` ili WhatsApp
+// ionyeshe kwa font ya monospace (tofauti na maandishi ya kawaida ya
+// kuchati), na box-drawing characters kuzungushia jedwali.
+// rows: [ [label, value], ... ]
+// ─────────────────────────────────────────────
+function buildBox(title, rows) {
+  const labelWidth = Math.max(...rows.map((r) => String(r[0]).length));
+  const lines = rows.map(
+    ([label, value]) => `${String(label).padEnd(labelWidth)} : ${value}`
+  );
+  const innerWidth = Math.max(title.length, ...lines.map((l) => l.length));
+
+  const top    = `┌${'─'.repeat(innerWidth + 2)}┐`;
+  const sep    = `├${'─'.repeat(innerWidth + 2)}┤`;
+  const bottom = `└${'─'.repeat(innerWidth + 2)}┘`;
+  const titleLine = `│ ${title.padEnd(innerWidth)} │`;
+  const body = lines.map((l) => `│ ${l.padEnd(innerWidth)} │`).join('\n');
+
+  return '```\n' + [top, titleLine, sep, body, bottom].join('\n') + '\n```';
+}
+
 function withTimeout(promise, ms, label) {
   return Promise.race([
     promise,
@@ -351,17 +373,22 @@ function buildMessage(data, calc, ai, newsContext) {
   L.push(buildHeader(`${symbol} — DSE ANALYZE`));
   L.push('');
   if (name && name !== symbol) L.push(`🏢 *${name}*`);
-  L.push(
-    `💰 *Bei:* TZS ${fmt(price)}` +
-      (priceChangePct != null
-        ? ` (${priceChangePct >= 0 ? '+' : ''}${Number(priceChangePct).toFixed(2)}%)`
-        : '')
-  );
   L.push('');
 
-  // Verdict
-  L.push(`🎯 *Verdict:* ${verdictEmoji(ai.verdict)} *${ai.verdict || 'NEUTRAL'}*`);
-  L.push(`📊 *Score:* ${ai.score ?? '—'}/100  •  *Confidence:* ${ai.confidence || '—'}`);
+  const priceStr =
+    `TZS ${fmt(price)}` +
+    (priceChangePct != null
+      ? ` (${priceChangePct >= 0 ? '+' : ''}${Number(priceChangePct).toFixed(2)}%)`
+      : '');
+
+  L.push(
+    buildBox('SNAPSHOT', [
+      ['Bei', priceStr],
+      ['Verdict', `${verdictEmoji(ai.verdict)} ${ai.verdict || 'NEUTRAL'}`],
+      ['Score', `${ai.score ?? '—'}/100`],
+      ['Confidence', ai.confidence || '—'],
+    ])
+  );
   L.push('');
 
   // Muhtasari
@@ -371,21 +398,27 @@ function buildMessage(data, calc, ai, newsContext) {
     L.push('');
   }
 
-  // Fundamentals ghafi
+  // Fundamentals ghafi — kwenye box ya monospace
   if (fund) {
     L.push(`📊 *Fundamentals (${asOf || 'kipindi kisichojulikana'})*`);
-    L.push(`   • EPS: TZS ${fmt(fund.eps)}`);
-    L.push(`   • BVPS: TZS ${fmt(fund.bvps)}`);
-    L.push(`   • DPS: TZS ${fmt(fund.dps)}`);
-    L.push(`   • ROE: ${fund.roe != null ? fmt2(fund.roe) + '%' : 'N/A'}`);
+    L.push(
+      buildBox('FUNDAMENTALS', [
+        ['EPS', `TZS ${fmt(fund.eps)}`],
+        ['BVPS', `TZS ${fmt(fund.bvps)}`],
+        ['DPS', `TZS ${fmt(fund.dps)}`],
+        ['ROE', fund.roe != null ? fmt2(fund.roe) + '%' : 'N/A'],
+      ])
+    );
     L.push('');
 
     L.push(`📐 *Uwiano*`);
-    L.push(`   • P/E: ${calc.pe != null ? fmt2(calc.pe) + 'x' : 'N/A'}`);
-    L.push(`   • P/B: ${calc.pb != null ? fmt2(calc.pb) + 'x' : 'N/A'}`);
-    L.push(`   • Dividend Yield: ${calc.dy != null ? fmt2(calc.dy) + '%' : 'N/A'}`);
     L.push(
-      `   • Market Cap: ${calc.marketcap != null ? 'TZS ' + fmt(calc.marketcap) : 'N/A'}`
+      buildBox('UWIANO', [
+        ['P/E', calc.pe != null ? fmt2(calc.pe) + 'x' : 'N/A'],
+        ['P/B', calc.pb != null ? fmt2(calc.pb) + 'x' : 'N/A'],
+        ['Div. Yield', calc.dy != null ? fmt2(calc.dy) + '%' : 'N/A'],
+        ['Market Cap', calc.marketcap != null ? 'TZS ' + fmt(calc.marketcap) : 'N/A'],
+      ])
     );
     L.push('');
   } else {
@@ -514,8 +547,27 @@ module.exports = {
         try {
           newsContext = await fetchLiveNewsContext(symbol, data.name);
         } catch (err) {
-          console.warn('analyze: live news fetch error', err.message);
-          audit.push(`Habari za mtandaoni hazikupatikana (${err.message}).`);
+          // Log details kamili (status, body) kwa developer — si kwa mtumiaji,
+          // ili tuweze kubaini chanzo halisi cha errors kama 413/429/500.
+          console.warn(
+            'analyze: live news fetch error',
+            err.status || err.response?.status || '',
+            err.message,
+            err.error || err.response?.data || ''
+          );
+
+          const status = err.status || err.response?.status;
+          let reason;
+          if (status === 413) {
+            reason = 'ombi lilikuwa kubwa mno kwa seva ya habari';
+          } else if (status === 429) {
+            reason = 'kikomo cha maombi kimefikiwa (rate limit), jaribu tena baadaye';
+          } else if (/muda umeisha/i.test(err.message)) {
+            reason = 'muda wa kusubiri umeisha';
+          } else {
+            reason = 'tatizo la mtandao/seva';
+          }
+          audit.push(`Habari za mtandaoni hazikupatikana (${reason}).`);
         }
       }
 
