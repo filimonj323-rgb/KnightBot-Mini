@@ -1,5 +1,5 @@
 /**
- * Stock Command — Uchambuzi wa haraka wa hisa ya DSE
+ * Stock Command — Snapshot ya hisa ya DSE
  *
  * Inachanganya:
  *   1) Bei ya sasa kutoka dse.js (fetchDSEStocks — DSE HTML, cache 2 min).
@@ -7,8 +7,8 @@
  *   3) Fallback: fundamentals.json (manual) kama stockana.js inashindwa.
  *
  * Tofauti na .analyze:
- *   - .stock inaonyesha fundamentals ghafi + uwiano wa haraka
- *   - .analyze inatoa uchambuzi kamili (score, verdict, tathmini ya kila kigezo)
+ *   - .stock inaonyesha fundamentals ghafi + uwiano wa haraka (snapshot).
+ *   - .analyze inatoa uchambuzi kamili (score, verdict, tathmini ya kila kigezo).
  *
  * ⚠️ SI USHAURI WA UWEKEZAJI.
  */
@@ -16,7 +16,9 @@
 const { fetchDSEStocks } = require('./dse.js');
 const { fetchStockana } = require('../../utils/stockana.js');
 
-function buildHeader(title) { return `⎯⎯⎯ 『 *${title}* 』 ⎯⎯⎯`; }
+function buildHeader(title) {
+  return `⎯⎯⎯ 『 *${title}* 』 ⎯⎯⎯`;
+}
 
 function buildFooter() {
   return (
@@ -37,8 +39,13 @@ function buildMessage({ symbol, name, price, priceChangePct, fund, asOf, srcPric
   lines.push(buildHeader(`${symbol} — DSE SNAPSHOT`));
   lines.push('');
 
-  if (name) lines.push(`🏢 *${name}*`);
-  lines.push(`💰 *Bei:* TZS ${fmt(price)}` + (priceChangePct != null ? ` (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}%)` : ''));
+  if (name && name !== symbol) lines.push(`🏢 *${name}*`);
+  lines.push(
+    `💰 *Bei:* TZS ${fmt(price)}` +
+      (priceChangePct != null
+        ? ` (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}%)`
+        : '')
+  );
   lines.push('');
 
   if (fund) {
@@ -48,14 +55,35 @@ function buildMessage({ symbol, name, price, priceChangePct, fund, asOf, srcPric
     lines.push(`   • DPS: TZS ${fmt(fund.dps)}`);
     lines.push(`   • ROE: ${fund.roe != null ? fund.roe.toFixed(1) + '%' : 'N/A'}`);
     lines.push('');
+
     lines.push(`📐 *Uwiano*`);
-    if (fund.pe != null) lines.push(`   • P/E: ${fmt2(fund.pe)}x`);
-    else if (price && fund.eps) lines.push(`   • P/E: ${fmt2(price / fund.eps)}x _(imehesabiwa)_`);
-    if (fund.pb != null) lines.push(`   • P/B: ${fmt2(fund.pb)}x`);
-    else if (price && fund.bvps) lines.push(`   • P/B: ${fmt2(price / fund.bvps)}x _(imehesabiwa)_`);
-    if (fund.divYield != null) lines.push(`   • Dividend Yield: ${fmt2(fund.divYield)}%`);
-    else if (price && fund.dps) lines.push(`   • Dividend Yield: ${fmt2((fund.dps / price) * 100)}% _(imehesabiwa)_`);
-    if (fund.marketcap != null) lines.push(`   • Market Cap: TZS ${fmt(fund.marketcap)}`);
+
+    // P/E — tumia iliyopatikana, au hesabu kutoka bei/eps
+    if (fund.pe != null) {
+      lines.push(`   • P/E: ${fmt2(fund.pe)}x`);
+    } else if (price != null && fund.eps) {
+      lines.push(`   • P/E: ${fmt2(price / fund.eps)}x _(imehesabiwa)_`);
+    }
+
+    // P/B — tumia iliyopatikana, au hesabu kutoka bei/bvps
+    if (fund.pb != null) {
+      lines.push(`   • P/B: ${fmt2(fund.pb)}x`);
+    } else if (price != null && fund.bvps) {
+      lines.push(`   • P/B: ${fmt2(price / fund.bvps)}x _(imehesabiwa)_`);
+    }
+
+    // Dividend Yield — tumia iliyopatikana, au hesabu kutoka dps/bei
+    if (fund.divYield != null) {
+      lines.push(`   • Dividend Yield: ${fmt2(fund.divYield)}%`);
+    } else if (price != null && fund.dps) {
+      lines.push(`   • Dividend Yield: ${fmt2((fund.dps / price) * 100)}% _(imehesabiwa)_`);
+    }
+
+    // Market Cap — kama ipo
+    if (fund.marketcap != null) {
+      lines.push(`   • Market Cap: TZS ${fmt(fund.marketcap)}`);
+    }
+
     lines.push('');
   } else {
     lines.push('⚠️ *Fundamentals hazipatikani* kwa hisa hii.');
@@ -94,8 +122,12 @@ module.exports = {
     }
 
     try {
-      // 1) Bei kutoka DSE (kama ilivyo kwenye analyze.js)
-      let price = null, name = symbol, priceChangePct = null, srcPrice = 'DSE';
+      // 1) Bei kutoka DSE (fetchDSEStocks — kama ilivyo kwenye analyze.js)
+      let price = null;
+      let name = symbol;
+      let priceChangePct = null;
+      let srcPrice = 'DSE';
+
       try {
         const { stocks } = await fetchDSEStocks();
         const live = stocks.find((s) => s.symbol === symbol);
@@ -111,23 +143,44 @@ module.exports = {
       const fund = await fetchStockana(symbol);
       const srcFund = fund?.source || 'haipatikani';
 
-      if (fund?.name && (!name || name === symbol)) name = fund.name;
+      // 3) Kama DSE haikupata bei, tumia bei kutoka stockana.js
       if (price == null && fund?.price != null) {
         price = fund.price;
         srcPrice = 'stockanalysis.com';
       }
 
+      // 4) Kama hatuna kitu kabisa
       if (price == null && !fund) {
         return await sock.sendMessage(
           jid,
-          { text: `❌ Hatuna data kwa "${symbol}" kwa sasa. Jaribu tena baadaye.` },
+          {
+            text:
+              `❌ Hatuna data kwa "${symbol}" kwa sasa.\n\n` +
+              `• Bei haikupatikana kwenye DSE\n` +
+              `• Fundamentals hazipatikani kwenye stockanalysis.com\n\n` +
+              `Jaribu tena baadaye au tumia \`.dse ${symbol}\` kwa bei pekee.`,
+          },
           { quoted: msg }
         );
       }
 
+      // 5) Tumia jina kutoka fundamentals kama DSE halina jina
+      if (fund?.name && (!name || name === symbol)) name = fund.name;
+
       return await sock.sendMessage(
         jid,
-        { text: buildMessage({ symbol, name, price, priceChangePct, fund, asOf: fund?.asOf, srcPrice, srcFund }) },
+        {
+          text: buildMessage({
+            symbol,
+            name,
+            price,
+            priceChangePct,
+            fund,
+            asOf: fund?.asOf,
+            srcPrice,
+            srcFund,
+          }),
+        },
         { quoted: msg }
       );
     } catch (err) {
