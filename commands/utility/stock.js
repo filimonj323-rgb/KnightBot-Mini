@@ -3,8 +3,10 @@
  *
  * Inachanganya:
  *   1) Bei ya sasa kutoka dse.js (fetchDSEStocks — DSE HTML, cache 2 min).
- *   2) Fundamentals kutoka stockana.js (stockanalysis.com __data.json, cache 7d).
- *   3) Fallback: fundamentals.json (manual) kama stockana.js inashindwa.
+ *   2) Fundamentals kutoka stockana.js (stockanalysis.com/quote/dar/.../statistics/,
+ *      cache siku 7).
+ *   3) Fallback: fundamentals.json (manual) kama stockana.js inashindwa
+ *      (symbol haipo kwenye stockanalysis.com, au tovuti haipatikani).
  *
  * Tofauti na .analyze:
  *   - .stock inaonyesha fundamentals ghafi + uwiano wa haraka (snapshot).
@@ -15,6 +17,7 @@
 
 const { fetchDSEStocks } = require('./dse.js');
 const { fetchStockana } = require('../../utils/stockana.js');
+const fundamentals = require('../../utils/data/fundamentals.json');
 
 function buildHeader(title) {
   return `⎯⎯⎯ 『 *${title}* 』 ⎯⎯⎯`;
@@ -58,18 +61,22 @@ function buildMessage({ symbol, name, price, priceChangePct, fund, asOf, srcPric
 
     lines.push(`📐 *Uwiano*`);
 
-    // P/E — tumia iliyopatikana, au hesabu kutoka bei/eps
+    // P/E — tumia iliyopatikana (stockana.js), au hesabu kutoka bei/eps
     if (fund.pe != null) {
       lines.push(`   • P/E: ${fmt2(fund.pe)}x`);
-    } else if (price != null && fund.eps) {
+    } else if (price != null && fund.eps > 0) {
       lines.push(`   • P/E: ${fmt2(price / fund.eps)}x _(imehesabiwa)_`);
+    } else {
+      lines.push(`   • P/E: N/A`);
     }
 
     // P/B — tumia iliyopatikana, au hesabu kutoka bei/bvps
     if (fund.pb != null) {
       lines.push(`   • P/B: ${fmt2(fund.pb)}x`);
-    } else if (price != null && fund.bvps) {
+    } else if (price != null && fund.bvps > 0) {
       lines.push(`   • P/B: ${fmt2(price / fund.bvps)}x _(imehesabiwa)_`);
+    } else {
+      lines.push(`   • P/B: N/A`);
     }
 
     // Dividend Yield — tumia iliyopatikana, au hesabu kutoka dps/bei
@@ -77,11 +84,15 @@ function buildMessage({ symbol, name, price, priceChangePct, fund, asOf, srcPric
       lines.push(`   • Dividend Yield: ${fmt2(fund.divYield)}%`);
     } else if (price != null && fund.dps) {
       lines.push(`   • Dividend Yield: ${fmt2((fund.dps / price) * 100)}% _(imehesabiwa)_`);
+    } else {
+      lines.push(`   • Dividend Yield: 0.00%`);
     }
 
-    // Market Cap — kama ipo
+    // Market Cap — tumia iliyopatikana, au hesabu kutoka shares * bei
     if (fund.marketcap != null) {
       lines.push(`   • Market Cap: TZS ${fmt(fund.marketcap)}`);
+    } else if (fund.sharesOutstanding != null && price != null) {
+      lines.push(`   • Market Cap: TZS ${fmt(fund.sharesOutstanding * price)} _(imehesabiwa)_`);
     }
 
     lines.push('');
@@ -139,14 +150,24 @@ module.exports = {
         console.warn('stock: DSE fetch error', err.message);
       }
 
-      // 2) Fundamentals kutoka stockana.js
-      const fund = await fetchStockana(symbol);
-      const srcFund = fund?.source || 'haipatikani';
+      // 2) Fundamentals kutoka stockana.js (live, stockanalysis.com)
+      let fund = null;
+      let srcFund = 'haipatikani';
 
-      // 3) Kama DSE haikupata bei, tumia bei kutoka stockana.js
-      if (price == null && fund?.price != null) {
-        price = fund.price;
-        srcPrice = 'stockanalysis.com';
+      try {
+        fund = await fetchStockana(symbol);
+        if (fund) srcFund = 'stockanalysis.com';
+      } catch (err) {
+        console.warn('stock: stockana fetch error', err.message);
+      }
+
+      // 3) Fallback: fundamentals.json (manual) kama stockana.js imeshindwa
+      if (!fund) {
+        const fx = fundamentals[symbol];
+        if (fx) {
+          fund = fx;
+          srcFund = 'fundamentals.json (data ya mkono)';
+        }
       }
 
       // 4) Kama hatuna kitu kabisa
@@ -157,7 +178,7 @@ module.exports = {
             text:
               `❌ Hatuna data kwa "${symbol}" kwa sasa.\n\n` +
               `• Bei haikupatikana kwenye DSE\n` +
-              `• Fundamentals hazipatikani kwenye stockanalysis.com\n\n` +
+              `• Fundamentals hazipatikani kwenye stockanalysis.com wala fundamentals.json\n\n` +
               `Jaribu tena baadaye au tumia \`.dse ${symbol}\` kwa bei pekee.`,
           },
           { quoted: msg }
