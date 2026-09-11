@@ -160,6 +160,9 @@ function buildFooter() {
 module.exports = {
   name: 'dse',
   aliases: ['hisatz', 'tzstock', 'dsestock'],
+  // Inatolewa (exported) ili command nyingine (mfano analyze.js) itumie bei
+  // ya live bila kurudia logic ya kuchakura dse.co.tz.
+  fetchDSEStocks,
   category: 'utility',
   description: 'Bei za hisa za Dar es Salaam Stock Exchange (DSE)',
   usage: '.dse [symbol] — mfano: .dse CRDB — au .dse pekee kwa muhtasari wa soko',
