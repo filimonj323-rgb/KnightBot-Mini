@@ -1,0 +1,142 @@
+/**
+ * Stock Command — Uchambuzi wa haraka wa hisa ya DSE
+ *
+ * Inachanganya:
+ *   1) Bei ya sasa kutoka dse.js (fetchDSEStocks — DSE HTML, cache 2 min).
+ *   2) Fundamentals kutoka stockana.js (stockanalysis.com __data.json, cache 7d).
+ *   3) Fallback: fundamentals.json (manual) kama stockana.js inashindwa.
+ *
+ * Tofauti na .analyze:
+ *   - .stock inaonyesha fundamentals ghafi + uwiano wa haraka
+ *   - .analyze inatoa uchambuzi kamili (score, verdict, tathmini ya kila kigezo)
+ *
+ * ⚠️ SI USHAURI WA UWEKEZAJI.
+ */
+
+const { fetchDSEStocks } = require('./dse.js');
+const { fetchStockana } = require('../../utils/stockana.js');
+
+function buildHeader(title) { return `⎯⎯⎯ 『 *${title}* 』 ⎯⎯⎯`; }
+
+function buildFooter() {
+  return (
+    `┌─────────────────\n` +
+    `│ 🛠️ *MR.IT MEDIATOR*\n` +
+    `└─────────────────\n` +
+    `   _for easy access of data and analysis.._\n` +
+    `   _system developer and automation.._\n` +
+    `   🔗 *DSE INVESTOR:* https://investor.dse.co.tz/login`
+  );
+}
+
+const fmt = (n) => (n == null ? 'N/A' : Number(n).toLocaleString());
+const fmt2 = (n) => (n == null ? 'N/A' : Number(n).toFixed(2));
+
+function buildMessage({ symbol, name, price, priceChangePct, fund, asOf, srcPrice, srcFund }) {
+  const lines = [];
+  lines.push(buildHeader(`${symbol} — DSE SNAPSHOT`));
+  lines.push('');
+
+  if (name) lines.push(`🏢 *${name}*`);
+  lines.push(`💰 *Bei:* TZS ${fmt(price)}` + (priceChangePct != null ? ` (${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}%)` : ''));
+  lines.push('');
+
+  if (fund) {
+    lines.push(`📊 *Fundamentals (${asOf || 'kipindi kisichojulikana'})*`);
+    lines.push(`   • EPS: TZS ${fmt(fund.eps)}`);
+    lines.push(`   • BVPS: TZS ${fmt(fund.bvps)}`);
+    lines.push(`   • DPS: TZS ${fmt(fund.dps)}`);
+    lines.push(`   • ROE: ${fund.roe != null ? fund.roe.toFixed(1) + '%' : 'N/A'}`);
+    lines.push('');
+    lines.push(`📐 *Uwiano*`);
+    if (fund.pe != null) lines.push(`   • P/E: ${fmt2(fund.pe)}x`);
+    else if (price && fund.eps) lines.push(`   • P/E: ${fmt2(price / fund.eps)}x _(imehesabiwa)_`);
+    if (fund.pb != null) lines.push(`   • P/B: ${fmt2(fund.pb)}x`);
+    else if (price && fund.bvps) lines.push(`   • P/B: ${fmt2(price / fund.bvps)}x _(imehesabiwa)_`);
+    if (fund.divYield != null) lines.push(`   • Dividend Yield: ${fmt2(fund.divYield)}%`);
+    else if (price && fund.dps) lines.push(`   • Dividend Yield: ${fmt2((fund.dps / price) * 100)}% _(imehesabiwa)_`);
+    if (fund.marketcap != null) lines.push(`   • Market Cap: TZS ${fmt(fund.marketcap)}`);
+    lines.push('');
+  } else {
+    lines.push('⚠️ *Fundamentals hazipatikani* kwa hisa hii.');
+    lines.push('');
+  }
+
+  lines.push(`_Chanzo: bei = ${srcPrice}; fundamentals = ${srcFund}._`);
+  lines.push(`_⚠️ SI ushauri wa kitaalamu wa uwekezaji._`);
+  lines.push('');
+  lines.push(buildFooter());
+  return lines.join('\n');
+}
+
+module.exports = {
+  name: 'stock',
+  aliases: ['hisa', 'snapshot'],
+  category: 'utility',
+  description: 'Snapshot ya hisa ya DSE — bei + fundamentals + uwiano wa haraka',
+  usage: '.stock <symbol> — mfano: .stock CRDB',
+
+  async execute(sock, msg, args) {
+    const jid = msg.key.remoteJid;
+    const symbol = (args[0] || '').toUpperCase();
+
+    if (!symbol) {
+      return await sock.sendMessage(
+        jid,
+        {
+          text:
+            `❓ Weka symbol ya hisa.\n\n` +
+            `Tumia: .stock <symbol>\n` +
+            `Mfano: .stock CRDB`,
+        },
+        { quoted: msg }
+      );
+    }
+
+    try {
+      // 1) Bei kutoka DSE (kama ilivyo kwenye analyze.js)
+      let price = null, name = symbol, priceChangePct = null, srcPrice = 'DSE';
+      try {
+        const { stocks } = await fetchDSEStocks();
+        const live = stocks.find((s) => s.symbol === symbol);
+        if (live) {
+          price = live.close || live.prevClose || live.open || null;
+          priceChangePct = live.changePct ?? null;
+        }
+      } catch (err) {
+        console.warn('stock: DSE fetch error', err.message);
+      }
+
+      // 2) Fundamentals kutoka stockana.js
+      const fund = await fetchStockana(symbol);
+      const srcFund = fund?.source || 'haipatikani';
+
+      if (fund?.name && (!name || name === symbol)) name = fund.name;
+      if (price == null && fund?.price != null) {
+        price = fund.price;
+        srcPrice = 'stockanalysis.com';
+      }
+
+      if (price == null && !fund) {
+        return await sock.sendMessage(
+          jid,
+          { text: `❌ Hatuna data kwa "${symbol}" kwa sasa. Jaribu tena baadaye.` },
+          { quoted: msg }
+        );
+      }
+
+      return await sock.sendMessage(
+        jid,
+        { text: buildMessage({ symbol, name, price, priceChangePct, fund, asOf: fund?.asOf, srcPrice, srcFund }) },
+        { quoted: msg }
+      );
+    } catch (err) {
+      console.error('stock error:', err.message);
+      await sock.sendMessage(
+        jid,
+        { text: `❌ Imeshindwa kuchambua "${symbol}": ${err.message}` },
+        { quoted: msg }
+      );
+    }
+  },
+};
