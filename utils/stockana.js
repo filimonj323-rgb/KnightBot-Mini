@@ -1,21 +1,21 @@
 /**
  * Stockana — Fundamentals kutoka stockanalysis.com
  *
- * Chanzo: SvelteKit __data.json endpoints (bila HTML, bila Cloudflare):
- *   - /quote/dar/{SYM}/financials/ratios/__data.json  → EPS, BVPS, ROE, P/E, P/B, DivYield
- *   - /quote/dar/{SYM}/dividend/__data.json           → DPS halisi
+ * Inatumia:
+ *   - axios kupata __data.json
+ *   - devalue (npm package) kuchambua SvelteKit encoding
  *
- * ⚠️ MUHIMU:
- *  - __data.json HAIPO nyuma ya Cloudflare (endpoint ya data).
- *  - Ina-cache kwa siku 7 (fundamentals hazibadiliki kila siku).
- *  - Fallback: fundamentals.json (manual) kama __data.json inashindwa.
+ * Chanzo: /quote/dar/{SYM}/financials/ratios/__data.json
+ *         /quote/dar/{SYM}/dividend/__data.json
  *
+ * ⚠️ Inahitaji: "devalue": "^5.1.1" kwenye package.json
  * ⚠️ SI USHAURI WA UWEKEZAJI.
  */
 
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
+const { unflatten } = require('devalue');
 
 const CACHE_FILE = path.join(__dirname, '..', 'data', 'stockana.cache.json');
 const CACHE_MS = 7 * 24 * 60 * 60 * 1000; // siku 7
@@ -61,83 +61,86 @@ async function getJson(url) {
 }
 
 /**
- * Resolve devalue index -> thamani halisi.
- * SvelteKit inatumia arrays: thamani ziko kwenye array kubwa, na indices
- * ndogo zinaelekeza kwenye nafasi.
+ * Chambua node moja ya __data.json kwa kutumia devalue unflatten.
+ *
+ * SvelteKit inatuma: { type: "data", data: [ ...devalue-encoded... ] }
+ * devalue unflatten inarudisha object halisi.
  */
-function makeResolver(pool) {
-  return function resolve(ref, depth = 0) {
-    if (depth > 5) return null;
-    if (ref == null) return null;
-    if (typeof ref === 'number') {
-      const v = pool[ref];
-      if (typeof v === 'number' || typeof v === 'string' || v === null) return v;
-      return resolve(v, depth + 1);
-    }
-    return ref;
-  };
+function unflattenNode(node) {
+  if (!node || node.type !== 'data' || !Array.isArray(node.data)) return null;
+  try {
+    return unflatten(node.data);
+  } catch (err) {
+    console.warn('[stockana] unflatten error:', err.message);
+    return null;
+  }
 }
 
 /**
  * Chambua __data.json ya financials/ratios/.
- * Inarudisha { eps, bvps, roe, pe, pb, divYield, marketcap, asOf }.
  */
 function parseRatios(json) {
-  if (!json || !Array.isArray(json.nodes)) return null;
+  if (!json || !Array.isArray(json.nodes)) {
+    console.log('[stockana] parseRatios: hakuna nodes');
+    return null;
+  }
 
   let financialData = null;
   let info = null;
-  let pool = null;
 
   for (const node of json.nodes) {
-    if (!node || node.type !== 'data' || !Array.isArray(node.data)) continue;
-    const first = node.data[0];
-    if (!first || typeof first !== 'object') continue;
+    const flat = unflattenNode(node);
+    if (!flat) continue;
 
-    if (first.financialData && !financialData) financialData = first.financialData;
-    if (first.symbol && first.name && !info) info = first;
-    if (Array.isArray(first) && first.length > pool?.length) pool = first;
-  }
-
-  // pool = array kubwa ya values (devalue root). Tafuta kwenye node.data.
-  if (!pool) {
-    for (const node of json.nodes) {
-      if (!node || node.type !== 'data') continue;
-      // devalue inaweka values kwenye node.data yenyewe kama array
-      if (Array.isArray(node.data) && node.data.length > 50) {
-        pool = node.data;
-        break;
-      }
+    const arr = Array.isArray(flat) ? flat : [flat];
+    for (const item of arr) {
+      if (!item || typeof item !== 'object') continue;
+      if (item.financialData && !financialData) financialData = item.financialData;
+      if (item.symbol && item.name && !info) info = item;
     }
   }
 
-  // Kama bado hakuna pool, tumia json.nodes[2].data kama fallback
-  if (!pool && json.nodes[2]?.data) pool = json.nodes[2].data;
+  if (!financialData) {
+    console.log('[stockana] parseRatios: financialData haipatikani');
+    return null;
+  }
 
-  const resolve = makeResolver(pool || []);
+  const fd = financialData;
 
-  if (!financialData) return null;
+  console.log('[stockana] financialData imepatikana, keys:', Object.keys(fd).slice(0, 15));
 
-  const at = (arr) => (Array.isArray(arr) ? resolve(arr[0]) : null);
+  const first = (arr) => {
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    const v = arr[0];
+    return typeof v === 'number' ? v : null;
+  };
 
-  const price     = at(financialData.lastCloseRatios);
-  const pe        = at(financialData.pe);
-  const pb        = at(financialData.pb);
-  const roeRaw    = at(financialData.roe);
-  const divYield  = at(financialData.dividendyield);
-  const payoutRaw = at(financialData.payoutratio);
-  const mcap      = at(financialData.marketcap);
+  const price      = first(fd.lastCloseRatios);
+  const pe         = first(fd.pe);
+  const pb         = first(fd.pb);
+  const roeRaw     = first(fd.roe);
+  const divYield   = first(fd.dividendyield);
+  const payoutRaw  = first(fd.payoutratio);
+  const mcap       = first(fd.marketcap);
 
-  const ttm = financialData.ttmPrior || {};
-  const eps  = resolve(ttm.epsBasic) ?? resolve(ttm.epsDil) ?? null;
-  const bvps = resolve(ttm.bvps) ?? resolve(ttm.tangibleBookValuePerShare) ?? null;
+  const ttm = fd.ttmPrior || {};
+  console.log('[stockana] ttmPrior keys:', Object.keys(ttm).slice(0, 15));
+  console.log('[stockana] ttm.epsBasic:', ttm.epsBasic);
+  console.log('[stockana] ttm.bvps:', ttm.bvps);
 
-  const fiscalYears = financialData.fiscalYear;
+  const eps  = typeof ttm.epsBasic === 'number' ? ttm.epsBasic
+             : typeof ttm.epsDil === 'number' ? ttm.epsDil
+             : null;
+  const bvps = typeof ttm.bvps === 'number' ? ttm.bvps
+             : typeof ttm.tangibleBookValuePerShare === 'number' ? ttm.tangibleBookValuePerShare
+             : null;
+
+  const fiscalYears = fd.fiscalYear;
   const asOf = Array.isArray(fiscalYears) && fiscalYears.length
-    ? String(resolve(fiscalYears[0]) ?? '')
+    ? String(fiscalYears[0])
     : null;
 
-  return {
+  const result = {
     symbol: (info?.symbol || '').toUpperCase() || null,
     name: info?.name || info?.nameFull || null,
     price: typeof price === 'number' ? price : null,
@@ -151,28 +154,54 @@ function parseRatios(json) {
     marketcap: typeof mcap === 'number' ? mcap : null,
     asOf: asOf || null,
   };
+
+  console.log('[stockana] parseRatios result:', {
+    eps: result.eps,
+    bvps: result.bvps,
+    roe: result.roe,
+    pe: result.pe,
+    pb: result.pb,
+    divYield: result.divYield,
+  });
+
+  return result;
 }
 
 /**
- * Chambua __data.json ya /dividend/ — kutoa DPS halisi.
- * Muundo unatofautiana, tunatafuta "annualDividend" au "dividendPerShare".
+ * Chambua __data.json ya /dividend/ kutoa DPS halisi.
  */
 function parseDividend(json) {
-  if (!json) return null;
-  const text = JSON.stringify(json);
+  if (!json || !Array.isArray(json.nodes)) return null;
 
-  // Tafuta fields zinazowezekana
-  const patterns = [
-    /"annualDividend"\s*:\s*([\d.]+)/i,
-    /"dividendPerShare"\s*:\s*([\d.]+)/i,
-    /"dps"\s*:\s*([\d.]+)/i,
-    /"dividend"\s*:\s*([\d.]+)/i,
-  ];
-  for (const p of patterns) {
-    const m = text.match(p);
-    if (m) {
-      const v = parseFloat(m[1]);
-      if (Number.isFinite(v) && v > 0 && v < 100000) return v;
+  for (const node of json.nodes) {
+    const flat = unflattenNode(node);
+    if (!flat) continue;
+    const arr = Array.isArray(flat) ? flat : [flat];
+    for (const item of arr) {
+      if (!item || typeof item !== 'object') continue;
+      const candidates = [
+        item.annualDividend,
+        item.dividendPerShare,
+        item.dps,
+        item.dividend,
+      ];
+      for (const c of candidates) {
+        if (typeof c === 'number' && c > 0 && c < 100000) {
+          console.log('[stockana] DPS imepatikana:', c);
+          return c;
+        }
+      }
+    }
+  }
+
+  // Fallback: tafuta kwenye string
+  const text = JSON.stringify(json);
+  const m = text.match(/"(?:annualDividend|dividendPerShare|dps)"\s*:\s*([\d.]+)/);
+  if (m) {
+    const v = parseFloat(m[1]);
+    if (Number.isFinite(v) && v > 0 && v < 100000) {
+      console.log('[stockana] DPS (fallback):', v);
+      return v;
     }
   }
   return null;
@@ -195,9 +224,6 @@ function sanity(v) {
   return out;
 }
 
-/**
- * Kazi kuu: chukua fundamentals kwa symbol.
- */
 async function fetchStockana(symbol) {
   symbol = String(symbol).toUpperCase();
   const cache = loadCache();
@@ -211,19 +237,25 @@ async function fetchStockana(symbol) {
   let ratios = null;
   let dividend = null;
 
-  try {
-    const [r1, r2] = await Promise.allSettled([getJson(u.ratios), getJson(u.dividend)]);
-    if (r1.status === 'fulfilled') ratios = parseRatios(r1.value);
-    if (r2.status === 'fulfilled') dividend = parseDividend(r2.value);
-  } catch (err) {
-    console.warn('stockana: fetch error', err.message);
+  const [r1, r2] = await Promise.allSettled([getJson(u.ratios), getJson(u.dividend)]);
+
+  if (r1.status === 'fulfilled') {
+    ratios = parseRatios(r1.value);
+  } else {
+    console.log('[stockana] ratios fetch error:', r1.reason?.message);
+  }
+
+  if (r2.status === 'fulfilled') {
+    dividend = parseDividend(r2.value);
+  } else {
+    console.log('[stockana] dividend fetch error:', r2.reason?.message);
   }
 
   let data = null;
 
   if (ratios) {
     const checked = sanity(ratios);
-    // DPS: chukua kutoka dividend, la sivyo hesabu kutoka yield × price
+
     let dps = dividend;
     if (dps == null && checked.divYield != null && checked.price != null) {
       dps = (checked.divYield / 100) * checked.price;
