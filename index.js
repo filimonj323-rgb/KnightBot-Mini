@@ -527,6 +527,7 @@ async function startBot() {
         // session TUPU — pairing code mpya itaombwa kama kawaida, bila
         // mgongano wowote.
         console.log('🔌 Kifaa kime-unlink (logged out) — nafuta session chakavu ya Turso na kuanza upya na session tupu...');
+        pairingCodeRequested = false; // session mpya kabisa inakuja — ruhusu kuomba pairing code MOJA mpya kwa hiyo session
         deleteSession(sessionId)
           .then(() => console.log(`[session] Session "${sessionId}" imefutwa Turso baada ya unlink.`))
           .catch((e) => console.error('❌ Imeshindwa kufuta Turso session baada ya unlink:', e.message))
