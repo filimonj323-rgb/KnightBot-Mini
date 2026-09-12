@@ -272,27 +272,63 @@ async function fetchLiveNewsContext(symbol, name) {
     return cached;
   }
 
-  const query = `${name || symbol} ${symbol} DSE Tanzania stock dividend earnings news`;
-  const results = await tavilySearch(query, 5);
+  // Maswali MAWILI tofauti: (1) habari maalum za kampuni hii (gawio, faida,
+  // uongozi), (2) takwimu za soko/wawekezaji za DSE kwa wiki hii (wa ndani
+  // dhidi ya wa nje, mahitaji/turnover) — hizi mara nyingi huripotiwa kwa
+  // pamoja (mfano ripoti za "Zan Securities weekly wrap-up"), si kwa
+  // company-specific search pekee, hivyo tunaziomba tofauti ili zote mbili
+  // zipatikane hata kama moja haihusiani moja kwa moja na symbol.
+  const companyQuery =
+    `${name || symbol} (${symbol}) Dar es Salaam Stock Exchange dividend ` +
+    `earnings profit announcement news`;
+  const marketQuery =
+    `Dar es Salaam Stock Exchange DSE weekly market report foreign local ` +
+    `investors turnover this week`;
 
-  if (!results.length) {
+  const [companyResults, marketResults] = await Promise.all([
+    tavilySearch(companyQuery, 4).catch(() => []),
+    tavilySearch(marketQuery, 3).catch(() => []),
+  ]);
+
+  // Ondoa marudio (url ile ile ikitokea kwenye maswali yote mawili).
+  const seen = new Set();
+  const dedupe = (list) =>
+    list.filter((r) => {
+      if (!r?.url || seen.has(r.url)) return false;
+      seen.add(r.url);
+      return true;
+    });
+  const companyUnique = dedupe(companyResults);
+  const marketUnique = dedupe(marketResults);
+
+  if (!companyUnique.length && !marketUnique.length) {
     const empty = { text: null, sources: [], at: Date.now() };
     newsCache.set(key, empty);
     return empty;
   }
 
-  const sources = results.slice(0, 3).map((r) => ({ title: r.title, url: r.url }));
+  // Vyanzo vya kuonyesha kwa mtumiaji — jina fupi + link, bila marudio,
+  // upeo wa 4 (2 kwa kila kundi) ili sehemu ya "Vyanzo" isiwe ndefu/fujo.
+  const sources = [...companyUnique.slice(0, 2), ...marketUnique.slice(0, 2)].map((r) => ({
+    title: r.title,
+    url: r.url,
+  }));
 
-  // Matokeo GHAFI ya utafutaji (title + snippet fupi, mara nyingi Kiingereza)
-  // — hii ndiyo "recent_web_context" itakayopelekwa kwa MODEL kuu ya
-  // uchambuzi (gpt-oss-120b). Model yenyewe ndiyo itakayotafsiri/kuchanganya
-  // taarifa muhimu kwenye muhtasari wa Kiswahili — hakuna hatua ya ziada ya
-  // "compound" wala tafsiri tofauti inayohitajika, hivyo hakuna hatari ya
-  // 413 kwa sababu hii ni chat completion ya kawaida, isiyo na tool-loop.
-  const snippetText = results
-    .slice(0, 5)
-    .map((r, i) => `${i + 1}. ${r.title}: ${String(r.content || '').slice(0, 300)}`)
-    .join('\n');
+  // Matokeo GHAFI ya utafutaji, YAMEGAWANYWA kwa lebo mbili wazi (KAMPUNI /
+  // SOKO) — hii ndiyo "recent_web_context" itakayopelekwa kwa MODEL kuu ya
+  // uchambuzi (gpt-oss-120b), ambayo itachambua kila sehemu kando kwenye
+  // "web_highlights" (angalia system prompt ya analyzeWithGroq) badala ya
+  // kuchanganya kila kitu kwenye aya moja isiyoeleweka.
+  const section = (label, list) =>
+    list.length
+      ? `[${label}]\n` +
+        list.map((r, i) => `${i + 1}. ${r.title}: ${String(r.content || '').slice(0, 300)}`).join('\n')
+      : `[${label}]\n(hakuna matokeo)`;
+
+  const snippetText =
+    section('HABARI ZA KAMPUNI', companyUnique.slice(0, 4)) +
+    '\n\n' +
+    section('SOKO/WAWEKEZAJI (DSE, wiki hii)', marketUnique.slice(0, 3));
 
   const result = { text: snippetText, sources, at: Date.now() };
   newsCache.set(key, result);
@@ -354,18 +390,32 @@ yenye muundo huu:
   "risks": ["pointi 2-4"],
   "action": "pendekezo fupi la hatua (si ushauri wa kifedha)",
   "watch": ["vitu vya kufuatilia (2-3)"],
-  "data_warnings": ["onyo lolote kuhusu ubora wa data"]
+  "data_warnings": ["onyo lolote kuhusu ubora wa data"],
+  "web_highlights": {
+    "dividend": "taarifa YOYOTE mahususi kuhusu gawio (tarehe, kiwango, tangazo jipya) kutoka [HABARI ZA KAMPUNI], KWA UFUPI (sentensi 1). Kama hakuna taarifa mahususi, andika \"hakuna taarifa mpya\".",
+    "investor_activity": "muhtasari wa shughuli za wawekezaji wa NDANI dhidi ya wa NJE (asilimia/idadi ya turnover) kutoka [SOKO/WAWEKEZAJI], sentensi 1. Kama hakuna namba mahususi, andika \"hakuna takwimu mahususi\".",
+    "market_demand": "muhtasari wa mahitaji ya soko / turnover ya jumla ya DSE wiki hii kutoka [SOKO/WAWEKEZAJI], sentensi 1. Kama hakuna, andika \"hakuna taarifa\".",
+    "other": ["taarifa nyingine muhimu kutoka [HABARI ZA KAMPUNI] tu (si zaidi ya pointi 2), acha wazi [] kama hakuna"]
+  }
 }
 
 KANUNI:
 - Kama kigezo ni null/N/A, sema "hakipatikani" usibuni namba.
 - Kama kuna data_quality_notes, zitaje kwenye data_warnings.
-- Kama "recent_web_context" ipo, isome (hata kama ni Kiingereza), TAFSIRI/
-  CHANGANYA taarifa muhimu tu kwenye summary/strengths/risks/watch kwa
-  Kiswahili (mfano: gawio jipya lililotangazwa, ripoti ya faida ya karibuni,
-  hatari ya kiudhibiti). Puuza vipande visivyohusiana na kampuni hii moja kwa
-  moja. Kama recent_web_context ni null au haina taarifa za maana, puuza
-  kimya kimya — usitengeneze habari za kubuni.
+- "recent_web_context" (ikiwepo) imegawanywa kwa lebo mbili: [HABARI ZA
+  KAMPUNI] na [SOKO/WAWEKEZAJI (DSE, wiki hii)]. TUMIA KILA SEHEMU KWA KAZI
+  YAKE PEKEE: "dividend" na "other" zitoke [HABARI ZA KAMPUNI] tu;
+  "investor_activity" na "market_demand" zitoke [SOKO/WAWEKEZAJI] tu — hata
+  kama hazihusu symbol hii moja kwa moja (ni takwimu za soko zima). USICHANGANYE
+  makundi mawili. Kama sehemu husika ina "(hakuna matokeo)" au haihusiani,
+  tumia thamani ya default iliyoainishwa hapo juu — usibuni namba/tarehe.
+  Ndani ya summary/strengths/risks/watch, tumia TU vitu ambavyo tayari
+  vimeainishwa kwenye web_highlights (usirudie kutafsiri recent_web_context
+  kando mara ya pili humo).
+- Kama "recent_web_context" ni null, weka web_highlights na thamani za
+  default ("hakuna taarifa mpya"/"hakuna takwimu mahususi"/"hakuna
+  taarifa"/[]), na usitaje chochote kuhusu habari za mtandaoni kwenye
+  summary/strengths/risks/watch.
 - Usitoe ushauri wa kifedha wa moja kwa moja; tumia "inaweza", "inaashiria".
 - Jibu KISWAHILI pekee.
 - JSON pekee, hakuna maelezo ya ziada nje ya JSON.
@@ -567,10 +617,31 @@ function buildMessage(data, calc, ai, newsContext) {
     L.push('');
   }
 
-  // Vyanzo vya habari za mtandaoni (kama ".analyze SYMBOL habari" ilitumika)
+  // Taarifa maalum za mtandaoni (kama ".analyze SYMBOL habari" ilitumika) —
+  // jedwali fupi, wazi, badala ya kuchanganya kila kitu kwenye Muhtasari.
+  const wh = ai.web_highlights;
+  if (newsContext && wh) {
+    L.push(`🌐 *Taarifa za Mtandaoni*`);
+    L.push(
+      buildKVTable([
+        ['Gawio', wh.dividend || 'hakuna taarifa mpya'],
+        ['Wawekezaji', wh.investor_activity || 'hakuna takwimu mahususi'],
+        ['Mahitaji Soko', wh.market_demand || 'hakuna taarifa'],
+      ])
+    );
+    if (Array.isArray(wh.other) && wh.other.length) {
+      wh.other.forEach((o) => L.push(`   • ${o}`));
+    }
+    L.push('');
+  }
+
+  // Vyanzo (majina mafupi + link) — kama .analyze SYMBOL habari ilitumika
   if (newsContext?.sources?.length) {
-    L.push(`🌐 *Vyanzo vya habari (mtandaoni)*`);
-    newsContext.sources.forEach((s) => L.push(`   • ${s.title || s.url}`));
+    L.push(`🔗 *Vyanzo*`);
+    newsContext.sources.forEach((s) => {
+      const shortTitle = String(s.title || s.url).slice(0, 60);
+      L.push(`   • ${shortTitle}`);
+    });
     L.push('');
   }
 
