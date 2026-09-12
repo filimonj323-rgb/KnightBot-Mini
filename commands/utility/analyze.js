@@ -15,6 +15,9 @@
  * ⚠️ SI USHAURI WA KITAALAMU WA UWEKEZAJI.
  */
 
+const { sendButtons } = require('gifted-btns');
+const pendingFollowup = require('../../utils/pendingAnalysisFollowup');
+
 const { fetchDSEStocks } = require('./dse.js');
 const { fetchStockana } = require('../../utils/stockana.js');
 const fundamentals = require('../../utils/data/fundamentals.json');
@@ -409,8 +412,56 @@ KANUNI:
 }
 
 // ─────────────────────────────────────────────
-// 5) Kujenga ujumbe wa WhatsApp
+// 5b) Kujibu swali la ufuatiliaji (follow-up) kuhusu uchambuzi wa mwisho
+// Haifanyi fetch mpya — inatumia data ile ile iliyokwishakusanywa/kuchambuliwa,
+// hivyo ni haraka na haigharimu tena "habari" (news search) fee.
 // ─────────────────────────────────────────────
+async function answerFollowupQuestion(context, question) {
+  const { symbol, name, data, calc, ai, newsContext } = context;
+
+  const groq = getGroq();
+  const contextSummary = {
+    symbol,
+    name: name || symbol,
+    price: data.price,
+    fundamentals: data.fund || null,
+    calculated_ratios: calc,
+    ai_analysis: ai,
+    live_news: newsContext?.text || null,
+  };
+
+  const resp = await withTimeout(
+    groq.chat.completions.create({
+      model: MODEL,
+      temperature: 0.3,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Wewe ni msaidizi wa uchambuzi wa hisa za DSE (Tanzania). Mtumiaji ' +
+            'ameshapewa uchambuzi wa hisa fulani (umeambatanishwa kama JSON hapa ' +
+            'chini) na sasa ana swali la ufafanuzi zaidi kuhusu uchambuzi huo. ' +
+            'Jibu KWA KISWAHILI rahisi, fupi na moja kwa moja (aya 1-3, si zaidi ' +
+            'ya maneno 150). Tumia TU namba/data zilizopo kwenye JSON — usibuni ' +
+            'namba mpya. Kama swali haliwezi kujibiwa na data uliyopewa, sema ' +
+            'hivyo wazi na mshauri atumie `.analyze ' + symbol + ' habari` kwa ' +
+            'taarifa za ziada za mtandaoni.\n\n' +
+            `DATA YA UCHAMBUZI:\n${JSON.stringify(contextSummary)}`,
+        },
+        { role: 'user', content: question },
+      ],
+    }),
+    NEWS_TIMEOUT_MS,
+    'swali la ufuatiliaji (MODEL)'
+  );
+
+  return (
+    resp.choices?.[0]?.message?.content?.trim() ||
+    'Samahani, sikuweza kutengeneza jibu kwa sasa. Jaribu kuuliza tena kwa maneno mengine.'
+  );
+}
+
+
 function verdictEmoji(v) {
   switch ((v || '').toUpperCase()) {
     case 'BUY':     return '🟢';
@@ -557,8 +608,9 @@ module.exports = {
   description: 'Uchambuzi wa kina wa hisa ya DSE kwa msaada wa Groq AI (ongeza "habari" kutafuta habari za sasa mtandaoni)',
   usage: '.analyze <symbol> [habari] — mfano: .analyze CRDB au .analyze CRDB habari',
 
-  async execute(sock, msg, args) {
+  async execute(sock, msg, args, extra) {
     const jid = msg.key.remoteJid;
+    const sender = extra?.sender || msg.key.participant || msg.key.remoteJid;
     const symbol = (args[0] || '').toUpperCase();
     const wantsLiveNews = NEWS_TRIGGER_WORDS.has((args[1] || '').toLowerCase());
 
@@ -655,12 +707,56 @@ module.exports = {
         ];
       }
 
-      // 6) Tuma
-      return await sock.sendMessage(
+      // 6) Tuma uchambuzi
+      await sock.sendMessage(
         jid,
         { text: buildMessage(data, calc, ai, newsContext) },
         { quoted: msg }
       );
+
+      // 7) Hifadhi muktadha kwa ajili ya swali la ufuatiliaji (dakika 10),
+      // kisha toa button ya interactive ili mtumiaji auliza zaidi kama
+      // kuna sehemu hajaelewa — bila kuandika command tena.
+      pendingFollowup.set(sender, { symbol, name: data.name, data, calc, ai, newsContext });
+
+      try {
+        await sendButtons(
+          sock,
+          jid,
+          {
+            title: '',
+            text: `💬 Kuna sehemu ya uchambuzi wa *${symbol}* usiyoielewa vizuri?`,
+            footer: 'Bonyeza chini kisha andika swali lako (dakika 10)',
+            buttons: [
+              {
+                name: 'quick_reply',
+                buttonParamsJson: JSON.stringify({
+                  display_text: '❓ Uliza Swali Zaidi',
+                  id: 'analyze_followup',
+                }),
+              },
+            ],
+          },
+          { quoted: msg }
+        );
+      } catch (btnErr) {
+        // Kama interactive button itashindwa (mfano version ya WhatsApp
+        // client au library haiungi mkono), tumia njia mbadala ya text —
+        // uchambuzi mkuu tayari umetumwa kwa mafanikio hapo juu.
+        console.warn('analyze: sendButtons error (follow-up)', btnErr.message);
+        await sock.sendMessage(
+          jid,
+          {
+            text:
+              `💬 Kuna sehemu ya uchambuzi huu usiyoielewa? Andika swali lako sasa hivi ` +
+              `(ujumbe wa kawaida, bila prefix) ndani ya dakika 10, nitakujibu.`,
+          },
+          { quoted: msg }
+        );
+        pendingFollowup.markAwaitingQuestion(sender);
+      }
+
+      return;
     } catch (err) {
       console.error('analyze error:', err.message);
       await sock.sendMessage(
@@ -669,5 +765,69 @@ module.exports = {
         { quoted: msg }
       );
     }
+  },
+
+  // ═════════════════════════════════════════════
+  // Kuitwa na handler.js wakati button "❓ Uliza Swali Zaidi" imebonyezwa
+  // (buttonId/nativeFlow id === 'analyze_followup'). Inaruhusu mtumiaji
+  // aandike swali lake kama ujumbe wa kawaida unaofuata.
+  // ═════════════════════════════════════════════
+  async handleFollowupButtonClick(sock, msg, sender) {
+    const jid = msg.key.remoteJid;
+    const entry = pendingFollowup.get(sender);
+    if (!entry) {
+      return sock.sendMessage(
+        jid,
+        {
+          text:
+            '⌛ Muktadha wa uchambuzi umeisha muda (au haujafanya .analyze bado). ' +
+            'Tumia `.analyze <symbol>` kwanza.',
+        },
+        { quoted: msg }
+      );
+    }
+    pendingFollowup.markAwaitingQuestion(sender);
+    return sock.sendMessage(
+      jid,
+      { text: `✍️ Karibu! Andika swali lako kuhusu *${entry.context.symbol}* sasa.` },
+      { quoted: msg }
+    );
+  },
+
+  // ═════════════════════════════════════════════
+  // Kuitwa na handler.js kwa ujumbe wa kawaida (bila prefix) wa mtumiaji
+  // mwenye pending.awaitingQuestion === true. Inarudisha `true` ikiwa
+  // imeshughulikia ujumbe (ili handler.js isiendelee kuuchakata kama kitu
+  // kingine), au `false` ikiwa hapana pending inayotumika.
+  // ═════════════════════════════════════════════
+  async handleFollowupMessage(sock, msg, sender, questionText) {
+    if (!pendingFollowup.isAwaitingQuestion(sender)) return false;
+    const jid = msg.key.remoteJid;
+    const entry = pendingFollowup.get(sender);
+    if (!entry) return false;
+
+    if (!questionText || !questionText.trim()) return false;
+
+    try {
+      await sock.sendMessage(jid, { react: { text: '💭', key: msg.key } });
+    } catch (_) {}
+
+    try {
+      const answer = await answerFollowupQuestion(entry.context, questionText.trim());
+      pendingFollowup.touch(sender); // ruhusu maswali zaidi ndani ya dakika 10 zilizobaki
+      await sock.sendMessage(
+        jid,
+        { text: `${buildHeader(`SWALI — ${entry.context.symbol}`)}\n\n${answer}` },
+        { quoted: msg }
+      );
+    } catch (err) {
+      console.warn('analyze: followup answer error', err.message);
+      await sock.sendMessage(
+        jid,
+        { text: `❌ Imeshindwa kujibu swali lako kwa sasa: ${err.message}` },
+        { quoted: msg }
+      );
+    }
+    return true;
   },
 };
