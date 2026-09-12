@@ -618,29 +618,46 @@ function buildMessage(data, calc, ai, newsContext) {
   }
 
   // Taarifa maalum za mtandaoni (kama ".analyze SYMBOL habari" ilitumika) —
-  // jedwali fupi, wazi, badala ya kuchanganya kila kitu kwenye Muhtasari.
+  // "kadi" yenye banner + emoji kwa kila kigezo (badala ya jedwali gumu),
+  // na thamani za "hakuna data" zinaonyeshwa kwa italiki ili zisipigie
+  // makelele sawa na taarifa halisi zilizopatikana.
+  const hv = (value, fallback) => {
+    const v = value || fallback;
+    return !value || /^hakuna/i.test(String(value)) ? `_${v}_` : `*${v}*`;
+  };
+
   const wh = ai.web_highlights;
   if (newsContext && wh) {
-    L.push(`🌐 *Taarifa za Mtandaoni*`);
-    L.push(
-      buildKVTable([
-        ['Gawio', wh.dividend || 'hakuna taarifa mpya'],
-        ['Wawekezaji', wh.investor_activity || 'hakuna takwimu mahususi'],
-        ['Mahitaji Soko', wh.market_demand || 'hakuna taarifa'],
-      ])
-    );
+    L.push(buildHeader('🌐 TAARIFA ZA MTANDAONI'));
+    L.push('');
+    L.push(`📅 Gawio`);
+    L.push(`   ➤ ${hv(wh.dividend, 'hakuna taarifa mpya')}`);
+    L.push('');
+    L.push(`🌍 Wawekezaji (Ndani/Nje)`);
+    L.push(`   ➤ ${hv(wh.investor_activity, 'hakuna takwimu mahususi')}`);
+    L.push('');
+    L.push(`📈 Mahitaji ya Soko`);
+    L.push(`   ➤ ${hv(wh.market_demand, 'hakuna taarifa')}`);
     if (Array.isArray(wh.other) && wh.other.length) {
-      wh.other.forEach((o) => L.push(`   • ${o}`));
+      L.push('');
+      L.push(`✨ Nyingine`);
+      wh.other.forEach((o) => L.push(`   ➤ *${o}*`));
     }
     L.push('');
   }
 
-  // Vyanzo (majina mafupi + link) — kama .analyze SYMBOL habari ilitumika
+  // Vyanzo — jina la tovuti (domain) + title fupi, safi zaidi ya link ndefu
   if (newsContext?.sources?.length) {
     L.push(`🔗 *Vyanzo*`);
     newsContext.sources.forEach((s) => {
-      const shortTitle = String(s.title || s.url).slice(0, 60);
-      L.push(`   • ${shortTitle}`);
+      let domain = '';
+      try {
+        domain = new URL(s.url).hostname.replace(/^www\./, '');
+      } catch (_) {
+        domain = '';
+      }
+      const shortTitle = String(s.title || '').slice(0, 55);
+      L.push(`   🔸 _${domain}_ — ${shortTitle}`);
     });
     L.push('');
   }
