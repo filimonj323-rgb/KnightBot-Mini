@@ -307,14 +307,6 @@ async function getWaVersion() {
   }
 }
 
-// Only ever request a pairing code on the FIRST connection attempt of this
-// process, never on the automatic reconnects that startBot() triggers on
-// every 'close' event — requesting a fresh code on every reconnect is what
-// WhatsApp treats as abuse, closing the socket immediately (the loop behind
-// "couldn't link a device"). Same fix already applied in
-// pairing/instanceManager.js's connectInstance(isReconnect) guard.
-let pairingCodeRequested = false;
-
 // Main connection function
 async function startBot() {
   // fetchLatestWaWebVersion() ni HTTP request halisi kwenda
@@ -434,7 +426,7 @@ async function startBot() {
   // iliyotolewa ilikuwa tayari "chakavu" (imepitwa na hali mpya ya
   // connection) kufikia mtumiaji anapoiandika kwenye simu, na kusababisha
   // "couldn't link a device".
-  if (process.env.PAIR_NUMBER && !state.creds.registered && !pairingCodeRequested) {
+  if (process.env.PAIR_NUMBER && !state.creds.registered) {
     // Herufi 8 hasa (A-Z, 0-9) ndizo tu WhatsApp inazokubali kama custom
     // code — sawa na uthibitisho unaotumika kwenye pairing/instanceManager.js.
     // Isipokidhi hilo, tunarudi kwenye random code ya WhatsApp badala ya
@@ -445,7 +437,6 @@ async function startBot() {
       console.warn(`⚠️ customPairingCode ("${config.customPairingCode}") si sahihi — inahitajika herufi 8 hasa (A-Z, 0-9). Kutumia random code badala yake.`);
     }
 
-    pairingCodeRequested = true; // zuia jaribio lolote lijalo la startBot() (reconnect) lisiombe code nyingine
     setTimeout(() => {
       if (state.creds.registered) return; // ime-link tayari kabla hatujafika hapa — usiombe code bure
       sock.requestPairingCode(process.env.PAIR_NUMBER, customCode || undefined)
@@ -454,10 +445,7 @@ async function startBot() {
           console.log('\n\n🔑🔑🔑 PAIRING CODE: ' + code + ' 🔑🔑🔑');
           console.log('👉 Fungua WhatsApp > Linked Devices > Link with phone number, andika code hii.\n\n');
         })
-        .catch((e) => {
-          console.error('❌ Imeshindwa kupata pairing code:', e.message);
-          pairingCodeRequested = false; // hitilafu ya kweli (si kufungwa na WhatsApp) — ruhusu jaribio jingine
-        });
+        .catch((e) => console.error('❌ Imeshindwa kupata pairing code:', e.message));
     }, 3000);
   }
 
@@ -527,7 +515,6 @@ async function startBot() {
         // session TUPU — pairing code mpya itaombwa kama kawaida, bila
         // mgongano wowote.
         console.log('🔌 Kifaa kime-unlink (logged out) — nafuta session chakavu ya Turso na kuanza upya na session tupu...');
-        pairingCodeRequested = false; // session mpya kabisa inakuja — ruhusu kuomba pairing code MOJA mpya kwa hiyo session
         deleteSession(sessionId)
           .then(() => console.log(`[session] Session "${sessionId}" imefutwa Turso baada ya unlink.`))
           .catch((e) => console.error('❌ Imeshindwa kufuta Turso session baada ya unlink:', e.message))
