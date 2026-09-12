@@ -6,8 +6,8 @@
  *   2) Fundamentals kutoka stockana.js (stockanalysis.com)
  *   3) Fallback: fundamentals.json (manual) kama stockana inashindwa
  *   4) Hesabu za haraka (P/E, P/B, DY, Market Cap) + ukaguzi wa data
- *   5) [HIARI: .analyze <symbol> habari] Groq/compound inatafuta habari za
- *      hivi karibuni mtandaoni kuhusu kampuni (matukio, ripoti, gawio, n.k)
+ *   5) [HIARI: .analyze <symbol> habari] Tavily Search API inatafuta habari
+ *      za hivi karibuni mtandaoni kuhusu kampuni (matukio, ripoti, gawio)
  *   6) Tuma kwa Groq (gpt-oss-120b) → JSON yenye verdict, score, maana ya
  *      kila kigezo, nguvu, hatari, na mapendekezo — ikizingatia pia habari
  *      za mtandaoni kama zimeombwa
@@ -15,6 +15,7 @@
  * ⚠️ SI USHAURI WA KITAALAMU WA UWEKEZAJI.
  */
 
+const axios = require('axios');
 const pendingFollowup = require('../../utils/pendingAnalysisFollowup');
 
 const { fetchDSEStocks } = require('./dse.js');
@@ -35,14 +36,27 @@ function getGroq() {
   return groqClient;
 }
 // ⚠️ llama-3.3-70b-versatile ilizimwa na Groq tarehe 16 Agosti 2026.
-// openai/gpt-oss-120b ndio mbadala rasmi anaopendekeza Groq kwa uchambuzi
-// wa JSON. groq/compound ni "system" tofauti (inatumia gpt-oss-120b + Llama 4
-// Scout ndani yake) yenye uwezo wa kutafuta mtandaoni (web search) wenyewe —
-// tunaitumia PEKEE ukiomba ".analyze <symbol> habari" kwa sababu ina gharama
-// ya ziada (search fee) na ni polepole zaidi kuliko uchambuzi wa kawaida.
+// openai/gpt-oss-120b ndio mbadala rasmi anaopendekeza Groq kwa uchambuzi wa JSON.
 const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-const NEWS_MODEL = process.env.GROQ_NEWS_MODEL || 'groq/compound';
-const NEWS_TIMEOUT_MS = 20000; // usisubiri zaidi ya sekunde 20 kwa habari za mtandaoni
+
+// ⚠️ BADILIKO: awali "habari za mtandaoni" zilipita kwa groq/compound (model
+// ya Groq yenye uwezo wa kutafuta mtandaoni wenyewe). Ile ina bug isiyo na
+// suluhu kamili upande wa Groq — non-English/maombi marefu mara nyingi
+// yalisababisha "413 Request Entity Too Large" (angalia community.groq.com/
+// t/750). Sasa tunatafuta wenyewe moja kwa moja kwa Tavily Search API (ndiyo
+// hiyo hiyo inayotumika NDANI ya groq/compound), kisha tunapeleka MATOKEO
+// GHAFI (title + snippet) kwa MODEL ya kawaida (gpt-oss-120b, si compound)
+// ili iyachanganye kwenye muhtasari wa Kiswahili. Maombi mawili rahisi
+// (search moja + chat completion moja) badala ya "agentic loop" moja
+// isiyotabirika — hatari ya 413 inaondoka kabisa.
+//
+// TAVILY_API_KEY ni HIARI: bila key, Tavily inatoa hali ya "keyless" (bure,
+// bila akaunti) lakini yenye mipaka midogo zaidi ya maombi. Kwa matumizi ya
+// kudumu, sajili key bure (dakika 1000/mwezi bila kadi) kwenye
+// https://app.tavily.com kisha weka TAVILY_API_KEY kwenye Railway env vars.
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY || null;
+const TAVILY_TIMEOUT_MS = 15000;
+const GROQ_TIMEOUT_MS = 20000; // kwa maombi ya Groq (mfano: answerFollowupQuestion)
 const NEWS_CACHE_MS = 6 * 60 * 60 * 1000; // saa 6 — habari hazibadiliki kila dakika
 
 // Maneno ambayo mtumiaji anaweza kuweka baada ya symbol kuomba habari za
@@ -226,31 +240,29 @@ function enrichAndAudit(data) {
 }
 
 // ─────────────────────────────────────────────
-// 3) Habari za mtandaoni (HIARI) kupitia groq/compound
+// 3) Habari za mtandaoni (HIARI) kupitia Tavily Search API
 // ─────────────────────────────────────────────
-// Hufanya ombi moja kwa groq/compound na kurudisha { englishText, sources }.
-// searchSettings=null huondoa kabisa "search_settings" (badala ya kuweka
-// nchi) — hii inapunguza idadi ya tool-iterations ambazo model hufanya, na
-// kwa maombi mafupi hupunguza uwezekano wa 413 (angalia comment ya juu).
-async function runCompoundQuery(groq, query, searchSettings) {
-  const payload = {
-    model: NEWS_MODEL,
-    temperature: 0.2,
-    messages: [{ role: 'user', content: query }],
-  };
-  if (searchSettings) payload.search_settings = searchSettings;
+async function tavilySearch(query, maxResults) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (TAVILY_API_KEY) {
+    headers['Authorization'] = `Bearer ${TAVILY_API_KEY}`;
+  } else {
+    headers['X-Tavily-Access-Mode'] = 'keyless'; // bila key — bure, mipaka madogo
+  }
 
-  const resp = await withTimeout(
-    groq.chat.completions.create(payload),
-    NEWS_TIMEOUT_MS,
-    'habari za mtandaoni (groq/compound)'
+  const { data } = await axios.post(
+    'https://api.tavily.com/search',
+    {
+      query,
+      search_depth: 'basic',
+      topic: 'news',
+      max_results: maxResults,
+      include_answer: false,
+    },
+    { headers, timeout: TAVILY_TIMEOUT_MS }
   );
 
-  const englishText = resp.choices?.[0]?.message?.content?.trim() || null;
-  const rawResults =
-    resp.choices?.[0]?.message?.executed_tools?.[0]?.search_results?.results || [];
-  const sources = rawResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url }));
-  return { englishText, sources };
+  return Array.isArray(data?.results) ? data.results : [];
 }
 
 async function fetchLiveNewsContext(symbol, name) {
@@ -260,86 +272,33 @@ async function fetchLiveNewsContext(symbol, name) {
     return cached;
   }
 
-  const groq = getGroq();
+  const query = `${name || symbol} ${symbol} DSE Tanzania stock dividend earnings news`;
+  const results = await tavilySearch(query, 5);
 
-  // Query kwa KIINGEREZA: groq/compound (na search ya web nyuma yake) inatoa
-  // matokeo bora zaidi na thabiti zaidi kwa Kiingereza kuliko Kiswahili
-  // (vyanzo vingi vya habari za soko/DSE viko kwa Kiingereza hata hivyo).
-  const fullQuery =
-    `Search for recent news (last 3-6 months) about the stock/share ` +
-    `"${name || symbol}" (symbol: ${symbol}) listed on the Dar es Salaam ` +
-    `Stock Exchange (DSE), Tanzania. I want: recent financial/earnings ` +
-    `reports, any dividend announcements, management changes, ` +
-    `expansions/new contracts, or regulatory risks. Reply in English, ONE ` +
-    `short paragraph (60-100 words). If you cannot find company-specific ` +
-    `news, say so clearly instead of making things up.`;
-
-  let englishText = null;
-  let sources = [];
-
-  try {
-    ({ englishText, sources } = await runCompoundQuery(groq, fullQuery, {
-      country: 'tanzania',
-    }));
-  } catch (err) {
-    const status = err.status || err.response?.status;
-    // ⚠️ Bug ya Groq isiyotatuliwa kikamilifu (community.groq.com/t/750):
-    // groq/compound wakati mwingine inatupa 413 hata kwa Kiingereza,
-    // hasa maombi yenye maelekezo mengi/marefu. Jaribu MARA MOJA zaidi
-    // na query fupi sana, bila search_settings (hupunguza idadi ya
-    // tool-iterations za ndani) — maombi mafupi yana nafasi kubwa zaidi
-    // ya kufaulu kulingana na taarifa za watumiaji wengine wa Groq.
-    if (status === 413) {
-      console.warn('analyze: compound 413, retrying na query fupi zaidi kwa', key);
-      const shortQuery = `Recent news about ${name || symbol} (${symbol}) DSE Tanzania stock, one short paragraph, English only.`;
-      ({ englishText, sources } = await runCompoundQuery(groq, shortQuery, null));
-    } else {
-      throw err;
-    }
+  if (!results.length) {
+    const empty = { text: null, sources: [], at: Date.now() };
+    newsCache.set(key, empty);
+    return empty;
   }
 
-  // Tafsiri kwa Kiswahili kwa kutumia model rasmi (MODEL = gpt-oss-120b) —
-  // hii ndiyo model inayotumika kwenye uchambuzi mkuu na inajua Kiswahili
-  // vizuri; groq/compound inabaki kwa kazi ya search pekee.
-  const text = englishText
-    ? await translateToSwahili(englishText)
-    : null;
+  const sources = results.slice(0, 3).map((r) => ({ title: r.title, url: r.url }));
 
-  const result = { text, sources, at: Date.now() };
+  // Matokeo GHAFI ya utafutaji (title + snippet fupi, mara nyingi Kiingereza)
+  // — hii ndiyo "recent_web_context" itakayopelekwa kwa MODEL kuu ya
+  // uchambuzi (gpt-oss-120b). Model yenyewe ndiyo itakayotafsiri/kuchanganya
+  // taarifa muhimu kwenye muhtasari wa Kiswahili — hakuna hatua ya ziada ya
+  // "compound" wala tafsiri tofauti inayohitajika, hivyo hakuna hatari ya
+  // 413 kwa sababu hii ni chat completion ya kawaida, isiyo na tool-loop.
+  const snippetText = results
+    .slice(0, 5)
+    .map((r, i) => `${i + 1}. ${r.title}: ${String(r.content || '').slice(0, 300)}`)
+    .join('\n');
+
+  const result = { text: snippetText, sources, at: Date.now() };
   newsCache.set(key, result);
   return result;
 }
 
-// Tafsiri fupi ya maandishi ya Kiingereza kwenda Kiswahili rahisi, kwa
-// kutumia model rasmi (MODEL). Ikiwa tafsiri itashindwa, tunarudisha
-// maandishi ya Kiingereza badala ya kuvunja mtiririko mzima.
-async function translateToSwahili(englishText) {
-  try {
-    const groq = getGroq();
-    const resp = await withTimeout(
-      groq.chat.completions.create({
-        model: MODEL,
-        temperature: 0.2,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Wewe ni mtafsiri. Tafsiri maandishi uliyopewa kutoka Kiingereza ' +
-              'kwenda Kiswahili rahisi na sanifu. Rudisha TU tafsiri, aya moja, ' +
-              'bila maelezo ya ziada, bila kuongeza wala kupunguza taarifa.',
-          },
-          { role: 'user', content: englishText },
-        ],
-      }),
-      NEWS_TIMEOUT_MS,
-      'tafsiri ya habari (MODEL)'
-    );
-    return resp.choices?.[0]?.message?.content?.trim() || englishText;
-  } catch (err) {
-    console.warn('analyze: translation error', err.message);
-    return englishText; // fallback: bora Kiingereza kuliko kukosa kabisa
-  }
-}
 
 // ─────────────────────────────────────────────
 // 4) Groq — uchambuzi wa maana
@@ -375,8 +334,9 @@ async function analyzeWithGroq(data, calc, audit, newsContext) {
   const system = `
 Wewe ni mchambuzi wa hisa za DSE (Dar es Salaam Stock Exchange) unaongea Kiswahili rahisi.
 Unapokea data mbichi + uwiano uliohesabiwa (na wakati mwingine "recent_web_context" —
-muhtasari wa habari za hivi karibuni zilizotafutwa mtandaoni), kisha unarudisha JSON
-KAMILI (bila maandishi ya nje) yenye muundo huu:
+matokeo ghafi ya utafutaji wa mtandaoni: majina ya makala + vipande vya maudhui,
+mara nyingi kwa KIINGEREZA), kisha unarudisha JSON KAMILI (bila maandishi ya nje)
+yenye muundo huu:
 
 {
   "verdict": "BUY" | "HOLD" | "SELL" | "NEUTRAL" | "WATCH",
@@ -400,10 +360,12 @@ KAMILI (bila maandishi ya nje) yenye muundo huu:
 KANUNI:
 - Kama kigezo ni null/N/A, sema "hakipatikani" usibuni namba.
 - Kama kuna data_quality_notes, zitaje kwenye data_warnings.
-- Kama "recent_web_context" ipo na ina taarifa za maana, izingatie kwenye
-  summary/strengths/risks/watch (mfano: gawio jipya lililotangazwa, ripoti ya
-  faida ya karibuni, hatari ya kiudhibiti). Kama recent_web_context ni null au
-  inasema "hakuna habari", puuza kimya kimya — usitengeneze habari za kubuni.
+- Kama "recent_web_context" ipo, isome (hata kama ni Kiingereza), TAFSIRI/
+  CHANGANYA taarifa muhimu tu kwenye summary/strengths/risks/watch kwa
+  Kiswahili (mfano: gawio jipya lililotangazwa, ripoti ya faida ya karibuni,
+  hatari ya kiudhibiti). Puuza vipande visivyohusiana na kampuni hii moja kwa
+  moja. Kama recent_web_context ni null au haina taarifa za maana, puuza
+  kimya kimya — usitengeneze habari za kubuni.
 - Usitoe ushauri wa kifedha wa moja kwa moja; tumia "inaweza", "inaashiria".
 - Jibu KISWAHILI pekee.
 - JSON pekee, hakuna maelezo ya ziada nje ya JSON.
@@ -483,7 +445,7 @@ async function answerFollowupQuestion(context, question) {
         { role: 'user', content: question },
       ],
     }),
-    NEWS_TIMEOUT_MS,
+    GROQ_TIMEOUT_MS,
     'swali la ufuatiliaji (MODEL)'
   );
 
@@ -623,7 +585,7 @@ function buildMessage(data, calc, ai, newsContext) {
   }
 
   L.push(`_Chanzo: bei = ${srcPrice}; fundamentals = ${srcFund}; uchambuzi = Groq (${MODEL})` +
-    (newsContext ? `; habari = Groq (${NEWS_MODEL})` : '') + `._`);
+    (newsContext ? `; habari = Tavily Search` : '') + `._`);
   L.push(`_⚠️ SI ushauri wa kitaalamu wa uwekezaji._`);
   L.push('');
   L.push(`💬 Swali? \`.swali <swali lako>\``);
