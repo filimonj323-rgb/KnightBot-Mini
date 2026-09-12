@@ -937,6 +937,46 @@ const handleMessageImpl = async (sock, msg) => {
           });
         }
         return;
+      } else if (buttonId === 'analyze_followup') {
+        // Button "❓ Uliza Swali Zaidi" kutoka .analyze — angalia analyze.js
+        try {
+          const analyzeCmd = commands.get('analyze');
+          if (analyzeCmd && analyzeCmd.handleFollowupButtonClick) {
+            await analyzeCmd.handleFollowupButtonClick(sock, msg, sender);
+          }
+        } catch (e) {
+          console.error('[analyze_followup button error]', e.message);
+        }
+        return;
+      }
+    }
+
+    // 🔹 Button za kisasa za "interactive/native flow" (single_select,
+    // quick_reply, n.k) hazirudi kama buttonsResponseMessage bali kama
+    // interactiveResponseMessage.nativeFlowResponseMessage na id ndani ya
+    // paramsJson. Tunaishughulikia hapa kwa id zinazojulikana (mfano
+    // 'analyze_followup') ili button hii ifanye kazi bila kujali muundo
+    // gani WhatsApp client ya mtumiaji inarudisha.
+    const nativeFlow =
+      content.interactiveResponseMessage?.nativeFlowResponseMessage ||
+      msg.message?.interactiveResponseMessage?.nativeFlowResponseMessage;
+    if (nativeFlow) {
+      let selectedId = null;
+      try {
+        selectedId = JSON.parse(nativeFlow.paramsJson || '{}').id || null;
+      } catch (e) {
+        // paramsJson isiyo halali — puuza kimya kimya
+      }
+      if (selectedId === 'analyze_followup') {
+        try {
+          const analyzeCmd = commands.get('analyze');
+          if (analyzeCmd && analyzeCmd.handleFollowupButtonClick) {
+            await analyzeCmd.handleFollowupButtonClick(sock, msg, sender);
+          }
+        } catch (e) {
+          console.error('[analyze_followup nativeFlow error]', e.message);
+        }
+        return;
       }
     }
     
@@ -953,6 +993,26 @@ const handleMessageImpl = async (sock, msg) => {
     }
     
     body = (body || '').trim();
+
+    // Swali la ufuatiliaji la ".analyze" (angalia analyze.js + button
+    // "❓ Uliza Swali Zaidi") — kama mtumiaji ana pending inayosubiri swali,
+    // na ujumbe huu SIO command (hauanzi na prefix), tumia kama swali lenyewe
+    // badala ya kuuchakata kama ujumbe wa kawaida. Angalia KABLA ya command
+    // prefix check, sawa na mifumo ya bomb/tictactoe hapa chini.
+    if (body && !body.startsWith(effectiveConfig.prefix)) {
+      try {
+        const pendingAnalysisFollowup = require('./utils/pendingAnalysisFollowup');
+        if (pendingAnalysisFollowup.isAwaitingQuestion(sender)) {
+          const analyzeCmd = commands.get('analyze');
+          if (analyzeCmd && analyzeCmd.handleFollowupMessage) {
+            const handled = await analyzeCmd.handleFollowupMessage(sock, msg, sender, body);
+            if (handled) return;
+          }
+        }
+      } catch (e) {
+        console.error('[analyze followup message error]', e.message);
+      }
+    }
     
     // Check antiall protection (owner only feature)
     if (isGroup) {
