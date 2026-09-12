@@ -228,6 +228,31 @@ function enrichAndAudit(data) {
 // ─────────────────────────────────────────────
 // 3) Habari za mtandaoni (HIARI) kupitia groq/compound
 // ─────────────────────────────────────────────
+// Hufanya ombi moja kwa groq/compound na kurudisha { englishText, sources }.
+// searchSettings=null huondoa kabisa "search_settings" (badala ya kuweka
+// nchi) — hii inapunguza idadi ya tool-iterations ambazo model hufanya, na
+// kwa maombi mafupi hupunguza uwezekano wa 413 (angalia comment ya juu).
+async function runCompoundQuery(groq, query, searchSettings) {
+  const payload = {
+    model: NEWS_MODEL,
+    temperature: 0.2,
+    messages: [{ role: 'user', content: query }],
+  };
+  if (searchSettings) payload.search_settings = searchSettings;
+
+  const resp = await withTimeout(
+    groq.chat.completions.create(payload),
+    NEWS_TIMEOUT_MS,
+    'habari za mtandaoni (groq/compound)'
+  );
+
+  const englishText = resp.choices?.[0]?.message?.content?.trim() || null;
+  const rawResults =
+    resp.choices?.[0]?.message?.executed_tools?.[0]?.search_results?.results || [];
+  const sources = rawResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url }));
+  return { englishText, sources };
+}
+
 async function fetchLiveNewsContext(symbol, name) {
   const key = symbol.toUpperCase();
   const cached = newsCache.get(key);
@@ -240,7 +265,7 @@ async function fetchLiveNewsContext(symbol, name) {
   // Query kwa KIINGEREZA: groq/compound (na search ya web nyuma yake) inatoa
   // matokeo bora zaidi na thabiti zaidi kwa Kiingereza kuliko Kiswahili
   // (vyanzo vingi vya habari za soko/DSE viko kwa Kiingereza hata hivyo).
-  const query =
+  const fullQuery =
     `Search for recent news (last 3-6 months) about the stock/share ` +
     `"${name || symbol}" (symbol: ${symbol}) listed on the Dar es Salaam ` +
     `Stock Exchange (DSE), Tanzania. I want: recent financial/earnings ` +
@@ -249,21 +274,29 @@ async function fetchLiveNewsContext(symbol, name) {
     `short paragraph (60-100 words). If you cannot find company-specific ` +
     `news, say so clearly instead of making things up.`;
 
-  const resp = await withTimeout(
-    groq.chat.completions.create({
-      model: NEWS_MODEL,
-      temperature: 0.2,
-      messages: [{ role: 'user', content: query }],
-      search_settings: { country: 'tanzania' },
-    }),
-    NEWS_TIMEOUT_MS,
-    'habari za mtandaoni (groq/compound)'
-  );
+  let englishText = null;
+  let sources = [];
 
-  const englishText = resp.choices?.[0]?.message?.content?.trim() || null;
-  const rawResults =
-    resp.choices?.[0]?.message?.executed_tools?.[0]?.search_results?.results || [];
-  const sources = rawResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url }));
+  try {
+    ({ englishText, sources } = await runCompoundQuery(groq, fullQuery, {
+      country: 'tanzania',
+    }));
+  } catch (err) {
+    const status = err.status || err.response?.status;
+    // ⚠️ Bug ya Groq isiyotatuliwa kikamilifu (community.groq.com/t/750):
+    // groq/compound wakati mwingine inatupa 413 hata kwa Kiingereza,
+    // hasa maombi yenye maelekezo mengi/marefu. Jaribu MARA MOJA zaidi
+    // na query fupi sana, bila search_settings (hupunguza idadi ya
+    // tool-iterations za ndani) — maombi mafupi yana nafasi kubwa zaidi
+    // ya kufaulu kulingana na taarifa za watumiaji wengine wa Groq.
+    if (status === 413) {
+      console.warn('analyze: compound 413, retrying na query fupi zaidi kwa', key);
+      const shortQuery = `Recent news about ${name || symbol} (${symbol}) DSE Tanzania stock, one short paragraph, English only.`;
+      ({ englishText, sources } = await runCompoundQuery(groq, shortQuery, null));
+    } else {
+      throw err;
+    }
+  }
 
   // Tafsiri kwa Kiswahili kwa kutumia model rasmi (MODEL = gpt-oss-120b) —
   // hii ndiyo model inayotumika kwenye uchambuzi mkuu na inajua Kiswahili
