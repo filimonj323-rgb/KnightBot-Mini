@@ -714,24 +714,33 @@ module.exports = {
         { quoted: msg }
       );
 
-      // 7) Hifadhi muktadha kwa ajili ya swali la ufuatiliaji (dakika 10),
-      // kisha toa button ya interactive ili mtumiaji auliza zaidi kama
-      // kuna sehemu hajaelewa — bila kuandika command tena.
+      // 7) Hifadhi muktadha kwa ajili ya swali la ufuatiliaji (dakika 10).
+      // Njia RASMI ya kuuliza ni command ya wazi: ".swali <swali lako>"
+      // (angalia commands/utility/swali.js) — SI ujumbe wa kawaida bila
+      // prefix, kwa sababu hilo lingeweza "kunasa" kimakosa ujumbe wowote
+      // usiofungamana wa mtumiaji kwenye group (mgogoro/conflict).
       pendingFollowup.set(sender, { symbol, name: data.name, data, calc, ai, newsContext });
 
+      const followupHint =
+        `💬 Kuna sehemu ya uchambuzi wa *${symbol}* usiyoielewa vizuri?\n` +
+        `Tumia: \`.swali <swali lako>\` (ndani ya dakika 10)\n` +
+        `Mfano: \`.swali kwa nini P/E iko juu?\``;
+
       try {
+        // Button ni "shortcut" tu ya kumkumbusha mtumiaji amba command ya
+        // kutumia — ikibonyezwa, bado tunamwelekeza kwenye ".swali ...".
         await sendButtons(
           sock,
           jid,
           {
             title: '',
-            text: `💬 Kuna sehemu ya uchambuzi wa *${symbol}* usiyoielewa vizuri?`,
-            footer: 'Bonyeza chini kisha andika swali lako (dakika 10)',
+            text: followupHint,
+            footer: 'Bonyeza chini kama unataka kukumbushwa jinsi ya kuuliza',
             buttons: [
               {
                 name: 'quick_reply',
                 buttonParamsJson: JSON.stringify({
-                  display_text: '❓ Uliza Swali Zaidi',
+                  display_text: '❓ Nisaidie Kuuliza',
                   id: 'analyze_followup',
                 }),
               },
@@ -741,19 +750,10 @@ module.exports = {
         );
       } catch (btnErr) {
         // Kama interactive button itashindwa (mfano version ya WhatsApp
-        // client au library haiungi mkono), tumia njia mbadala ya text —
-        // uchambuzi mkuu tayari umetumwa kwa mafanikio hapo juu.
+        // client au library haiungi mkono), text hii hii ya juu inatosha
+        // kama fallback — HAKUNA free-text capture ya kiotomatiki.
         console.warn('analyze: sendButtons error (follow-up)', btnErr.message);
-        await sock.sendMessage(
-          jid,
-          {
-            text:
-              `💬 Kuna sehemu ya uchambuzi huu usiyoielewa? Andika swali lako sasa hivi ` +
-              `(ujumbe wa kawaida, bila prefix) ndani ya dakika 10, nitakujibu.`,
-          },
-          { quoted: msg }
-        );
-        pendingFollowup.markAwaitingQuestion(sender);
+        await sock.sendMessage(jid, { text: followupHint }, { quoted: msg });
       }
 
       return;
@@ -768,9 +768,9 @@ module.exports = {
   },
 
   // ═════════════════════════════════════════════
-  // Kuitwa na handler.js wakati button "❓ Uliza Swali Zaidi" imebonyezwa
-  // (buttonId/nativeFlow id === 'analyze_followup'). Inaruhusu mtumiaji
-  // aandike swali lake kama ujumbe wa kawaida unaofuata.
+  // Kuitwa na handler.js wakati button "❓ Nisaidie Kuuliza" imebonyezwa
+  // (buttonId/nativeFlow id === 'analyze_followup'). HAIWEKI free-text
+  // listening — inamkumbusha tu mtumiaji atumie ".swali <swali lako>".
   // ═════════════════════════════════════════════
   async handleFollowupButtonClick(sock, msg, sender) {
     const jid = msg.key.remoteJid;
@@ -786,48 +786,18 @@ module.exports = {
         { quoted: msg }
       );
     }
-    pendingFollowup.markAwaitingQuestion(sender);
     return sock.sendMessage(
       jid,
-      { text: `✍️ Karibu! Andika swali lako kuhusu *${entry.context.symbol}* sasa.` },
+      {
+        text:
+          `✍️ Tumia: \`.swali <swali lako>\` kuuliza kuhusu *${entry.context.symbol}*.\n` +
+          `Mfano: \`.swali kwa nini verdict ni ${entry.context.ai?.verdict || 'hii'}?\``,
+      },
       { quoted: msg }
     );
   },
 
-  // ═════════════════════════════════════════════
-  // Kuitwa na handler.js kwa ujumbe wa kawaida (bila prefix) wa mtumiaji
-  // mwenye pending.awaitingQuestion === true. Inarudisha `true` ikiwa
-  // imeshughulikia ujumbe (ili handler.js isiendelee kuuchakata kama kitu
-  // kingine), au `false` ikiwa hapana pending inayotumika.
-  // ═════════════════════════════════════════════
-  async handleFollowupMessage(sock, msg, sender, questionText) {
-    if (!pendingFollowup.isAwaitingQuestion(sender)) return false;
-    const jid = msg.key.remoteJid;
-    const entry = pendingFollowup.get(sender);
-    if (!entry) return false;
-
-    if (!questionText || !questionText.trim()) return false;
-
-    try {
-      await sock.sendMessage(jid, { react: { text: '💭', key: msg.key } });
-    } catch (_) {}
-
-    try {
-      const answer = await answerFollowupQuestion(entry.context, questionText.trim());
-      pendingFollowup.touch(sender); // ruhusu maswali zaidi ndani ya dakika 10 zilizobaki
-      await sock.sendMessage(
-        jid,
-        { text: `${buildHeader(`SWALI — ${entry.context.symbol}`)}\n\n${answer}` },
-        { quoted: msg }
-      );
-    } catch (err) {
-      console.warn('analyze: followup answer error', err.message);
-      await sock.sendMessage(
-        jid,
-        { text: `❌ Imeshindwa kujibu swali lako kwa sasa: ${err.message}` },
-        { quoted: msg }
-      );
-    }
-    return true;
-  },
+  // Inatumika na commands/utility/swali.js kujibu swali la ufuatiliaji
+  // kwa kutumia muktadha ule ule wa uchambuzi wa mwisho (bila fetch mpya).
+  answerFollowupQuestion,
 };
