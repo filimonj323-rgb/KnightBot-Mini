@@ -71,25 +71,38 @@ function buildFooter() {
 }
 
 // ─────────────────────────────────────────────
-// Box/frame ya monospace kwa tables (values) — inatumia ``` ili WhatsApp
-// ionyeshe kwa font ya monospace (tofauti na maandishi ya kawaida ya
-// kuchati), na box-drawing characters kuzungushia jedwali.
-// rows: [ [label, value], ... ]
+// Table ya monospace inayoonekana sawa kwenye WhatsApp (ndani ya ```code```).
+// Mtindo huu ni sawa na gainers.js na dse.js kwa uthabiti (consistency) wa
+// design katika bot nzima.
+// KUMBUKA: usiweke emoji ndani ya cells — upana wao si sawa na herufi za
+// kawaida kwenye monospace, hivyo vinavuruga alignment ya columns.
 // ─────────────────────────────────────────────
-function buildBox(title, rows) {
-  const labelWidth = Math.max(...rows.map((r) => String(r[0]).length));
-  const lines = rows.map(
-    ([label, value]) => `${String(label).padEnd(labelWidth)} : ${value}`
+function padCol(str, width) {
+  str = String(str);
+  return str.length >= width ? str.slice(0, width) : str + ' '.repeat(width - str.length);
+}
+
+function buildTable(rows, headers, widths) {
+  let out = '```\n';
+  out += headers.map((h, i) => padCol(h, widths[i])).join(' ') + '\n';
+  out += widths.map((w) => '-'.repeat(w)).join(' ') + '\n';
+  rows.forEach((r) => {
+    out += r.map((c, i) => padCol(c, widths[i])).join(' ') + '\n';
+  });
+  out += '```';
+  return out;
+}
+
+// Jedwali la "METRIC : VALUE" (columns 2) linalotumika kwa Fundamentals,
+// Uwiano, na Snapshot — widths zinajipima kiotomatiki kutokana na maudhui.
+function buildKVTable(rows) {
+  const labelWidth = Math.max(4, ...rows.map(([label]) => String(label).length));
+  const valueWidth = Math.max(5, ...rows.map(([, value]) => String(value).length));
+  return buildTable(
+    rows.map(([label, value]) => [label, value]),
+    ['METRIC', 'VALUE'],
+    [Math.max(labelWidth, 6), valueWidth]
   );
-  const innerWidth = Math.max(title.length, ...lines.map((l) => l.length));
-
-  const top    = `┌${'─'.repeat(innerWidth + 2)}┐`;
-  const sep    = `├${'─'.repeat(innerWidth + 2)}┤`;
-  const bottom = `└${'─'.repeat(innerWidth + 2)}┘`;
-  const titleLine = `│ ${title.padEnd(innerWidth)} │`;
-  const body = lines.map((l) => `│ ${l.padEnd(innerWidth)} │`).join('\n');
-
-  return '```\n' + [top, titleLine, sep, body, bottom].join('\n') + '\n```';
 }
 
 function withTimeout(promise, ms, label) {
@@ -221,14 +234,18 @@ async function fetchLiveNewsContext(symbol, name) {
   }
 
   const groq = getGroq();
+
+  // Query kwa KIINGEREZA: groq/compound (na search ya web nyuma yake) inatoa
+  // matokeo bora zaidi na thabiti zaidi kwa Kiingereza kuliko Kiswahili
+  // (vyanzo vingi vya habari za soko/DSE viko kwa Kiingereza hata hivyo).
   const query =
-    `Tafuta habari za hivi karibuni (miezi 3-6 iliyopita) kuhusu hisa ya ` +
-    `"${name || symbol}" (symbol: ${symbol}) inayouzwa katika Dar es Salaam ` +
-    `Stock Exchange (DSE), Tanzania. Nataka: ripoti za kifedha/faida za hivi ` +
-    `karibuni, tangazo lolote la gawio (dividend), mabadiliko ya uongozi, ` +
-    `upanuzi/mikataba mipya, au hatari za kiudhibiti. Jibu kwa Kiswahili ` +
-    `rahisi, aya MOJA fupi (maneno 60-100). Kama huwezi kupata habari mahususi ` +
-    `za kampuni hii, sema hivyo wazi badala ya kubuni.`;
+    `Search for recent news (last 3-6 months) about the stock/share ` +
+    `"${name || symbol}" (symbol: ${symbol}) listed on the Dar es Salaam ` +
+    `Stock Exchange (DSE), Tanzania. I want: recent financial/earnings ` +
+    `reports, any dividend announcements, management changes, ` +
+    `expansions/new contracts, or regulatory risks. Reply in English, ONE ` +
+    `short paragraph (60-100 words). If you cannot find company-specific ` +
+    `news, say so clearly instead of making things up.`;
 
   const resp = await withTimeout(
     groq.chat.completions.create({
@@ -241,14 +258,52 @@ async function fetchLiveNewsContext(symbol, name) {
     'habari za mtandaoni (groq/compound)'
   );
 
-  const text = resp.choices?.[0]?.message?.content?.trim() || null;
+  const englishText = resp.choices?.[0]?.message?.content?.trim() || null;
   const rawResults =
     resp.choices?.[0]?.message?.executed_tools?.[0]?.search_results?.results || [];
   const sources = rawResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url }));
 
+  // Tafsiri kwa Kiswahili kwa kutumia model rasmi (MODEL = gpt-oss-120b) —
+  // hii ndiyo model inayotumika kwenye uchambuzi mkuu na inajua Kiswahili
+  // vizuri; groq/compound inabaki kwa kazi ya search pekee.
+  const text = englishText
+    ? await translateToSwahili(englishText)
+    : null;
+
   const result = { text, sources, at: Date.now() };
   newsCache.set(key, result);
   return result;
+}
+
+// Tafsiri fupi ya maandishi ya Kiingereza kwenda Kiswahili rahisi, kwa
+// kutumia model rasmi (MODEL). Ikiwa tafsiri itashindwa, tunarudisha
+// maandishi ya Kiingereza badala ya kuvunja mtiririko mzima.
+async function translateToSwahili(englishText) {
+  try {
+    const groq = getGroq();
+    const resp = await withTimeout(
+      groq.chat.completions.create({
+        model: MODEL,
+        temperature: 0.2,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Wewe ni mtafsiri. Tafsiri maandishi uliyopewa kutoka Kiingereza ' +
+              'kwenda Kiswahili rahisi na sanifu. Rudisha TU tafsiri, aya moja, ' +
+              'bila maelezo ya ziada, bila kuongeza wala kupunguza taarifa.',
+          },
+          { role: 'user', content: englishText },
+        ],
+      }),
+      NEWS_TIMEOUT_MS,
+      'tafsiri ya habari (MODEL)'
+    );
+    return resp.choices?.[0]?.message?.content?.trim() || englishText;
+  } catch (err) {
+    console.warn('analyze: translation error', err.message);
+    return englishText; // fallback: bora Kiingereza kuliko kukosa kabisa
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -381,10 +436,11 @@ function buildMessage(data, calc, ai, newsContext) {
       ? ` (${priceChangePct >= 0 ? '+' : ''}${Number(priceChangePct).toFixed(2)}%)`
       : '');
 
+  L.push(`🎯 ${verdictEmoji(ai.verdict)} *Uchambuzi wa Hisa*`);
   L.push(
-    buildBox('SNAPSHOT', [
+    buildKVTable([
       ['Bei', priceStr],
-      ['Verdict', `${verdictEmoji(ai.verdict)} ${ai.verdict || 'NEUTRAL'}`],
+      ['Verdict', ai.verdict || 'NEUTRAL'],
       ['Score', `${ai.score ?? '—'}/100`],
       ['Confidence', ai.confidence || '—'],
     ])
@@ -398,11 +454,11 @@ function buildMessage(data, calc, ai, newsContext) {
     L.push('');
   }
 
-  // Fundamentals ghafi — kwenye box ya monospace
+  // Fundamentals ghafi — kwenye jedwali la monospace (mtindo wa gainers/dse)
   if (fund) {
     L.push(`📊 *Fundamentals (${asOf || 'kipindi kisichojulikana'})*`);
     L.push(
-      buildBox('FUNDAMENTALS', [
+      buildKVTable([
         ['EPS', `TZS ${fmt(fund.eps)}`],
         ['BVPS', `TZS ${fmt(fund.bvps)}`],
         ['DPS', `TZS ${fmt(fund.dps)}`],
@@ -413,7 +469,7 @@ function buildMessage(data, calc, ai, newsContext) {
 
     L.push(`📐 *Uwiano*`);
     L.push(
-      buildBox('UWIANO', [
+      buildKVTable([
         ['P/E', calc.pe != null ? fmt2(calc.pe) + 'x' : 'N/A'],
         ['P/B', calc.pb != null ? fmt2(calc.pb) + 'x' : 'N/A'],
         ['Div. Yield', calc.dy != null ? fmt2(calc.dy) + '%' : 'N/A'],
