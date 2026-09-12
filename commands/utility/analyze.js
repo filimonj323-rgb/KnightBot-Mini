@@ -15,7 +15,6 @@
  * ⚠️ SI USHAURI WA KITAALAMU WA UWEKEZAJI.
  */
 
-const { sendButtons } = require('gifted-btns');
 const pendingFollowup = require('../../utils/pendingAnalysisFollowup');
 
 const { fetchDSEStocks } = require('./dse.js');
@@ -594,6 +593,8 @@ function buildMessage(data, calc, ai, newsContext) {
     (newsContext ? `; habari = Groq (${NEWS_MODEL})` : '') + `._`);
   L.push(`_⚠️ SI ushauri wa kitaalamu wa uwekezaji._`);
   L.push('');
+  L.push(`💬 Swali? \`.swali <swali lako>\``);
+  L.push('');
   L.push(buildFooter());
   return L.join('\n');
 }
@@ -707,7 +708,8 @@ module.exports = {
         ];
       }
 
-      // 6) Tuma uchambuzi
+      // 6) Tuma uchambuzi (ujumbe MMOJA — mstari wa ".swali" tayari umo
+      // ndani ya buildMessage() yenyewe, hakuna ujumbe wa pili/button).
       await sock.sendMessage(
         jid,
         { text: buildMessage(data, calc, ai, newsContext) },
@@ -715,46 +717,11 @@ module.exports = {
       );
 
       // 7) Hifadhi muktadha kwa ajili ya swali la ufuatiliaji (dakika 10).
-      // Njia RASMI ya kuuliza ni command ya wazi: ".swali <swali lako>"
+      // Njia ya kuuliza ni command ya wazi: ".swali <swali lako>"
       // (angalia commands/utility/swali.js) — SI ujumbe wa kawaida bila
       // prefix, kwa sababu hilo lingeweza "kunasa" kimakosa ujumbe wowote
       // usiofungamana wa mtumiaji kwenye group (mgogoro/conflict).
       pendingFollowup.set(sender, { symbol, name: data.name, data, calc, ai, newsContext });
-
-      const followupHint =
-        `💬 Kuna sehemu ya uchambuzi wa *${symbol}* usiyoielewa vizuri?\n` +
-        `Tumia: \`.swali <swali lako>\` (ndani ya dakika 10)\n` +
-        `Mfano: \`.swali kwa nini P/E iko juu?\``;
-
-      try {
-        // Button ni "shortcut" tu ya kumkumbusha mtumiaji amba command ya
-        // kutumia — ikibonyezwa, bado tunamwelekeza kwenye ".swali ...".
-        await sendButtons(
-          sock,
-          jid,
-          {
-            title: '',
-            text: followupHint,
-            footer: 'Bonyeza chini kama unataka kukumbushwa jinsi ya kuuliza',
-            buttons: [
-              {
-                name: 'quick_reply',
-                buttonParamsJson: JSON.stringify({
-                  display_text: '❓ Nisaidie Kuuliza',
-                  id: 'analyze_followup',
-                }),
-              },
-            ],
-          },
-          { quoted: msg }
-        );
-      } catch (btnErr) {
-        // Kama interactive button itashindwa (mfano version ya WhatsApp
-        // client au library haiungi mkono), text hii hii ya juu inatosha
-        // kama fallback — HAKUNA free-text capture ya kiotomatiki.
-        console.warn('analyze: sendButtons error (follow-up)', btnErr.message);
-        await sock.sendMessage(jid, { text: followupHint }, { quoted: msg });
-      }
 
       return;
     } catch (err) {
@@ -765,36 +732,6 @@ module.exports = {
         { quoted: msg }
       );
     }
-  },
-
-  // ═════════════════════════════════════════════
-  // Kuitwa na handler.js wakati button "❓ Nisaidie Kuuliza" imebonyezwa
-  // (buttonId/nativeFlow id === 'analyze_followup'). HAIWEKI free-text
-  // listening — inamkumbusha tu mtumiaji atumie ".swali <swali lako>".
-  // ═════════════════════════════════════════════
-  async handleFollowupButtonClick(sock, msg, sender) {
-    const jid = msg.key.remoteJid;
-    const entry = pendingFollowup.get(sender);
-    if (!entry) {
-      return sock.sendMessage(
-        jid,
-        {
-          text:
-            '⌛ Muktadha wa uchambuzi umeisha muda (au haujafanya .analyze bado). ' +
-            'Tumia `.analyze <symbol>` kwanza.',
-        },
-        { quoted: msg }
-      );
-    }
-    return sock.sendMessage(
-      jid,
-      {
-        text:
-          `✍️ Tumia: \`.swali <swali lako>\` kuuliza kuhusu *${entry.context.symbol}*.\n` +
-          `Mfano: \`.swali kwa nini verdict ni ${entry.context.ai?.verdict || 'hii'}?\``,
-      },
-      { quoted: msg }
-    );
   },
 
   // Inatumika na commands/utility/swali.js kujibu swali la ufuatiliaji
