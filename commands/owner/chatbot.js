@@ -2,6 +2,7 @@
  * Chatbot Command - On/Off AI chatbot
  */
 const config = require('../../config');
+const { updateBotSettings } = require('../../database');
 
 module.exports = {
   name: 'chatbot',
@@ -33,21 +34,25 @@ module.exports = {
       if (opt === 'on') {
         config.chatbotInbox = true;
         config.chatbotGroup = true;
+        updateBotSettings({ chatbotInbox: true, chatbotGroup: true });
         return extra.reply('✅ AI Chatbot: *ON*\nBot itajibu inbox na groups zote kama binadamu!');
       }
       if (opt === 'off') {
         config.chatbotInbox = false;
         config.chatbotGroup = false;
+        updateBotSettings({ chatbotInbox: false, chatbotGroup: false });
         return extra.reply('❌ AI Chatbot: *OFF*');
       }
       if (opt === 'inbox') {
         config.chatbotInbox = !config.chatbotInbox;
         config.chatbotGroup = false;
+        updateBotSettings({ chatbotInbox: config.chatbotInbox, chatbotGroup: false });
         return extra.reply(`📩 Chatbot Inbox: *${config.chatbotInbox ? 'ON ✅' : 'OFF ❌'}*`);
       }
       if (opt === 'group') {
         config.chatbotGroup = !config.chatbotGroup;
         config.chatbotInbox = false;
+        updateBotSettings({ chatbotGroup: config.chatbotGroup, chatbotInbox: false });
         return extra.reply(`👥 Chatbot Groups: *${config.chatbotGroup ? 'ON ✅' : 'OFF ❌'}*`);
       }
 
