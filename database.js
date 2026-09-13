@@ -33,6 +33,7 @@ const GROUPS_DB = path.join(DB_PATH, 'groups.json');
 const USERS_DB = path.join(DB_PATH, 'users.json');
 const WARNINGS_DB = path.join(DB_PATH, 'warnings.json');
 const MODS_DB = path.join(DB_PATH, 'mods.json');
+const BOTSETTINGS_DB = path.join(DB_PATH, 'botsettings.json');
 
 // Ramani kutoka path la faili la ndani → "store_key" kwenye Turso.
 const STORE_KEYS = {
@@ -40,6 +41,7 @@ const STORE_KEYS = {
   [USERS_DB]: 'users',
   [WARNINGS_DB]: 'warnings',
   [MODS_DB]: 'mods',
+  [BOTSETTINGS_DB]: 'botsettings',
 };
 
 // Initialize database directory
@@ -58,6 +60,7 @@ initDB(GROUPS_DB, {});
 initDB(USERS_DB, {});
 initDB(WARNINGS_DB, {});
 initDB(MODS_DB, { moderators: [] });
+initDB(BOTSETTINGS_DB, { chatbotInbox: false, chatbotGroup: false });
 
 // ── TURSO BACKING STORE ─────────────────────────────────────────────────
 let tursoSchemaReady = false;
@@ -291,6 +294,20 @@ const isModerator = (userId) => {
   return mods.includes(userId);
 };
 
+// Bot-wide settings (chatbot on/off, n.k.) — Turso-backed kama groups/warnings
+// ili zisirudi OFF kimya kimya kila container inaporestart.
+const getBotSettings = () => {
+  const settings = readDB(BOTSETTINGS_DB);
+  return { chatbotInbox: false, chatbotGroup: false, ...settings };
+};
+
+const updateBotSettings = (settings) => {
+  const current = readDB(BOTSETTINGS_DB);
+  const updated = { ...current, ...settings };
+  writeDB(BOTSETTINGS_DB, updated);
+  return updated;
+};
+
 module.exports = {
   initializeDatabase,
   getGroupSettings,
@@ -305,5 +322,7 @@ module.exports = {
   getModerators,
   addModerator,
   removeModerator,
-  isModerator
+  isModerator,
+  getBotSettings,
+  updateBotSettings
 };
