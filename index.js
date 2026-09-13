@@ -121,6 +121,8 @@ const {
   seedCredsFromLegacyImport,
   migrateDiskSessionIfPresent,
   deleteSession,
+  saveMessageForRetry,
+  getStoredMessage,
 } = require('./session-db');
 const { initializeDatabase: initializeGroupDatabase } = require('./database');
 const os = require('os');
@@ -403,7 +405,12 @@ async function startBot() {
     syncFullHistory: false,
     downloadHistory: false,
     markOnlineOnConnect: false,
-    getMessage: async () => undefined // Don't load messages from store
+    // getStoredMessage() inasoma kutoka wa_messages (Turso) — hii ndiyo
+    // inayomjibu mpokeaji anapoomba retry (WhatsApp ikishindwa ku-decrypt
+    // upande wake, inaomba tuma tena). Kabla haikuwa hivi (ilirudisha
+    // undefined kila mara), Baileys haikuwa na cha kutuma tena, na
+    // mpokeaji alibaki na "Waiting for this message" milele.
+    getMessage: async (key) => (await getStoredMessage(sessionId, key)) || undefined
   });
   mainSock = sock; // rejea ya kimataifa kwa ajili ya SIGTERM/SIGINT shutdown
 
@@ -456,6 +463,17 @@ async function startBot() {
   // Update on every message
   sock.ev.on('messages.upsert', () => {
     lastActivity = Date.now();
+  });
+
+  // Hifadhi kila ujumbe (uliotumwa na bot NA uliopokelewa) kwenye wa_messages
+  // — hii ndiyo chanzo kinachotumiwa na getMessage() hapo juu kujibu maombi
+  // ya retry ("Waiting for this message") kutoka kwa WhatsApp.
+  sock.ev.on('messages.upsert', ({ messages, type }) => {
+    if (type !== 'notify' && type !== 'append') return;
+    for (const msg of messages) {
+      if (!msg.message || !msg.key?.id || !msg.key?.remoteJid) continue;
+      saveMessageForRetry(sessionId, msg.key, msg.message).catch(() => {});
+    }
   });
 
   // Check every 5 min
