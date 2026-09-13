@@ -60,7 +60,7 @@ initDB(GROUPS_DB, {});
 initDB(USERS_DB, {});
 initDB(WARNINGS_DB, {});
 initDB(MODS_DB, { moderators: [] });
-initDB(BOTSETTINGS_DB, { chatbotInbox: false, chatbotGroup: false });
+initDB(BOTSETTINGS_DB, { __main__: { chatbotInbox: false, chatbotGroup: false } });
 
 // ── TURSO BACKING STORE ─────────────────────────────────────────────────
 let tursoSchemaReady = false;
@@ -295,17 +295,26 @@ const isModerator = (userId) => {
 };
 
 // Bot-wide settings (chatbot on/off, n.k.) — Turso-backed kama groups/warnings
-// ili zisirudi OFF kimya kimya kila container inaporestart.
+// ili zisirudi OFF kimya kimya kila container inaporestart. Ime-scope kwa
+// owner (sawa na getGroupSettings/updateGroupSettings) ili mteja mmoja wa
+// pairing dashboard akiwasha/kuzima chatbot, isiathiri bot kuu wala wateja
+// wengine wanaoendesha kwenye process ile ile — bila hii, kwa kuwa
+// config.chatbotInbox/chatbotGroup ni object MOJA ya global, kila mtu
+// angeshiriki hali moja.
+const scopedBotSettingsKey = () => ownerScopeStorage.getStore() || '__main__';
+
 const getBotSettings = () => {
-  const settings = readDB(BOTSETTINGS_DB);
-  return { chatbotInbox: false, chatbotGroup: false, ...settings };
+  const key = scopedBotSettingsKey();
+  const all = readDB(BOTSETTINGS_DB);
+  return { chatbotInbox: false, chatbotGroup: false, ...(all[key] || {}) };
 };
 
 const updateBotSettings = (settings) => {
-  const current = readDB(BOTSETTINGS_DB);
-  const updated = { ...current, ...settings };
-  writeDB(BOTSETTINGS_DB, updated);
-  return updated;
+  const key = scopedBotSettingsKey();
+  const all = readDB(BOTSETTINGS_DB);
+  all[key] = { ...(all[key] || {}), ...settings };
+  writeDB(BOTSETTINGS_DB, all);
+  return all[key];
 };
 
 module.exports = {

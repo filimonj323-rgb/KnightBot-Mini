@@ -338,17 +338,6 @@ async function startBot() {
   // faili za ndani pekee (haizuii boot).
   await initializeGroupDatabase();
 
-  // Rudisha hali ya .chatbot on/off iliyowekwa mara ya mwisho — bila hii,
-  // kila container restart ingerudisha chatbot kuwa OFF kimya kimya (config
-  // hii ilikuwa inaishi memory-only kabla), hata kama owner aliiwasha.
-  try {
-    const botSettings = getBotSettings();
-    config.chatbotInbox = !!botSettings.chatbotInbox;
-    config.chatbotGroup = !!botSettings.chatbotGroup;
-  } catch (e) {
-    // haipo bado / Turso haipatikani — endelea na default za config.js
-  }
-
   // sessionId ya Turso — jina moja thabiti kwa bot hii (haihitaji Railway
   // Volume kabisa: creds+keys zinaishi Turso, si diskini tena).
   const sessionId = config.sessionName || 'default';
@@ -696,9 +685,13 @@ async function startBot() {
         try {
           const isGroup = from.endsWith('@g.us');
           const isInbox = from.endsWith('@s.whatsapp.net');
+          // getBotSettings() bila owner scope (bot kuu haiwahi kuita
+          // runWithOwnerScope) inarudi kwenye '__main__' kiotomatiki — hii
+          // ndiyo hali iliyowekwa na commands/owner/chatbot.js kwa bot hii.
+          const botSettings = getBotSettings();
           const shouldChat =
-            (isGroup && config.chatbotGroup) ||
-            (isInbox && config.chatbotInbox);
+            (isGroup && botSettings.chatbotGroup) ||
+            (isInbox && botSettings.chatbotInbox);
 
           if (shouldChat && !msg.key.fromMe) {
             const userText =
