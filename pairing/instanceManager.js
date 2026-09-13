@@ -56,6 +56,7 @@ const db = require('./db');
 // SAME JSON-file group settings store the WhatsApp commands already use
 // (commands/admin/antilink.js etc.) — one source of truth, no duplication.
 const groupDb = require('../database');
+const { groqReply } = require('../utils/groqChat');
 // Auto-Forward rules — SAME store the `.autoforward` WhatsApp command
 // (commands/owner/autoforward.js) already reads/writes, so a rule set from
 // the dashboard shows up instantly via WhatsApp and vice versa.
@@ -715,6 +716,53 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         await handler.handleAntilink(sock, msg, groupMetadata);
         await handler.handleAntipromo(sock, msg, groupMetadata);
       }).catch(() => {});
+    }
+
+    // AI Chatbot — mirrors index.js's version, lakini ime-scope kwa
+    // phoneNumber ya mteja huyu (groupDb.runWithOwnerScope) ili toggle ya
+    // .chatbot na chat history visichanganyike kati ya wateja tofauti wa
+    // pairing dashboard, wala visiathiri bot kuu.
+    try {
+      const from = msg.key.remoteJid;
+      if (from && from !== 'status@broadcast' && !msg.key.fromMe) {
+        const isGroup = from.endsWith('@g.us');
+        const isInbox = from.endsWith('@s.whatsapp.net');
+        const botSettings = groupDb.runWithOwnerScope(phoneNumber, () => groupDb.getBotSettings());
+        const shouldChat = (isGroup && botSettings.chatbotGroup) || (isInbox && botSettings.chatbotInbox);
+
+        if (shouldChat) {
+          const userText =
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage?.text ||
+            msg.message?.imageMessage?.caption || '';
+          const sharedConfig = require('../config');
+          const prefix = (sock.instanceSettings && sock.instanceSettings.prefix) || sharedConfig.prefix || '.';
+          const isCommand = userText.startsWith(prefix);
+
+          let canReply = true;
+          if (isGroup) {
+            const botJid = sock.user?.id?.replace(/:\d+/, '') + '@s.whatsapp.net';
+            const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+            const quotedBy = msg.message?.extendedTextMessage?.contextInfo?.participant;
+            canReply = mentioned.includes(botJid) || quotedBy === botJid;
+          }
+
+          if (userText && !isCommand && canReply) {
+            const sender = msg.key.participant || from;
+            // phoneNumber (namba ya bot hii) imeambatanishwa ili chat history
+            // ya mtumiaji huyu isichanganyike na mazungumzo yake na bot
+            // NYINGINE ya pairing dashboard (groqChat.js ina-key kwa userId
+            // pekee, si kwa bot).
+            const userId = `${phoneNumber}:${sender.split('@')[0]}`;
+            await sock.sendPresenceUpdate('composing', from);
+            const reply = await groqReply(userId, userText);
+            await sock.sendMessage(from, { text: reply }, { quoted: msg });
+            await sock.sendPresenceUpdate('paused', from);
+          }
+        }
+      }
+    } catch (e) {
+      // Silently handle — sawa na tabia ya index.js kwa block hii
     }
   });
 
