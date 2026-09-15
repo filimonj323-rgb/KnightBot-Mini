@@ -104,6 +104,14 @@ const pino = require('pino');
 // `const { X } = global.__baileys` line resolves correctly.
 let makeWASocket, DisconnectReason, Browsers, fetchLatestBaileysVersion, fetchLatestWaWebVersion, useMultiFileAuthState;
 const qrcode = require('qrcode-terminal');
+// Package hii ("qrcode", tofauti na "qrcode-terminal" hapo juu) inazalisha
+// QR kama picha (data URL ya PNG) badala ya text ya terminal — hii ndiyo
+// tunayotumia kuionyesha kwenye admin dashboard (angalia global.mainQR chini
+// na route ya /api/admin/main-qr kwenye pairing/server.js), kwa sababu QR ya
+// terminal iliyoko kwenye Railway logs ni ngumu ku-scan (imebanwa/imepindana
+// kwenye log viewer). Hii ni kwa BOT KUU tu — si sehemu ya mfumo wa pairing
+// bots za wateja (wale wanatumia pairing code pekee, si QR).
+const qrImage = require('qrcode');
 const config = require('./config');
 let handler; // populated by loadBaileysBridge()
 // Rejea ya sock kuu ya bot — inatumika na SIGTERM/SIGINT handler chini ili
@@ -544,6 +552,18 @@ async function startBot() {
       if (process.env.PAIR_NUMBER) {
         console.log('👉 Au tumia PAIRING CODE iliyotolewa hapo juu — chagua njia inayokufanyia kazi.\n');
       }
+      // QR ya Railway logs ni ngumu ku-scan (imebanwa kwenye log viewer) —
+      // hii inazalisha picha ile ile (PNG data URL) na kuihifadhi kwenye
+      // global.mainQR ili admin.html iiombe (GET /api/admin/main-qr,
+      // protected na admin login) na kuionyesha kubwa, rahisi ku-scan.
+      // Bot kuu TU — si njia ya pairing bots za wateja.
+      qrImage.toDataURL(qr, { margin: 1, scale: 8 })
+        .then((dataUrl) => {
+          global.mainQR = { dataUrl, generatedAt: Date.now() };
+        })
+        .catch((e) => {
+          console.error('❌ Imeshindwa kuzalisha QR image kwa dashboard:', e.message);
+        });
     }
 
     if (connection === 'close') {
@@ -575,6 +595,8 @@ async function startBot() {
         // mgongano wowote.
         console.log('🔌 Kifaa kime-unlink (logged out) — nafuta session chakavu ya Turso na kuanza upya na session tupu...');
         pairingCodeRequested = false; // session mpya kabisa inakuja — ruhusu kuomba pairing code MOJA mpya kwa hiyo session
+        global.currentSock = null;
+        global.mainQR = null; // itajazwa upya na QR mpya mara startBot() ijaribu tena hapa chini
         deleteSession(sessionId)
           .then(() => console.log(`[session] Session "${sessionId}" imefutwa Turso baada ya unlink.`))
           .catch((e) => console.error('❌ Imeshindwa kufuta Turso session baada ya unlink:', e.message))
@@ -583,6 +605,7 @@ async function startBot() {
     } else if (connection === 'open') {
       console.log('\n✅ Bot connected successfully!');
       global.currentSock = sock; // ruhusu functions nyingine (mfano auto-backup) kutumia sock hii
+      global.mainQR = null; // imelinki — QR ya zamani isionekane tena kwenye dashboard
       console.log(`📱 Bot Number: ${sock.user.id.split(':')[0]}`);
       console.log(`🤖 Bot Name: ${config.botName}`);
       console.log(`⚡ Prefix: ${config.prefix}`);
