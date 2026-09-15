@@ -199,6 +199,29 @@ const updateGroupSettings = (groupId, settings) => {
   return writeDB(GROUPS_DB, groups);
 };
 
+// Returns { groupId: settings } for every group belonging to the CURRENT
+// owner scope only (main bot sees only its own un-prefixed keys; a pairing
+// customer sees only their own "ownerId::groupId" keys, with the prefix
+// stripped back off). Used by commands/general/antidelete.js to show how
+// many groups have per-group self-recovery enabled without leaking one
+// customer's group list into another's.
+const listAllGroupSettings = () => {
+  const owner = ownerScopeStorage.getStore();
+  const groups = readDB(GROUPS_DB);
+  const result = {};
+  if (!owner) {
+    for (const [key, val] of Object.entries(groups)) {
+      if (!key.includes('::')) result[key] = val;
+    }
+    return result;
+  }
+  const prefix = `${owner}::`;
+  for (const [key, val] of Object.entries(groups)) {
+    if (key.startsWith(prefix)) result[key.slice(prefix.length)] = val;
+  }
+  return result;
+};
+
 // User Data
 const getUser = (userId) => {
   const users = readDB(USERS_DB);
@@ -330,6 +353,7 @@ module.exports = {
   initializeDatabase,
   getGroupSettings,
   updateGroupSettings,
+  listAllGroupSettings,
   runWithOwnerScope,
   getUser,
   updateUser,
