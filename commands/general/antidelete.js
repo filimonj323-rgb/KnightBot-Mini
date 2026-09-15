@@ -1,29 +1,44 @@
 /**
  * Anti-Delete Command
  *
- * Hurejesha na kukutumia ujumbe uliofutwa ("delete for everyone") pamoja na
- * ujumbe ulioufuta nani na wapi. Inatumia database.getBotSettings()/
- * updateBotSettings() (owner-scoped) badala ya kubadilisha config.js moja
- * kwa moja, kwa sababu config.js ni module MOJA inayoshirikiwa na kila
- * instance (bot kuu + kila mteja wa pairing dashboard) kwenye process hii —
- * ingebadilishwa moja kwa moja, kuwasha/kuzima antidelete kwa mteja mmoja
- * kungeathiri kila mtu mwingine. getBotSettings/updateBotSettings tayari
- * huweka usanifu huu kwa AsyncLocalStorage (database.js), kwa hiyo kila
- * bot (kuu au ya pairing) ina hali yake YENYEWE.
+ * Modes:
+ *  1) GLOBAL (owner DM) — `.antidelete on/off`, `.antidelete group on/off`,
+ *     `.antidelete private on/off`. Ujumbe uliofutwa (group yoyote isiyo na
+ *     per-group override, au private) hutumwa kwa OWNER binafsi (DM/self-chat).
+ *     Inatunzwa kwenye database.getBotSettings()/updateBotSettings()
+ *     (owner-scoped + Turso-backed — tazama database.js) badala ya config.js
+ *     moja kwa moja, kwa sababu config.js ni module MOJA inayoshirikiwa na
+ *     kila instance (bot kuu + kila mteja wa pairing dashboard) — ingebadilishwa
+ *     moja kwa moja, kuwasha/kuzima kwa mteja mmoja kungeathiri kila mtu mwingine.
  *
- * Utambuzi halisi wa ujumbe uliofutwa (cache + kuugundua "revoke") upo
+ *  2) PER-GROUP (self-recovery) — `.antidelete here on/off` (ukiwa ndani ya
+ *     group) au `.antidelete gid <groupId> on/off` (kutoka popote, ukitumia
+ *     namba/ID ya group). Ukiwasha hii kwa group fulani, ujumbe utakaofutwa
+ *     KATIKA GROUP HILO hutumwa TENA HAPO HAPO kwenye group hilo, si kwa
+ *     owner. Inatunzwa kwenye database.getGroupSettings()/updateGroupSettings()
+ *     (field `antidelete` — ile ile field iliyokuwepo tayari kwenye
+ *     config.js's defaultGroupSettings, sasa inatumika), Turso-backed vile vile.
+ *
+ * Utambuzi halisi (cache + kuugundua "revoke" + kuamua wapi kutuma) upo
  * ndani ya handler.js -> handleAntideleteImpl(), inayoendeshwa kwa kila
  * ujumbe unaoingia kwenye BOT ZOTE (index.js na pairing/instanceManager.js)
  * bila kuhitaji mabadiliko yoyote kwenye faili hizo.
  */
 const database = require('../../database');
 
+const normalizeGroupId = (id) => {
+  if (!id) return null;
+  id = id.trim().replace(/[^0-9@.\-]/g, '');
+  if (!id) return null;
+  return id.endsWith('@g.us') ? id : `${id}@g.us`;
+};
+
 module.exports = {
   name: 'antidelete',
   aliases: ['antidel'],
   category: 'general',
-  description: 'Rejesha na tuma ujumbe uliofutwa (delete for everyone) kwako',
-  usage: '.antidelete <on/off/group/private>',
+  description: 'Rejesha na tuma ujumbe uliofutwa (delete for everyone) — kwako au hapo hapo groupni',
+  usage: '.antidelete <on/off/group/private/here/gid>',
   ownerOnly: true,
 
   async execute(sock, msg, args, extra) {
@@ -34,15 +49,27 @@ module.exports = {
       if (!action) {
         const groupStatus = settings.antideleteGroup ? 'ON ✅' : 'OFF ❌';
         const privateStatus = settings.antideletePrivate ? 'ON ✅' : 'OFF ❌';
+
+        // Hesabu ni group ngapi zenye per-group self-recovery imewashwa
+        let perGroupCount = 0;
+        try {
+          const groups = database.listAllGroupSettings ? database.listAllGroupSettings() : null;
+          if (groups) {
+            perGroupCount = Object.values(groups).filter(g => g && g.antidelete).length;
+          }
+        } catch (e) {}
+
         return extra.reply(
           `🛡️ *Anti-Delete Status*\n\n` +
-          `📌 Groups: ${groupStatus}\n` +
-          `📌 Private: ${privateStatus}\n\n` +
-          `*Matumizi:*\n` +
-          `• .antidelete on — washa zote mbili\n` +
-          `• .antidelete off — zima zote mbili\n` +
+          `📌 Groups (kwa owner DM): ${groupStatus}\n` +
+          `📌 Private (kwa owner DM): ${privateStatus}\n` +
+          (perGroupCount ? `📌 Groups zenye self-recovery: ${perGroupCount}\n` : '') +
+          `\n*Matumizi:*\n` +
+          `• .antidelete on / off — global (owner DM)\n` +
           `• .antidelete group on/off\n` +
-          `• .antidelete private on/off`
+          `• .antidelete private on/off\n` +
+          `• .antidelete here on/off — group hii hii (rejesha ndani ya group)\n` +
+          `• .antidelete gid <groupId> on/off — group nyingine kwa ID`
         );
       }
 
@@ -67,7 +94,37 @@ module.exports = {
         return extra.reply(`🛡️ *Anti-Delete (${label}): ${sub === 'on' ? 'ON ✅' : 'OFF ❌'}*`);
       }
 
-      return extra.reply('❌ Tumia: `.antidelete on / off / group on|off / private on|off`');
+      // ── PER-GROUP (self-recovery) ─────────────────────────────────────
+      if (action === 'here') {
+        if (!extra.isGroup) {
+          return extra.reply('❌ `.antidelete here` inatumika ndani ya GROUP tu. Kwa group nyingine tumia `.antidelete gid <groupId> on/off`.');
+        }
+        const sub = (args[1] || '').toLowerCase();
+        if (!['on', 'off'].includes(sub)) {
+          return extra.reply('❌ Tumia: `.antidelete here on` au `.antidelete here off`');
+        }
+        database.updateGroupSettings(extra.from, { antidelete: sub === 'on' });
+        return extra.reply(
+          sub === 'on'
+            ? '🛡️ *Anti-Delete (group hii): ON ✅*\n\nUjumbe utakaofutwa hapa utarejeshwa HAPA HAPA kwenye group.'
+            : '🛡️ *Anti-Delete (group hii): OFF ❌*'
+        );
+      }
+
+      if (action === 'gid') {
+        const groupId = normalizeGroupId(args[1]);
+        const sub = (args[2] || '').toLowerCase();
+        if (!groupId || !['on', 'off'].includes(sub)) {
+          return extra.reply('❌ Tumia: `.antidelete gid <groupId> on/off`\nMfano: `.antidelete gid 120363042078595907 on`');
+        }
+        database.updateGroupSettings(groupId, { antidelete: sub === 'on' });
+        return extra.reply(
+          `🛡️ *Anti-Delete kwa group* \`${groupId}\`: ${sub === 'on' ? 'ON ✅' : 'OFF ❌'}\n\n` +
+          (sub === 'on' ? 'Ujumbe utakaofutwa huko utarejeshwa hapo hapo kwenye group hilo.' : '')
+        );
+      }
+
+      return extra.reply('❌ Tumia: `.antidelete on / off / group on|off / private on|off / here on|off / gid <id> on|off`');
     } catch (err) {
       extra.reply(`❌ Error: ${err.message}`);
     }
