@@ -393,6 +393,21 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
       }
 
+      // ── Admin: QR ya BOT KUU (si ya pairing bots za wateja — wale
+      // wanatumia pairing code pekee). global.mainQR/global.currentSock
+      // vinawekwa na index.js (connection.update handler ya socket kuu).
+      // Hii inaruhusu admin.html kuionyesha QR kama picha kubwa badala ya
+      // ile ya Railway logs (ngumu ku-scan kwenye log viewer).
+      if (req.method === 'GET' && req.url === '/api/admin/main-qr') {
+        return sendJson(res, 200, {
+          ok: true,
+          connected: !!global.currentSock,
+          botNumber: global.currentSock?.user?.id ? global.currentSock.user.id.split(':')[0] : null,
+          qr: global.mainQR?.dataUrl || null,
+          generatedAt: global.mainQR?.generatedAt || null,
+        });
+      }
+
       // Number Lookup (global — si ya bot moja): tafuta namba yoyote KATIKA
       // GROUPS ZA BOT ZOTE zinazoendesha kwa sasa, si za instance moja tu —
       // kwa sababu namba fulani inaweza kuwa kwenye group ya mteja A wakati
