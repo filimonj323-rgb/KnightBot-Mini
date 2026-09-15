@@ -219,6 +219,19 @@
   .badge.expired { background: rgba(255,85,102,0.12); color: var(--red); }
   .badge.blocked { background: rgba(255,85,102,0.2); color: var(--red); }
 
+  /* ── Bot Kuu QR card ── */
+  .qr-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+    padding: 14px 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .qr-card .qr-info { flex: 1; min-width: 160px; }
+  .qr-card .qr-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .qr-card .qr-status { font-size: 13px; font-weight: 600; }
+  .qr-card .qr-status.connected { color: var(--accent); }
+  .qr-card .qr-status.waiting { color: var(--amber); }
+  .qr-card img.qr-img { width: 168px; height: 168px; border-radius: 4px; background: #fff; padding: 6px; display: block; }
+  .qr-card .qr-empty { width: 168px; height: 168px; border: 1px dashed var(--border); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px; text-align: center; padding: 8px; }
+
   /* ── Detail slide-over ── */
   #overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 30; }
   #detail {
@@ -303,6 +316,15 @@
   </div>
 
   <div class="content">
+    <div class="qr-card">
+      <div id="qrImageWrap" class="qr-empty">Inapakia...</div>
+      <div class="qr-info">
+        <div class="qr-title">Bot Kuu · Linking</div>
+        <div class="qr-status" id="qrStatusText">Inaangalia hali...</div>
+        <div style="margin-top:8px;"><button class="ghost" onclick="loadMainQR()">↻ Refresh QR</button></div>
+      </div>
+    </div>
+
     <div class="stats" id="statsRow"></div>
 
     <div class="toolbar">
@@ -1072,11 +1094,42 @@
     }
   }
 
+  // ── Bot Kuu QR: badala ya kusoma QR kwenye Railway logs (ngumu ku-scan),
+  // hii inaomba /api/admin/main-qr na kuionyesha hapa kama picha. Inaanza
+  // kwa mwenyewe (poll kila sekunde 5) — Baileys inazalisha QR mpya kila
+  // baada ya muda mfupi ikiwa haijalinki, hivyo refresh ya mara kwa mara
+  // inahakikisha picha inayoonekana bado ni halali (haijaisha muda).
+  let qrPollTimer = null;
+  async function loadMainQR() {
+    try {
+      const data = await api('/api/admin/main-qr');
+      const wrap = document.getElementById('qrImageWrap');
+      const statusEl = document.getElementById('qrStatusText');
+      if (data.connected) {
+        statusEl.textContent = '✅ Imeunganishwa' + (data.botNumber ? ' (+' + data.botNumber + ')' : '');
+        statusEl.className = 'qr-status connected';
+        wrap.outerHTML = '<div class="qr-empty" id="qrImageWrap">Bot iko live — hakuna QR ya kuonyesha.</div>';
+      } else if (data.qr) {
+        statusEl.textContent = '📱 Fungua WhatsApp > Linked Devices > Link a Device, kisha scan.';
+        statusEl.className = 'qr-status waiting';
+        wrap.outerHTML = '<img class="qr-img" id="qrImageWrap" src="' + data.qr + '" alt="QR ya Bot Kuu" />';
+      } else {
+        statusEl.textContent = 'Bado hakuna QR — bot inaanzisha muunganiko...';
+        statusEl.className = 'qr-status waiting';
+        wrap.outerHTML = '<div class="qr-empty" id="qrImageWrap">Inasubiri QR...</div>';
+      }
+    } catch (e) {
+      document.getElementById('qrStatusText').textContent = 'Imeshindwa kupata QR: ' + e.message;
+    }
+  }
+
   function showApp() {
     document.getElementById('loginCard').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     loadUsers();
+    loadMainQR();
     setInterval(loadUsers, 15000);
+    if (!qrPollTimer) qrPollTimer = setInterval(loadMainQR, 5000);
     setInterval(() => {
       document.getElementById('clock').textContent = new Date().toLocaleTimeString('sw-TZ');
     }, 1000);
