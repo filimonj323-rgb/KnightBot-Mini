@@ -608,14 +608,22 @@ const handleAntideleteImpl = async (sock, msg) => {
     if (!deletedKey?.id) return;
 
     const isGroup = chatJid.endsWith('@g.us');
-    const settings = database.getBotSettings();
-    const enabled = isGroup ? settings.antideleteGroup : settings.antideletePrivate;
-    if (!enabled) return;
+    const botSettings = database.getBotSettings();
+    // Per-group override (.antidelete here / .antidelete gid <id>) — ikiwa
+    // group hii ina yake YENYEWE imewashwa, ujumbe hurejeshwa HAPO HAPO
+    // kwenye group hilo badala ya kwenda kwa owner DM.
+    const groupSettings = isGroup ? database.getGroupSettings(chatJid) : null;
+    const perGroupEnabled = !!groupSettings?.antidelete;
+
+    const globalEnabled = isGroup ? botSettings.antideleteGroup : botSettings.antideletePrivate;
+    if (!perGroupEnabled && !globalEnabled) return;
 
     const original = antideleteStore.getMessage(ownerKey, chatJid, deletedKey.id);
     if (!original || !original.message) return; // haipo/ilikwisha-expire kwenye cache
 
-    const destJid = getAntideleteDestJid(sock);
+    // Group yenye per-group override → tuma HAPO HAPO kwenye group hilo.
+    // Vinginevyo (global au private) → tuma kwa owner DM/self-chat.
+    const destJid = perGroupEnabled ? chatJid : getAntideleteDestJid(sock);
     if (!destJid) return;
 
     const deleterJid = deletedKey.fromMe
@@ -628,11 +636,16 @@ const handleAntideleteImpl = async (sock, msg) => {
       chatLabel = `Group${groupMeta?.subject ? ` (${groupMeta.subject})` : ''}`;
     }
 
-    const header =
-      `🗑️ *Anti-Delete: Ujumbe Umefutwa*\n` +
-      `👤 Aliyefuta: @${deleterJid.split('@')[0]}\n` +
-      `💬 Chat: ${chatLabel}\n` +
-      `🕒 ${new Date().toLocaleString('en-GB', { timeZone: config.timezone })}`;
+    const header = perGroupEnabled
+      ? `🗑️ *Ujumbe Umefutwa!*\n` +
+        `👤 Aliyefuta: @${deleterJid.split('@')[0]}\n` +
+        `🕒 ${new Date().toLocaleString('en-GB', { timeZone: config.timezone })}\n\n` +
+        `📍 *DETECTED BY MR. IT MEDIATOR*`
+      : `🗑️ *Anti-Delete: Ujumbe Umefutwa*\n` +
+        `👤 Aliyefuta: @${deleterJid.split('@')[0]}\n` +
+        `💬 Chat: ${chatLabel}\n` +
+        `🕒 ${new Date().toLocaleString('en-GB', { timeZone: config.timezone })}\n\n` +
+        `📍 *DETECTED BY MR. IT MEDIATOR*`;
 
     await sendAutoForwardCopy(sock, destJid, original, header, deleterJid);
   } catch (err) {
