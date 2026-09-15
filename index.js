@@ -425,22 +425,39 @@ async function startBot() {
   // Bind store to socket
   store.bind(sock.ev);
 
-  // ── PAIRING CODE (badala ya QR) ──────────────────────────────────────
-  // Weka PAIR_NUMBER kwenye Railway Variables (namba yako ya WhatsApp,
-  // mfano 255700000000, bila + wala 0 mwanzoni) ili upate herufi 8 za
-  // kuandika WhatsApp > Linked Devices > Link with phone number — huna
-  // haja ya kamera wala simu ya pili. Ikiwa PAIR_NUMBER haipo, tabia ya
-  // zamani (QR kwenye logs) inaendelea kama kawaida.
+  // ── NJIA ZA KU-LINK: SESSION_ID, PAIRING CODE, na QR ─────────────────
+  // Bot hii ina NJIA TATU za ku-link, huru moja kwa nyingine (yoyote
+  // inayofanya kazi kwa Railway/WhatsApp yako wakati huo inatosha):
   //
-  // MUHIMU: hii inafuata muundo ULE ULE unaotumika (na umethibitika
-  // kufanya kazi) kwenye pairing/instanceManager.js — kusubiri sekunde 3
-  // TU baada ya socket kuundwa, bila kusubiri 'connecting' event wala
-  // sendPresenceUpdate. Toleo la awali lililokuwa likisubiri
-  // 'connecting' + presence + 1.5s lilikuwa likigongana na QR ambayo
-  // Baileys inaendelea kuizalisha wakati huo huo — hivyo pairing code
-  // iliyotolewa ilikuwa tayari "chakavu" (imepitwa na hali mpya ya
-  // connection) kufikia mtumiaji anapoiandika kwenye simu, na kusababisha
-  // "couldn't link a device".
+  //   1) SESSION_ID (Railway Variable) — kama tayari una session
+  //      iliyoshalinkwa mahali pengine (format "KnightBot!<base64>...."),
+  //      iwekwe kwenye SESSION_ID. Inashughulikiwa juu kabisa ya function
+  //      hii (config.sessionID) KABLA ya useTursoAuthState() — ikiwa
+  //      creds ni sahihi, state.creds.registered itakuwa true hapa chini
+  //      na wala PAIR_NUMBER wala QR havitaombwa kabisa.
+  //
+  //   2) PAIR_NUMBER (Railway Variable) — namba yako ya WhatsApp (mfano
+  //      255700000000, bila + wala 0 mwanzoni) ili upate herufi 8 za
+  //      kuandika WhatsApp > Linked Devices > Link with phone number.
+  //
+  //   3) QR CODE — inaonyeshwa kwenye logs SIKU ZOTE wakati session
+  //      haijalinki bado, HATA kama PAIR_NUMBER imewekwa. Hii ndiyo
+  //      "njia ya pili inayofanya kazi" — baadhi ya namba/mitandao
+  //      WhatsApp inakataa kukubali pairing code ("couldn't link a
+  //      device") ingawa QR ya socket ile ile inafanya kazi. Kabla,
+  //      QR ilifichwa kabisa PAIR_NUMBER ikiwa imewekwa — sasa
+  //      zinaonyeshwa PAMOJA, na yeyote ya (2)/(3) mtumiaji anayoweza
+  //      kutumia kwa mafanikio ndiyo italink bot.
+  //
+  // MUHIMU (pairing code request): hii inafuata muundo ULE ULE
+  // unaotumika (na umethibitika kufanya kazi) kwenye
+  // pairing/instanceManager.js — kusubiri sekunde 3 TU baada ya socket
+  // kuundwa, bila kusubiri 'connecting' event wala sendPresenceUpdate.
+  // Toleo la awali lililokuwa likisubiri 'connecting' + presence + 1.5s
+  // lilikuwa likigongana na QR ambayo Baileys inaendelea kuizalisha
+  // wakati huo huo — hivyo pairing code iliyotolewa ilikuwa tayari
+  // "chakavu" (imepitwa na hali mpya ya connection) kufikia mtumiaji
+  // anapoiandika kwenye simu, na kusababisha "couldn't link a device".
   if (process.env.PAIR_NUMBER && !state.creds.registered && !pairingCodeRequested) {
     // Herufi 8 hasa (A-Z, 0-9) ndizo tu WhatsApp inazokubali kama custom
     // code — sawa na uthibitisho unaotumika kwenye pairing/instanceManager.js.
@@ -459,10 +476,12 @@ async function startBot() {
         .then((rawCode) => {
           const code = rawCode.match(/.{1,4}/g).join('-');
           console.log('\n\n🔑🔑🔑 PAIRING CODE: ' + code + ' 🔑🔑🔑');
-          console.log('👉 Fungua WhatsApp > Linked Devices > Link with phone number, andika code hii.\n\n');
+          console.log('👉 Fungua WhatsApp > Linked Devices > Link with phone number, andika code hii.');
+          console.log('ℹ️  Ikiwa namba haikubali code hii ("couldn\'t link a device"), tumia QR CODE inayoonekana hapa chini (au juu, ikitokea kabla ya hii) badala yake — zote mbili zinaelekea session moja.\n\n');
         })
         .catch((e) => {
           console.error('❌ Imeshindwa kupata pairing code:', e.message);
+          console.log('ℹ️  Tumia QR CODE kwenye logs badala yake kuunganisha (WhatsApp > Linked Devices > Link a device).');
           pairingCodeRequested = false; // hitilafu ya kweli (si kufungwa na WhatsApp) — ruhusu jaribio jingine
         });
     }, 3000);
@@ -512,9 +531,19 @@ async function startBot() {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr && !process.env.PAIR_NUMBER) {
-      console.log('\n\n📱 Scan this QR code with WhatsApp:\n');
+    // QR inaonyeshwa SIKU ZOTE Baileys inapoitoa (haijalinki bado) — hata
+    // kama PAIR_NUMBER imewekwa. Hii ndiyo njia ya PILI, huru na pairing
+    // code: ikiwa namba yako inakataa kukubali herufi 8 za pairing code
+    // ("couldn't link a device" WhatsApp-side), scan QR hii badala yake.
+    // Zote mbili (pairing code + QR) zinaelekea session/socket ile ile,
+    // hivyo yoyote itakayofanikiwa italink bot — hakuna haja ya kuondoa
+    // PAIR_NUMBER kwenye Railway Variables ili kupata QR.
+    if (qr) {
+      console.log('\n\n📱 Scan this QR code with WhatsApp (njia mbadala ya pairing code):\n');
       qrcode.generate(qr, { small: true });
+      if (process.env.PAIR_NUMBER) {
+        console.log('👉 Au tumia PAIRING CODE iliyotolewa hapo juu — chagua njia inayokufanyia kazi.\n');
+      }
     }
 
     if (connection === 'close') {
