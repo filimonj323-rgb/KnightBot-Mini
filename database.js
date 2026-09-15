@@ -306,7 +306,16 @@ const scopedBotSettingsKey = () => ownerScopeStorage.getStore() || '__main__';
 const getBotSettings = () => {
   const key = scopedBotSettingsKey();
   const all = readDB(BOTSETTINGS_DB);
-  return { chatbotInbox: false, chatbotGroup: false, ...(all[key] || {}) };
+  return {
+    chatbotInbox: false,
+    chatbotGroup: false,
+    // Anti-Delete — inatumika bot-nzima (si per-group), kwa hiyo inaishi hapa
+    // (owner-scoped) badala ya defaultGroupSettings. Tazama commands/general/antidelete.js
+    // na handler.js (handleAntideleteImpl) kwa logic kamili.
+    antideleteGroup: false,
+    antideletePrivate: false,
+    ...(all[key] || {})
+  };
 };
 
 const updateBotSettings = (settings) => {

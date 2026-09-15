@@ -564,6 +564,82 @@ const sendAutoForwardCopy = async (sock, destJid, msg, header, mentionJid) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// ANTI-DELETE — hurejesha na kutuma kwa owner ujumbe ulioufutwa ("delete for
+// everyone"). Inatumia utils/antideleteStore.js (cache ya kumbukumbu,
+// imetenganishwa kwa kila owner) kuhifadhi kila ujumbe unaoingia, kisha
+// hutambua "revoke" protocol message ya WhatsApp na kuchimbua ujumbe wa
+// awali kwenye cache hiyo. Function hii inaitwa moja kwa moja ndani ya
+// handleMessageImpl (chini) kwa kila ujumbe — hivyo INAFANYA KAZI KWA BOT
+// KUU (index.js) NA KILA CUSTOMER WA PAIRING (pairing/instanceManager.js)
+// bila kuhitaji mabadiliko yoyote kwenye faili hizo, kwa sababu zote
+// mbili tayari zinaita handler.handleMessage(sock, msg) kwa kila ujumbe.
+const antideleteStore = require('./utils/antideleteStore');
+
+const getAntideleteOwnerKey = (sock) => sock?.pairingOwnerId || '__main__';
+
+// Kwa bot kuu: namba ya kwanza kwenye config.ownerNumber. Kwa pairing
+// instance: namba ya mteja mwenyewe (sock.pairingOwnerId) ndiye "owner"
+// anayepaswa kupokea ujumbe uliorejeshwa wa bot YAKE.
+const getAntideleteDestJid = (sock) => {
+  const raw = sock?.pairingOwnerId || (config.ownerNumber && config.ownerNumber[0]);
+  if (!raw) return null;
+  return raw.includes('@') ? raw : `${raw}@s.whatsapp.net`;
+};
+
+const handleAntideleteImpl = async (sock, msg) => {
+  try {
+    const chatJid = msg.key?.remoteJid;
+    if (!chatJid || !msg.message) return;
+    if (chatJid.includes('@broadcast') || chatJid.includes('status.broadcast')) return;
+
+    const ownerKey = getAntideleteOwnerKey(sock);
+    const protocolMessage = msg.message.protocolMessage;
+    // Type 0 == REVOKE kwenye WhatsApp protobuf (ujumbe "delete for everyone")
+    const isRevoke = !!protocolMessage && (protocolMessage.type === 0 || protocolMessage.type === 'REVOKE');
+
+    if (!isRevoke) {
+      // Hifadhi ujumbe huu kwa ajili ya kurejeshwa baadaye ikiwa utafutwa.
+      antideleteStore.cacheMessage(ownerKey, msg);
+      return;
+    }
+
+    const deletedKey = protocolMessage.key;
+    if (!deletedKey?.id) return;
+
+    const isGroup = chatJid.endsWith('@g.us');
+    const settings = database.getBotSettings();
+    const enabled = isGroup ? settings.antideleteGroup : settings.antideletePrivate;
+    if (!enabled) return;
+
+    const original = antideleteStore.getMessage(ownerKey, chatJid, deletedKey.id);
+    if (!original || !original.message) return; // haipo/ilikwisha-expire kwenye cache
+
+    const destJid = getAntideleteDestJid(sock);
+    if (!destJid) return;
+
+    const deleterJid = deletedKey.fromMe
+      ? (sock.user?.id?.replace(/:\d+/, '') + '@s.whatsapp.net')
+      : (deletedKey.participant || original.key?.participant || chatJid);
+
+    let chatLabel = 'Private';
+    if (isGroup) {
+      const groupMeta = await getGroupMetadata(sock, chatJid);
+      chatLabel = `Group${groupMeta?.subject ? ` (${groupMeta.subject})` : ''}`;
+    }
+
+    const header =
+      `🗑️ *Anti-Delete: Ujumbe Umefutwa*\n` +
+      `👤 Aliyefuta: @${deleterJid.split('@')[0]}\n` +
+      `💬 Chat: ${chatLabel}\n` +
+      `🕒 ${new Date().toLocaleString('en-GB', { timeZone: config.timezone })}`;
+
+    await sendAutoForwardCopy(sock, destJid, original, header, deleterJid);
+  } catch (err) {
+    console.error('[AntiDelete Error]', err.message);
+  }
+};
+
 const isSystemJid = (jid) => {
   if (!jid) return true;
   return jid.includes('@broadcast') || 
@@ -728,6 +804,10 @@ const handleMessageImpl = async (sock, msg) => {
     // Auto View-Once — fire-and-continue, must never block normal command
     // processing below (menu, antilink, antipromo, n.k).
     handleAutoViewOnce(sock, msg).catch((e) => console.error('handleAutoViewOnce error:', e.message));
+
+    // Anti-Delete — cache ujumbe huu na utambue "delete for everyone" ikiwa
+    // huu ni revoke notice. Fire-and-continue, sawa na handleAutoViewOnce juu.
+    handleAntideleteImpl(sock, msg).catch((e) => console.error('[AntiDelete Error]', e.message));
 
 
     // Per-customer overrides (prefix / bot name) set via the pairing
