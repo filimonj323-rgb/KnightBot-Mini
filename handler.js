@@ -607,6 +607,30 @@ const handleAntideleteImpl = async (sock, msg) => {
     const deletedKey = protocolMessage.key;
     if (!deletedKey?.id) return;
 
+    // MUHIMU: usichanganye funguo hizi mbili —
+    //  • msg.key (outer)         = ujumbe HUU wa "revoke" wenyewe, hivyo
+    //    msg.key.fromMe/participant zinaonyesha NANI KAFUTA (mfutaji halisi).
+    //  • protocolMessage.key (deletedKey) = kiungo kinachoelekeza kwenye
+    //    UJUMBE WA ASILI uliofutwa, hivyo deletedKey.fromMe/participant
+    //    zinaonyesha NANI ALITUMA ujumbe huo wa asili (si mfutaji).
+    // Kabla ya hii, code ilikuwa ikitumia deletedKey.fromMe kuamua "mfutaji",
+    // hivyo owner akifuta ujumbe wa mtu mwingine (kama admin) — au hata pale
+    // mtu mwingine alipofuta ujumbe wake mwenyewe uliokuwa umewahi kutumwa
+    // na owner awali — ilikuwa ikimtaja/kum-mention BOT/OWNER kama mfutaji
+    // badala ya mtu husika. Sasa NANI-KAFUTA anapatikana kwa usahihi kwenye
+    // msg.key (fromMe/participant).
+    const deleterIsOwner = !!msg.key?.fromMe;
+    const originalWasOwnerSent = !!deletedKey.fromMe;
+
+    // Owner akifuta ujumbe ALIOUTUMA MWENYEWE, ACHA kabisa — usirejeshe/
+    // usitume popote. Bila hii, antidelete ilikuwa ikimzuia owner kufuta
+    // ujumbe wake mwenyewe kwa ufanisi, kwa sababu bot ilikuwa inaurejesha
+    // papo hapo (per-group self-recovery) au kuutuma kwa DM yake (global) —
+    // kitendo cha "kufuta" kikawa hakina maana yoyote kwa owner. Owner
+    // akifuta ujumbe wa MTU MWINGINE (mfano kama admin), au mtu mwingine
+    // akifuta ujumbe wowote, bado unaendelea kunaswa/kurejeshwa kama kawaida.
+    if (deleterIsOwner && originalWasOwnerSent) return;
+
     const isGroup = chatJid.endsWith('@g.us');
     const botSettings = database.getBotSettings();
     // Per-group override (.antidelete here / .antidelete gid <id>) — ikiwa
@@ -626,9 +650,14 @@ const handleAntideleteImpl = async (sock, msg) => {
     const destJid = perGroupEnabled ? chatJid : getAntideleteDestJid(sock);
     if (!destJid) return;
 
-    const deleterJid = deletedKey.fromMe
+    // Mfutaji halisi: kama ni owner (deleterIsOwner) → namba ya bot/owner
+    // mwenyewe (sahihi kwa kesi hii, kwa mfano owner-as-admin akifuta ujumbe
+    // wa mtu mwingine). La sivyo → participant wa HUU ujumbe wa revoke
+    // (msg.key.participant, kwa group) ndiye aliyefuta — si deletedKey
+    // ambayo inaelezea ujumbe wa ASILI tu.
+    const deleterJid = deleterIsOwner
       ? (sock.user?.id?.replace(/:\d+/, '') + '@s.whatsapp.net')
-      : (deletedKey.participant || original.key?.participant || chatJid);
+      : (msg.key?.participant || deletedKey.participant || original.key?.participant || chatJid);
 
     let chatLabel = 'Private';
     if (isGroup) {
