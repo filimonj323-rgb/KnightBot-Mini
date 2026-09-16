@@ -25,6 +25,13 @@
  * bila kuhitaji mabadiliko yoyote kwenye faili hizo.
  */
 const database = require('../../database');
+// resolveGroupId ni ile ile function inayotumiwa na `.gm` (Remote Group
+// Manager) — inakubali namba fupi (1, 2, 3... kama zinavyoonekana kwenye
+// `.gm list`/`.antidelete gid list`) na kuzitafsiri kuwa groupId halisi
+// kwa kutumia sock.groupFetchAllParticipating(). Kwa kuitumia hapa pia,
+// `.antidelete gid` (kutoka inbox) sasa inakubali namba ya group kama
+// inavyofanya group manager, badala ya kuhitaji groupId ndefu kila wakati.
+const { resolveGroupId } = require('../owner/groupmanager');
 
 const normalizeGroupId = (id) => {
   if (!id) return null;
@@ -69,7 +76,7 @@ module.exports = {
           `• .antidelete group on/off\n` +
           `• .antidelete private on/off\n` +
           `• .antidelete here on/off — group hii hii (rejesha ndani ya group)\n` +
-          `• .antidelete gid <groupId> on/off — group nyingine kwa ID`
+          `• .antidelete gid <namba|groupId> on/off — group nyingine, kwa namba (kama \`.gm list\`) au ID kamili`
         );
       }
 
@@ -112,14 +119,43 @@ module.exports = {
       }
 
       if (action === 'gid') {
-        const groupId = normalizeGroupId(args[1]);
+        const rawArg = args[1];
         const sub = (args[2] || '').toLowerCase();
-        if (!groupId || !['on', 'off'].includes(sub)) {
-          return extra.reply('❌ Tumia: `.antidelete gid <groupId> on/off`\nMfano: `.antidelete gid 120363042078595907 on`');
+        if (!rawArg || !['on', 'off'].includes(sub)) {
+          return extra.reply(
+            '❌ Tumia: `.antidelete gid <namba|groupId> on/off`\n' +
+            'Mfano: `.antidelete gid 1 on` (namba kama kwenye `.gm list`)\n' +
+            'au: `.antidelete gid 120363042078595907 on` (groupId kamili)\n\n' +
+            '💡 Pata namba/ID za groups zote kwa: `.gm list`'
+          );
         }
+
+        // Namba fupi (mfano "1", "2") -> groupId halisi, kwa kutumia utaratibu
+        // ule ule wa `.gm` (Remote Group Manager). GroupId kamili (ina @g.us)
+        // au namba ndefu inapita bila kubadilika.
+        let groupId;
+        try {
+          groupId = await resolveGroupId(sock, rawArg);
+        } catch (e) {
+          return extra.reply(`❌ ${e.message}`);
+        }
+        groupId = normalizeGroupId(groupId);
+        if (!groupId) {
+          return extra.reply('❌ Group namba/ID sio sahihi.');
+        }
+
         database.updateGroupSettings(groupId, { antidelete: sub === 'on' });
+
+        let groupLabel = groupId;
+        try {
+          const meta = await sock.groupMetadata(groupId);
+          if (meta?.subject) groupLabel = `${meta.subject} (\`${groupId}\`)`;
+        } catch (e) {
+          // Bot huenda haipo kwenye group hiyo — endelea na groupId tu.
+        }
+
         return extra.reply(
-          `🛡️ *Anti-Delete kwa group* \`${groupId}\`: ${sub === 'on' ? 'ON ✅' : 'OFF ❌'}\n\n` +
+          `🛡️ *Anti-Delete kwa group* ${groupLabel}: ${sub === 'on' ? 'ON ✅' : 'OFF ❌'}\n\n` +
           (sub === 'on' ? 'Ujumbe utakaofutwa huko utarejeshwa hapo hapo kwenye group hilo.' : '')
         );
       }
