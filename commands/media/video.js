@@ -72,24 +72,77 @@ module.exports = {
         }, { quoted: msg });
       }
 
-      // Get video: try EliteProTech first, then Yupra, then Okatsu fallback
-      let videoData;
+      // Njia ya moja kwa moja (bila API ya tatu) kwa kutumia wasitech/
+      // @distube/ytdl-core — maktaba ile ile inayotumika kwenye .song.
+      // Kikomo cha MB kinazuia buffer kubwa mno kujaza RAM ya container
+      // (tofauti na njia za API ambazo Baileys inasoma URL moja kwa moja
+      // bila kuhifadhi faili nzima kwenye kumbukumbu).
+      async function downloadDirectYtdl(url) {
+        let ytdl;
+        try { ytdl = require('wasitech'); } catch (e) {
+          try { ytdl = require('@distube/ytdl-core'); } catch (e2) { ytdl = null; }
+        }
+        if (!ytdl) throw new Error('ytdl haijasakinishwa');
+
+        const MAX_BYTES = 45 * 1024 * 1024; // 45MB — kikomo salama cha RAM
+        return new Promise((resolve, reject) => {
+          const stream = ytdl(url, {
+            quality: 'highest',
+            filter: (format) => format.hasVideo && format.hasAudio,
+            requestOptions: {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept-Language': 'en-US,en;q=0.9',
+              }
+            }
+          });
+          const chunks = [];
+          let total = 0;
+          stream.on('data', (chunk) => {
+            total += chunk.length;
+            if (total > MAX_BYTES) {
+              stream.destroy();
+              reject(new Error('Video ni kubwa mno kwa njia ya moja kwa moja'));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          stream.on('end', () => {
+            const buf = Buffer.concat(chunks);
+            if (buf.length > 10000) resolve(buf);
+            else reject(new Error('Buffer ndogo mno'));
+          });
+          stream.on('error', reject);
+          setTimeout(() => reject(new Error('ytdl timeout')), 60000);
+        });
+      }
+
+      // Jaribu njia ya moja kwa moja KWANZA (bila API ya tatu, hivyo
+      // haiwezi kukwama kwa "402 Payment Required" kutoka Okatsu/Yupra/
+      // EliteProTech). Ikishindwa (YouTube wakati mwingine ina-block server
+      // IPs), inarudi kwenye mfuatano wa awali wa APIs bila kubadilika.
+      let videoBuffer = null;
+      let videoData = null;
       try {
-        videoData = await APIs.getEliteProTechVideoByUrl(videoUrl);
-      } catch (e1) {
+        videoBuffer = await downloadDirectYtdl(videoUrl);
+      } catch (eDirect) {
         try {
-          videoData = await APIs.getYupraVideoByUrl(videoUrl);
-        } catch (e2) {
-          videoData = await APIs.getOkatsuVideoByUrl(videoUrl);
+          videoData = await APIs.getEliteProTechVideoByUrl(videoUrl);
+        } catch (e1) {
+          try {
+            videoData = await APIs.getYupraVideoByUrl(videoUrl);
+          } catch (e2) {
+            videoData = await APIs.getOkatsuVideoByUrl(videoUrl);
+          }
         }
       }
 
       // Send video directly using the download URL
       await sock.sendMessage(chatId, {
-        video: { url: videoData.download },
+        video: videoBuffer || { url: videoData.download },
         mimetype: 'video/mp4',
-        fileName: `${(videoData.title || videoTitle || 'video').replace(/[^\w\s-]/g, '')}.mp4`,
-        caption: `*${videoData.title || videoTitle || 'Video'}*\n\n> *_Downloaded by ${instanceConfig.botName}_*`
+        fileName: `${((videoData && videoData.title) || videoTitle || 'video').replace(/[^\w\s-]/g, '')}.mp4`,
+        caption: `*${(videoData && videoData.title) || videoTitle || 'Video'}*\n\n> *_Downloaded by ${instanceConfig.botName}_*`
       }, { quoted: msg });
 
     } catch (error) {
