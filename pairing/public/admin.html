@@ -207,6 +207,13 @@
   tbody tr { cursor: pointer; transition: background .1s; }
   tbody tr:hover { background: rgba(57,255,136,0.04); }
   .phone { font-weight: 600; }
+  .uname { font-weight: 700; font-size: 13.5px; }
+  .uname.noname { color: var(--muted); font-weight: 400; font-style: italic; }
+  .uphone { color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+  .dname-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+  #dName { font-size: 15px; font-weight: 700; }
+  #dName.noname { color: var(--muted); font-weight: 400; font-style: italic; }
+  .dname-row button { padding: 3px 8px; font-size: 11px; width: auto; }
   .liveline { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; margin-top: 2px; }
   .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
   .status-dot.connected { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 1.8s infinite; }
@@ -328,7 +335,7 @@
     <div class="stats" id="statsRow"></div>
 
     <div class="toolbar">
-      <input type="text" id="searchInput" placeholder="Tafuta namba ya simu..." />
+      <input type="text" id="searchInput" placeholder="Tafuta jina au namba ya simu..." />
       <div class="chips" id="filterChips">
         <div class="chip active" data-filter="all">Zote</div>
         <div class="chip" data-filter="connected">Live</div>
@@ -358,6 +365,10 @@
 <div id="detail">
   <div class="dhead">
     <div>
+      <div class="dname-row">
+        <span id="dName">—</span>
+        <button class="ghost" onclick="dEditName()">✏️ Hariri jina</button>
+      </div>
       <h2 id="dPhone">—</h2>
       <div class="liveline"><span class="status-dot" id="dStatusDot"></span><span id="dStatusText">—</span></div>
     </div>
@@ -589,10 +600,15 @@
     `;
   }
 
+  // Jina linaloonyeshwa: lile alilobadilisha admin, vinginevyo la WhatsApp.
+  function userName(u) {
+    return ((u && (u.displayName || u.waName)) || '').trim();
+  }
+
   function renderRows() {
     const q = document.getElementById('searchInput').value.trim();
     let list = ALL_USERS;
-    if (q) list = list.filter(u => u.phoneNumber.includes(q));
+    if (q) list = list.filter(u => u.phoneNumber.includes(q) || userName(u).toLowerCase().includes(q.toLowerCase()));
     if (CURRENT_FILTER === 'connected') list = list.filter(u => u.liveStatus === 'connected');
     else if (CURRENT_FILTER !== 'all') list = list.filter(u => userState(u) === CURRENT_FILTER);
 
@@ -604,7 +620,8 @@
     document.getElementById('userRows').innerHTML = list.map(u => `
       <tr onclick="openDetail('${u.phoneNumber}')">
         <td>
-          <div class="phone">${u.phoneNumber}</div>
+          ${userName(u) ? `<div class="uname">${escapeHtml(userName(u))}</div>` : `<div class="uname noname">Jina halijapatikana</div>`}
+          <div class="uphone">${u.phoneNumber}</div>
           <div class="liveline"><span class="status-dot ${u.liveStatus}"></span>${u.liveStatus}</div>
         </td>
         <td>${statusBadge(u)}</td>
@@ -718,6 +735,7 @@
   async function openDetail(phone) {
     CURRENT_PHONE = phone;
     document.getElementById('dPhone').textContent = phone;
+    updateDetailName();
     document.getElementById('overlay').style.display = 'block';
     document.getElementById('detail').style.display = 'block';
     document.querySelectorAll('.dtab')[0].click();
@@ -741,6 +759,33 @@
     document.querySelectorAll('#dSendModeTabs .mtab')[0].click();
     await refreshDetail();
     refreshBillingPane();
+  }
+
+  function updateDetailName() {
+    const el = document.getElementById('dName');
+    const name = userName(ALL_USERS.find(x => x.phoneNumber === CURRENT_PHONE));
+    el.textContent = name || 'Jina halijapatikana';
+    el.className = name ? '' : 'noname';
+  }
+
+  async function dEditName() {
+    const u = ALL_USERS.find(x => x.phoneNumber === CURRENT_PHONE);
+    if (!u) return;
+    const input = prompt('Jina la mtumiaji (acha wazi kurudisha jina la WhatsApp):', userName(u));
+    if (input === null) return;
+    try {
+      const data = await api(`/api/admin/users/${encodeURIComponent(CURRENT_PHONE)}/name`, {
+        method: 'POST',
+        body: JSON.stringify({ name: input }),
+      });
+      u.displayName = data.user.displayName;
+      u.waName = data.user.waName;
+      updateDetailName();
+      renderRows();
+      showToast('dOverviewMsg', true, 'Jina limehifadhiwa.');
+    } catch (e) {
+      showToast('dOverviewMsg', false, e.message);
+    }
   }
 
   function closeDetail() {
