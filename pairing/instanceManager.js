@@ -449,6 +449,158 @@ function getInstanceStatus(phoneNumber) {
 }
 
 /**
+ * ── ULINZI WA MUDA ULIOISHA (trial / malipo / blocked) ───────────────────
+ * Access ya mteja inakaguliwa KWANZA KABISA kwa kila tukio linaloingia
+ * (angalia messages.upsert ndani ya connectInstance). Akaunti ikiwa
+ * haina access:
+ *   • Auto View/React Status, Auto Recording, chatbot, antilink, autoforward,
+ *     view-once, anti-delete n.k — VYOTE vinasimama (havifikiwi kabisa).
+ *   • Command yoyote isipokuwa .menu (na aliases zake) HAIFANYI KAZI —
+ *     mmiliki akijaribu, anaambiwa muda umeisha na alipie.
+ *   • .menu pekee ndiyo inaruhusiwa (si kwa akaunti iliyozuiwa na admin).
+ */
+const EXPIRED_NOTICE_COOLDOWN_MS = 20 * 1000;      // notisi moja kila sekunde 20 kwa kila chat
+const EXPIRED_PAYLINK_COOLDOWN_MS = 10 * 60 * 1000; // link ya malipo (inbox binafsi) mara moja kila dakika 10
+const expiredNoticeAt = new Map();
+const expiredPayLinkAt = new Map();
+
+function unwrapMessageContent(message) {
+  // Sawa na getMessageContent() ya handler.js
+  let m = message;
+  if (m?.ephemeralMessage) m = m.ephemeralMessage.message;
+  if (m?.viewOnceMessageV2) m = m.viewOnceMessageV2.message;
+  if (m?.viewOnceMessage) m = m.viewOnceMessage.message;
+  if (m?.documentWithCaptionMessage) m = m.documentWithCaptionMessage.message;
+  return m || null;
+}
+
+function getMenuCommandNames() {
+  try {
+    const menuCmd = require('../commands/general/menu');
+    return new Set([menuCmd.name, ...(menuCmd.aliases || [])].map((n) => String(n).toLowerCase()));
+  } catch (e) {
+    return new Set(['menu']);
+  }
+}
+
+let knownCommandNames = null;
+function isKnownCommand(name) {
+  try {
+    if (!knownCommandNames) {
+      const { loadCommands } = require('../utils/commandLoader');
+      knownCommandNames = new Set(Array.from(loadCommands().keys()).map((k) => String(k).toLowerCase()));
+    }
+    return knownCommandNames.has(name);
+  } catch (e) {
+    return true; // ikishindikana kusoma orodha, chukulia ni command halisi (salama kwa billing)
+  }
+}
+
+function isSelfChat(sock, phoneNumber, chatJid) {
+  if (chatJid === `${phoneNumber}@s.whatsapp.net`) return true;
+  const ownLid = sock.user?.lid ? String(sock.user.lid).split(':')[0].split('@')[0] : null;
+  return !!ownLid && chatJid.endsWith('@lid') && chatJid.split('@')[0] === ownLid;
+}
+
+async function sendExpiredNotice(sock, msg, phoneNumber, record, access, prefix) {
+  const chatJid = msg.key.remoteJid;
+  const now = Date.now();
+  const noticeKey = `${phoneNumber}|${chatJid}`;
+  if (now - (expiredNoticeAt.get(noticeKey) || 0) < EXPIRED_NOTICE_COOLDOWN_MS) return;
+  expiredNoticeAt.set(noticeKey, now);
+
+  if (access.reason === 'blocked') {
+    await sock.sendMessage(chatJid, {
+      text: '🚫 *Akaunti Yako Imezuiwa*\n\nHuduma zote za bot zimesimamishwa na msimamizi. Wasiliana naye kwa maelezo zaidi.',
+    }, { quoted: msg });
+    return;
+  }
+
+  const reasonText = access.reason === 'subscription_expired'
+    ? 'Muda wa malipo yako umeisha.'
+    : 'Muda wako wa majaribio (trial) umeisha.';
+  let text =
+    '⏰ *' + reasonText + '*\n\n' +
+    'Huduma zote za bot (commands, Auto View/React Status na nyinginezo) zimesimama. ' +
+    'Command pekee inayofanya kazi ni *' + prefix + 'menu*.\n\n' +
+    'Tafadhali lipia ili uendelee kutumia huduma.';
+
+  const token = record.token || await getOrCreateToken(phoneNumber);
+  const selfJid = `${phoneNumber}@s.whatsapp.net`;
+
+  if (isSelfChat(sock, phoneNumber, chatJid)) {
+    // Link ya malipo ina token binafsi ya dashboard — inaonyeshwa TU kwenye
+    // chat ya mteja mwenyewe, kamwe kwenye group/chat ya mtu mwingine.
+    const { pay } = await getShortLinks(token);
+    text += '\n\n💳 Lipa hapa:\n' + pay;
+    await sock.sendMessage(chatJid, { text }, { quoted: msg });
+    expiredPayLinkAt.set(phoneNumber, now);
+    return;
+  }
+
+  text += '\n\n💳 Link ya kulipia nimekutumia kwenye ujumbe wako binafsi (Message Yourself).';
+  await sock.sendMessage(chatJid, { text }, { quoted: msg });
+
+  if (now - (expiredPayLinkAt.get(phoneNumber) || 0) >= EXPIRED_PAYLINK_COOLDOWN_MS) {
+    expiredPayLinkAt.set(phoneNumber, now);
+    const payText = await buildExpiryMessage('expired', token, { reasonText });
+    await sock.sendMessage(selfJid, { text: payText });
+  }
+}
+
+async function handleExpiredMessage(sock, msg, phoneNumber, record, access) {
+  const chatJid = msg.key.remoteJid;
+  if (!chatJid || chatJid.includes('@broadcast') || chatJid.includes('status.broadcast') || chatJid.includes('@newsletter')) return;
+
+  const content = unwrapMessageContent(msg.message);
+  if (!content) return;
+
+  const sharedConfig = require('../config');
+  const prefix = (sock.instanceSettings && sock.instanceSettings.prefix) || sharedConfig.prefix || '.';
+
+  let commandName;
+  const buttonId = content.buttonsResponseMessage?.selectedButtonId;
+  if (buttonId) {
+    // handler.js inaunga button 'btn_menu' → menu; button nyingine zote zimezuiwa.
+    commandName = buttonId === 'btn_menu' ? 'menu' : '__button__';
+  } else {
+    const body = (
+      content.conversation ||
+      content.extendedTextMessage?.text ||
+      content.imageMessage?.caption ||
+      content.videoMessage?.caption || ''
+    ).trim();
+    if (!body.startsWith(prefix)) return; // mazungumzo ya kawaida — kimya
+    commandName = (body.slice(prefix.length).trim().split(/\s+/)[0] || '').toLowerCase();
+    if (!commandName || !isKnownCommand(commandName)) return;
+  }
+
+  const sender = msg.key.fromMe
+    ? sock.user.id.split(':')[0] + '@s.whatsapp.net'
+    : (msg.key.participant || chatJid);
+
+  // .menu pekee ndiyo inaruhusiwa — na si kwa akaunti iliyozuiwa na admin.
+  if (access.reason !== 'blocked' && getMenuCommandNames().has(commandName)) {
+    if (sharedConfig.selfMode && !(handler && handler.isOwner && handler.isOwner(sender, sock))) return;
+    const menuCmd = require('../commands/general/menu');
+    await menuCmd.execute(sock, msg, [], {
+      from: chatJid,
+      sender,
+      isGroup: chatJid.endsWith('@g.us'),
+      reply: (text) => sock.sendMessage(chatJid, { text }, { quoted: msg }),
+      react: (emoji) => sock.sendMessage(chatJid, { react: { text: emoji, key: msg.key } }),
+    });
+    return;
+  }
+
+  // Command nyingine yoyote: mmiliki (ujumbe kutoka namba yake mwenyewe)
+  // anaambiwa muda umeisha; watu wengine wanapuuzwa kimya (hawaoni notisi
+  // ya malipo ya mteja).
+  if (!msg.key.fromMe) return;
+  await sendExpiredNotice(sock, msg, phoneNumber, record, access, prefix);
+}
+
+/**
  * Opens (or re-opens) the actual WhatsApp socket for a phone number and
  * wires up its event handlers. Called once to start pairing, then called
  * AGAIN automatically whenever the connection drops for a reason other than
@@ -610,17 +762,35 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   // Every message this customer's number receives is routed through the
   // SAME command handler as the main bot — same commands/*, no duplication.
   // BUT first check trial/payment access: once a customer's trial (or paid
-  // subscription) has lapsed and an admin hasn't blocked/unblocked them
-  // otherwise, the bot goes silent for their instance until they pay —
-  // this is the actual enforcement point for the whole trial/billing system.
+  // subscription) has lapsed (or an admin blocked them), NOTHING runs for
+  // their instance — not Auto View/React Status, not Auto Recording, not
+  // commands — except `.menu`, and the owner is told to pay when they try
+  // anything else (see handleExpiredMessage() above). This gate is the
+  // actual enforcement point for the whole trial/billing system, so it
+  // MUST stay the very first thing in this listener.
   sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages?.[0];
     if (!msg?.message) return;
 
+    let access;
+    try {
+      access = await userStore.getAccessStatus(phoneNumber);
+    } catch (e) {
+      // Hatuwezi kuthibitisha access (mfano Turso chini) → usiruhusu kitu.
+      console.error(`[pairing:${phoneNumber}] imeshindwa kuangalia access:`, e.message);
+      return;
+    }
+    if (!access.allowed) {
+      handleExpiredMessage(sock, msg, phoneNumber, record, access).catch((e) => {
+        console.error(`[pairing:${phoneNumber}] handleExpiredMessage error:`, e.message);
+      });
+      return;
+    }
+
     // Auto View/React Status — per-customer toggles from the dashboard
     // (Settings > Otomatiki), ON BY DEFAULT for every customer (see
-    // getInstanceSettings() below). Independent of the trial/billing gate
-    // below, same as autoTyping/autoRecording aren't billing-gated commands.
+    // getInstanceSettings() below). Only reached when access is allowed
+    // (gate above) — an expired/blocked customer gets NO auto view/react.
     // Mirrors handler.js's setupAutoStatusViewer() (the /owner !autostatus
     // command's own logic) — dedup cache, delayed react, and LID-aware
     // delivery JID — because that is the version proven to actually work;
@@ -647,6 +817,11 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
               const delayMs = 30000 + Math.floor(Math.random() * 30000);
               setTimeout(async () => {
                 try {
+                  // Muda unaweza kuisha ndani ya kuchelewa kwa sekunde 30–60 —
+                  // thibitisha tena access kabla ya kutuma react.
+                  const recheck = await userStore.getAccessStatus(phoneNumber);
+                  if (!recheck.allowed) return;
+
                   // Required lazily (not at module top) because this file is
                   // require()'d by server.js at startup, before
                   // ensureBaileysBridge() has set global.__baileys —
@@ -690,9 +865,6 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         }, 3000);
       }).catch(() => {});
     }
-
-    const access = await userStore.getAccessStatus(phoneNumber);
-    if (!access.allowed) return;
 
     userStore.incrementUsage(phoneNumber).catch(() => {}); // fire-and-forget — powers the admin "Matumizi" tab
 
@@ -857,6 +1029,26 @@ async function createOrPairInstance(rawPhoneNumber) {
  * after a redeploy — the customer would need to re-pair; see the storage
  * caveat in pairing/server.js).
  */
+/**
+ * Kizuizi cha huduma za dashboard (orodha ya groups, tuma status/ujumbe kwa
+ * groups, Downloads) — mteja mwenye muda ulioisha (au aliyezuiwa) hawezi
+ * kuzitumia. Billing/Malipo na kusoma settings hazipitii hapa, hivyo bado
+ * anaweza kulipa.
+ */
+async function assertActiveForToken(token) {
+  const phoneNumber = await getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi. Tumia link uliyopewa baada ya kuunganisha.');
+  const access = await userStore.getAccessStatus(phoneNumber);
+  if (!access.allowed) {
+    throw new Error(
+      access.reason === 'blocked'
+        ? '🚫 Akaunti yako imezuiwa na msimamizi. Wasiliana naye kwa maelezo zaidi.'
+        : '⏰ Muda wako umeisha — huduma hii imesimama. Nenda kwenye "Malipo" ulipie ili uendelee kutumia huduma.'
+    );
+  }
+  return phoneNumber;
+}
+
 async function getInstanceByToken(token) {
   const phoneNumber = await getPhoneNumberByToken(token);
   if (!phoneNumber) return null;
@@ -868,6 +1060,7 @@ async function getInstanceByToken(token) {
  * used by the dashboard to populate a "post status to" picker.
  */
 async function listGroups(token) {
+  await assertActiveForToken(token);
   const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
@@ -889,6 +1082,7 @@ async function listGroups(token) {
  * in one go — same shape as sendMessageToGroups() below.
  */
 async function postGroupStatusForToken(token, { groupIds, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
+  await assertActiveForToken(token);
   const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
@@ -952,6 +1146,7 @@ async function postGroupStatusForToken(token, { groupIds, text, caption, imageBa
  * ids so the customer can broadcast to several groups in one go.
  */
 async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64, videoBase64, audioBase64, audioMimetype }) {
+  await assertActiveForToken(token);
   const inst = await getInstanceByToken(token);
   if (!inst) throw new Error('Dashboard link si sahihi au bot haijaunganishwa.');
   if (inst.status !== 'connected') throw new Error('Bot bado haijaunganishwa kikamilifu.');
@@ -1008,9 +1203,7 @@ async function sendMessageToGroups(token, { groupIds, text, caption, imageBase64
  * socket to be connected — this doesn't touch WhatsApp at all).
  */
 async function previewMediaForToken(token, input) {
-  if (!(await getPhoneNumberByToken(token))) {
-    throw new Error('Dashboard link si sahihi. Tumia link uliyopewa baada ya kuunganisha.');
-  }
+  await assertActiveForToken(token);
   return mediaDownloader.previewMedia(input);
 }
 
@@ -1021,9 +1214,7 @@ async function previewMediaForToken(token, input) {
  * straight to the browser.
  */
 async function resolveMediaDownloadForToken(token, youtubeUrl, type) {
-  if (!(await getPhoneNumberByToken(token))) {
-    throw new Error('Dashboard link si sahihi. Tumia link uliyopewa baada ya kuunganisha.');
-  }
+  await assertActiveForToken(token);
   return mediaDownloader.resolveDownload(youtubeUrl, type);
 }
 
