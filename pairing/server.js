@@ -47,6 +47,7 @@ const {
   adminMarkPaid,
   adminExtendTrial,
   adminSetBlocked,
+  adminSetDisplayName,
   getBillingForToken,
   startReminderScheduler,
   adminGetInstanceDetail,
@@ -438,7 +439,7 @@ async function handlePairingRequest(req, res) {
       // Full-access bot control (per-customer) — status, groups, settings,
       // messaging, force session reset. All still behind the same admin
       // Authorization check above.
-      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|group-status|reset-session|adjust-days)$/);
+      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|group-status|reset-session|adjust-days|name|delete)$/);
       if (phoneMatch) {
         const [, phone, action] = phoneMatch;
 
@@ -477,6 +478,13 @@ async function handlePairingRequest(req, res) {
         if (action === 'delete' && req.method === 'POST') {
           const result = await adminDeleteUserCompletely(phone);
           return sendJson(res, 200, { ok: true, ...result });
+        }
+
+        // Badilisha jina la mtumiaji linaloonekana kwenye admin dashboard.
+        if (action === 'name' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const user = await adminSetDisplayName(phone, body.name);
+          return sendJson(res, 200, { ok: true, user });
         }
 
         if (action === 'adjust-days' && req.method === 'POST') {

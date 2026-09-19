@@ -125,6 +125,17 @@ async function initSchema() {
     // Column already exists — expected on every run after the first.
   }
 
+  // Migration: jina la mtumiaji kwenye admin dashboard — waName = jina la
+  // WhatsApp (linakamatwa moja kwa moja na bot), displayName = jina
+  // alilobadilisha admin mwenyewe (likiwepo, ndilo linaonyeshwa).
+  for (const col of ['waName TEXT', 'displayName TEXT']) {
+    try {
+      await client.execute(`ALTER TABLE users ADD COLUMN ${col}`);
+    } catch (e) {
+      // Column already exists — expected on every run after the first.
+    }
+  }
+
   schemaReady = true;
   console.log('[db] Turso schema iko tayari.');
 }

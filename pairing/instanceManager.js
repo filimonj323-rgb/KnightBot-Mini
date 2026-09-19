@@ -448,6 +448,20 @@ function getInstanceStatus(phoneNumber) {
   };
 }
 
+// Jina la WhatsApp la mteja (linaonekana kwenye admin dashboard). Hukumbukwa
+// kwenye kumbukumbu ili tuandike Turso TU jina likibadilika.
+const waNameSeen = new Map(); // phoneNumber -> jina la mwisho lililohifadhiwa
+function captureWaName(phoneNumber, rawName, { onlyIfMissing = false } = {}) {
+  const name = String(rawName || '').trim();
+  if (!name) return;
+  if (onlyIfMissing ? waNameSeen.has(phoneNumber) : waNameSeen.get(phoneNumber) === name) return;
+  waNameSeen.set(phoneNumber, name);
+  userStore.setWaName(phoneNumber, name, { onlyIfMissing }).catch((e) => {
+    waNameSeen.delete(phoneNumber);
+    console.error(`[pairing:${phoneNumber}] imeshindwa kuhifadhi jina la WhatsApp:`, e.message);
+  });
+}
+
 /**
  * ── ULINZI WA MUDA ULIOISHA (trial / malipo / blocked) ───────────────────
  * Access ya mteja inakaguliwa KWANZA KABISA kwa kila tukio linaloingia
@@ -622,6 +636,7 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   await migrateDiskSessionIfPresent(sessionId, sessionFolder);
 
   const { state, saveCreds } = await useTursoAuthState(sessionId);
+  captureWaName(phoneNumber, state.creds?.me?.name); // jina la WhatsApp (kama tayari lipo kwenye session)
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -656,6 +671,9 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   sock.pairingOwnerId = phoneNumber;
 
   sock.ev.on('creds.update', saveCreds);
+  // WhatsApp inatuma jina la mtumiaji (pushName) baada ya kuunganisha — lihifadhi
+  // ili lionekane kwenye admin dashboard.
+  sock.ev.on('creds.update', (u) => captureWaName(phoneNumber, u?.me?.name));
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect } = update;
@@ -665,6 +683,7 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       record.pairingCode = null;
       record.reconnectAttempts = 0;
       record.token = await getOrCreateToken(phoneNumber);
+      captureWaName(phoneNumber, sock.user?.name);
       if (await shouldSendWelcome(record.token)) {
         sendDashboardLinkMessage(sock, phoneNumber, record.token);
       }
@@ -692,6 +711,9 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     }
 
     if (connection === 'close') {
+      // Mteja amefutwa na admin (adminDeleteUserCompletely) — usiunganishe
+      // tena wala usijenge session mpya ya mtu aliyefutwa.
+      if (record.stopped) return;
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
       // statusCode 440 = another socket connected with the SAME creds at the
@@ -771,6 +793,10 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages?.[0];
     if (!msg?.message) return;
+
+    // Chanzo cha akiba cha jina: pushName ya ujumbe wake mwenyewe (tumia tu
+    // kama bado hatuna jina kutoka vyanzo vya uhakika hapo juu).
+    if (msg.key.fromMe && msg.pushName) captureWaName(phoneNumber, msg.pushName, { onlyIfMissing: true });
 
     let access;
     try {
@@ -1541,6 +1567,11 @@ async function adminExtendTrial(phoneNumber, days) {
   return userStore.extendTrial(normalizePhoneNumber(phoneNumber), days);
 }
 
+/** Admin anabadilisha jina la mtumiaji (tupu = rudi kwenye jina la WhatsApp). */
+async function adminSetDisplayName(phoneNumber, name) {
+  return userStore.setDisplayName(normalizePhoneNumber(phoneNumber), name);
+}
+
 async function adminSetBlocked(phoneNumber, blocked) {
   return userStore.setBlocked(normalizePhoneNumber(phoneNumber), blocked);
 }
@@ -1838,10 +1869,19 @@ async function adminDeleteUserCompletely(rawPhoneNumber) {
   const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
 
   const inst = instances.get(phoneNumber);
+  if (inst) inst.stopped = true; // zuia auto-reconnect kwenye 'close' handler
   if (inst?.sock) {
     try { inst.sock.end(undefined); } catch (e) { /* already closed — fine */ }
   }
   instances.delete(phoneNumber);
+
+  // Futa kumbukumbu za muda mfupi za namba hii, ili ikipairiwa tena upya
+  // ianze safi (jina la WhatsApp litahifadhiwa tena, notisi hazizuiliwi n.k.).
+  waNameSeen.delete(phoneNumber);
+  expiredPayLinkAt.delete(phoneNumber);
+  for (const key of Array.from(expiredNoticeAt.keys())) {
+    if (key.startsWith(phoneNumber + '|')) expiredNoticeAt.delete(key);
+  }
 
   const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
   fs.rmSync(sessionFolder, { recursive: true, force: true });
@@ -2118,6 +2158,7 @@ module.exports = {
   adminPostGroupStatus,
   adminResetUserSession,
   adminDeleteUserCompletely,
+  adminSetDisplayName,
   adminGetGroupInviteLink,
   adminLookupNumberAcrossAllInstances,
   restoreAllInstances,

@@ -24,6 +24,8 @@ function rowToUser(row) {
     expiryNotifiedAt: row.expiryNotifiedAt,
     lastReminderAt: row.lastReminderAt,
     trialWarningSentAt: row.trialWarningSentAt,
+    waName: row.waName || null,       // jina la WhatsApp (auto)
+    displayName: row.displayName || null, // jina alilobadilisha admin
   };
 }
 
@@ -209,6 +211,39 @@ async function markExpiryWarningSent(phoneNumber) {
   await saveUser(u);
 }
 
+/** Safisha jina: ondoa control chars, nafasi nyingi, kata urefu. */
+function cleanName(raw, maxLen) {
+  return String(raw == null ? '' : raw)
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLen);
+}
+
+/**
+ * Jina la WhatsApp la mtumiaji (linakamatwa na bot). Haliguswi kama ni
+ * lilelile. onlyIfMissing = tumia tu kama hakuna jina bado (kwa vyanzo
+ * visivyo na uhakika sana kama pushName ya ujumbe).
+ */
+async function setWaName(phoneNumber, name, { onlyIfMissing = false } = {}) {
+  const clean = cleanName(name, 100);
+  if (!clean) return;
+  await db.query(
+    onlyIfMissing
+      ? "UPDATE users SET waName = ? WHERE phoneNumber = ? AND (waName IS NULL OR waName = '')"
+      : 'UPDATE users SET waName = ? WHERE phoneNumber = ? AND (waName IS NULL OR waName != ?)',
+    onlyIfMissing ? [clean, phoneNumber] : [clean, phoneNumber, clean]
+  );
+}
+
+/** Jina la admin (override). Tupu = futa, arudi kuonyesha jina la WhatsApp. */
+async function setDisplayName(phoneNumber, name) {
+  await ensureUser(phoneNumber);
+  const clean = cleanName(name, 60);
+  await db.query('UPDATE users SET displayName = ? WHERE phoneNumber = ?', [clean || null, phoneNumber]);
+  return getUser(phoneNumber);
+}
+
 /**
  * Usage tracking — one row per (phoneNumber, date), incremented once per
  * inbound message the bot actually handled that day. Powers the "Matumizi"
@@ -258,6 +293,8 @@ module.exports = {
   isExpiryWarningDue,
   markExpiryWarningSent,
   getPaymentHistory,
+  setWaName,
+  setDisplayName,
   incrementUsage,
   getUsage,
 };
