@@ -31,6 +31,8 @@ const MAX_MULTIPLIER = Number(process.env.DERIV_MAX_MULTIPLIER || 100);
 const DEFAULT_MULTIPLIER = Number(process.env.DERIV_DEFAULT_MULTIPLIER || 20);
 
 const REQUEST_TIMEOUT_MS = 15000;
+const CONNECT_RETRIES = 3;
+const CONNECT_RETRY_DELAY_MS = 2000;
 
 let ws = null;
 let authorized = false;
@@ -43,24 +45,39 @@ function rejectAllPending(err) {
   pending.clear();
 }
 
-function connect() {
-  if (connectPromise) return connectPromise;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  connectPromise = new Promise((resolve, reject) => {
-    if (!API_TOKEN) {
-      connectPromise = null;
-      return reject(new Error('DERIV_API_TOKEN haipo kwenye env'));
-    }
+// Jaribio moja la kuunganisha (bila retry) — imetenganishwa ili connect()
+// iweze kuijaribu tena kama itashindwa (mfano 520 ya Cloudflare, ambayo
+// mara nyingi ni ya muda mfupi/kupita).
+function connectOnce() {
+  return new Promise((resolve, reject) => {
+    // Headers hizi zinasaidia kuepuka ulinzi wa Cloudflare unaoweza
+    // kuzuia maombi yasiyo na "User-Agent"/"Origin" ya kawaida ya browser,
+    // ambao mara nyingine husababisha 520 kwa maombi ya moja kwa moja
+    // kutoka seva (mfano Railway) badala ya browser.
+    ws = new WebSocket(WS_URL, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Origin: 'https://app.deriv.com',
+      },
+      handshakeTimeout: 15000,
+    });
 
-    ws = new WebSocket(WS_URL);
+    let settled = false;
 
     ws.on('open', async () => {
       try {
         const authRes = await sendRaw({ authorize: API_TOKEN });
         authorized = true;
+        settled = true;
         resolve(authRes);
       } catch (err) {
-        connectPromise = null;
+        settled = true;
         reject(err);
       }
     });
@@ -91,12 +108,38 @@ function connect() {
     });
 
     ws.on('error', (err) => {
-      if (!authorized) {
-        connectPromise = null;
+      if (!settled) {
+        settled = true;
         reject(err);
       }
     });
   });
+}
+
+async function connect() {
+  if (connectPromise) return connectPromise;
+
+  if (!API_TOKEN) {
+    return Promise.reject(new Error('DERIV_API_TOKEN haipo kwenye env'));
+  }
+
+  connectPromise = (async () => {
+    let lastErr;
+    for (let attempt = 1; attempt <= CONNECT_RETRIES; attempt++) {
+      try {
+        return await connectOnce();
+      } catch (err) {
+        lastErr = err;
+        console.warn(`derivTrader: jaribio ${attempt}/${CONNECT_RETRIES} la kuunganisha limeshindwa —`, err.message);
+        if (attempt < CONNECT_RETRIES) await sleep(CONNECT_RETRY_DELAY_MS * attempt);
+      }
+    }
+    connectPromise = null;
+    throw new Error(
+      `Imeshindwa kuunganisha na Deriv baada ya majaribio ${CONNECT_RETRIES} (${lastErr?.message || 'sababu haijulikani'}). ` +
+      `Kama tatizo ni "520", mara nyingi ni la muda mfupi upande wa Deriv/Cloudflare — subiri dakika chache kisha jaribu tena.`
+    );
+  })();
 
   return connectPromise;
 }
