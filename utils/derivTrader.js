@@ -22,7 +22,14 @@ const WebSocket = require('ws');
 
 const APP_ID = process.env.DERIV_APP_ID || '1089';
 const API_TOKEN = process.env.DERIV_API_TOKEN || null;
-const WS_URL = `wss://ws.derivws.com/websockets/v3?app_id=${APP_ID}`;
+// ⚠️ Domain mbadala: binaryws.com (jina la zamani la Deriv, kabla ya
+// kubadili jina kutoka Binary.com) — subdomain hizi mbili zinaelekeza
+// kwenye seva zile zile, lakini Cloudflare wakati mwingine inashughulikia
+// trafiki yao tofauti; ukiendelea kupata "520" kwenye ws.derivws.com,
+// binaryws.com mara nyingi hupita bila tatizo. Weka DERIV_WS_HOST kwenye
+// env kubadilisha bila kuhariri code.
+const WS_HOST = process.env.DERIV_WS_HOST || 'ws.binaryws.com';
+const WS_URL = `wss://${WS_HOST}/websockets/v3?app_id=${APP_ID}`;
 
 // Ulinzi wa usalama (safety rails) — hata kwenye demo, tunazoea tabia njema
 // tangu mwanzo ili zibaki pale live ikija baadaye.
