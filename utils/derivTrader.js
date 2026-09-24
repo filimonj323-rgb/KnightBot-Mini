@@ -1,92 +1,98 @@
 /**
  * derivTrader.js — Muunganiko na utekelezaji wa trade kupitia Deriv API
- * (WebSocket, https://api.deriv.com).
+ * MPYA (2026): https://developers.deriv.com — REST (OTP) + WebSocket.
  *
- * DERIV_API_TOKEN (LAZIMA): Deriv → Settings → API Token → tengeneza token
- * yenye ruhusa za "Trade" na "Read".
- * DERIV_APP_ID (hiari): sajili app yako mwenyewe kwenye api.deriv.com kwa
- * matumizi ya kudumu; 1089 ni app_id ya majaribio ya Deriv (default).
+ * ⚠️ BADILIKO KUBWA: Deriv wameacha kabisa mfumo wa zamani (legacy
+ * ws.derivws.com/binaryws.com/red.binaryws.com na app_id namba kama 1089).
+ * App ID za zamani HAZIFANYI KAZI kwenye mfumo mpya ("Invalid App ID" /
+ * "401 Unauthorized"). Hii ndiyo sababu ya 520 zote tulizoziona awali.
  *
- * Aina ya contract inayotumika: "Multipliers" (MULTUP/MULTDOWN) — hii
- * ndiyo bidhaa ya Deriv inayofanana zaidi na forex CFD ya kawaida (leverage
- * kupitia "multiplier"), na INA Stop Loss/Take Profit ASILI kwenye contract
- * yenyewe (si kitu tunachosimamia sisi wenyewe kwa kufuatilia bei kila
- * wakati) — Deriv yenyewe inafunga contract moja kwa moja ikifika SL/TP.
+ * MAHITAJI MAPYA (env vars):
+ *   DERIV_APP_ID     — App ID mpya kutoka developers.deriv.com (mfano
+ *                       "app12345" — tumia kama ilivyo, na herufi "app")
+ *   DERIV_API_TOKEN  — Personal Access Token (PAT) yenye scopes "trade" na
+ *                       "account_manage", kutoka developers.deriv.com dashboard
+ *   DERIV_ACCOUNT_ID — Account ID/loginid yako ya Deriv (mfano "VRTC1234567"
+ *                       kwa demo) — inaonekana juu-kulia kwenye akaunti yako
+ *
+ * Mtiririko: (1) REST POST /accounts/{id}/otp → inarudisha WebSocket URL
+ * yenye "otp" (tayari imethibitishwa/authenticated, hakuna "authorize"
+ * inayohitajika tena) → (2) unganisha WebSocket kwenye URL hiyo → (3) tuma
+ * amri za trading. Symbol field sasa ni "underlying_symbol" (si "symbol"
+ * kama zamani).
+ *
+ * Aina ya contract: "Multipliers" (MULTUP/MULTDOWN) — ina Stop Loss/Take
+ * Profit ASILI kwenye contract yenyewe (Deriv inafunga kiotomatiki).
  *
  * ⚠️⚠️ FOREX/MULTIPLIERS INA HATARI KUBWA (leverage). Hii SI ushauri wa
- * kifedha. Stop Loss na Take Profit ni LAZIMA kwenye kila trade — code hii
- * inakataa kufungua trade bila hizo.
+ * kifedha. Stop Loss na Take Profit ni LAZIMA kwenye kila trade.
  */
 
+const axios = require('axios');
 const WebSocket = require('ws');
 
-const APP_ID = process.env.DERIV_APP_ID || '1089';
+const APP_ID = process.env.DERIV_APP_ID || null;
 const API_TOKEN = process.env.DERIV_API_TOKEN || null;
-// ⚠️ Domain mbadala: binaryws.com (jina la zamani la Deriv, kabla ya
-// kubadili jina kutoka Binary.com) — subdomain hizi mbili zinaelekeza
-// kwenye seva zile zile, lakini Cloudflare wakati mwingine inashughulikia
-// trafiki yao tofauti; ukiendelea kupata "520" kwenye ws.derivws.com,
-// binaryws.com mara nyingi hupita bila tatizo. Weka DERIV_WS_HOST kwenye
-// env kubadilisha bila kuhariri code.
-const WS_HOST = process.env.DERIV_WS_HOST || 'ws.binaryws.com';
-const WS_URL = `wss://${WS_HOST}/websockets/v3?app_id=${APP_ID}`;
+const ACCOUNT_ID = process.env.DERIV_ACCOUNT_ID || null;
+const API_BASE = 'https://api.derivws.com';
 
-// Ulinzi wa usalama (safety rails) — hata kwenye demo, tunazoea tabia njema
-// tangu mwanzo ili zibaki pale live ikija baadaye.
 const MAX_STAKE_USD = Number(process.env.DERIV_MAX_STAKE_USD || 50);
 const MAX_MULTIPLIER = Number(process.env.DERIV_MAX_MULTIPLIER || 100);
 const DEFAULT_MULTIPLIER = Number(process.env.DERIV_DEFAULT_MULTIPLIER || 20);
 
 const REQUEST_TIMEOUT_MS = 15000;
-const CONNECT_RETRIES = 3;
-const CONNECT_RETRY_DELAY_MS = 2000;
+const REST_TIMEOUT_MS = 15000;
 
 let ws = null;
-let authorized = false;
+let wsReady = false;
 let connectPromise = null;
 let reqCounter = 1;
 const pending = new Map(); // req_id -> { resolve, reject }
+
+function checkEnv() {
+  const missing = [];
+  if (!APP_ID) missing.push('DERIV_APP_ID');
+  if (!API_TOKEN) missing.push('DERIV_API_TOKEN');
+  if (!ACCOUNT_ID) missing.push('DERIV_ACCOUNT_ID');
+  if (missing.length) {
+    throw new Error(`Env zifuatazo hazipo: ${missing.join(', ')}`);
+  }
+}
 
 function rejectAllPending(err) {
   for (const [, p] of pending) p.reject(err);
   pending.clear();
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Hatua ya 1 (REST): pata WebSocket URL yenye OTP tayari imethibitishwa.
+async function fetchOtpWsUrl() {
+  const { data } = await axios.post(
+    `${API_BASE}/trading/v1/options/accounts/${ACCOUNT_ID}/otp`,
+    {},
+    {
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+        'Deriv-App-ID': APP_ID,
+      },
+      timeout: REST_TIMEOUT_MS,
+    }
+  );
+  const url = data?.data?.url;
+  if (!url) throw new Error('Deriv haikurudisha WebSocket URL (otp)');
+  return url;
 }
 
-// Jaribio moja la kuunganisha (bila retry) — imetenganishwa ili connect()
-// iweze kuijaribu tena kama itashindwa (mfano 520 ya Cloudflare, ambayo
-// mara nyingi ni ya muda mfupi/kupita).
-function connectOnce() {
+// Hatua ya 2: unganisha kwenye URL hiyo (tayari imethibitishwa — hakuna
+// "authorize" inayohitajika).
+function connectWs(wsUrl) {
   return new Promise((resolve, reject) => {
-    // Headers hizi zinasaidia kuepuka ulinzi wa Cloudflare unaoweza
-    // kuzuia maombi yasiyo na "User-Agent"/"Origin" ya kawaida ya browser,
-    // ambao mara nyingine husababisha 520 kwa maombi ya moja kwa moja
-    // kutoka seva (mfano Railway) badala ya browser.
-    ws = new WebSocket(WS_URL, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-          '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Origin: 'https://app.deriv.com',
-      },
-      handshakeTimeout: 15000,
-    });
-
     let settled = false;
+    ws = new WebSocket(wsUrl);
 
-    ws.on('open', async () => {
-      try {
-        const authRes = await sendRaw({ authorize: API_TOKEN });
-        authorized = true;
-        settled = true;
-        resolve(authRes);
-      } catch (err) {
-        settled = true;
-        reject(err);
-      }
+    ws.on('open', () => {
+      wsReady = true;
+      settled = true;
+      resolve();
     });
 
     ws.on('message', (raw) => {
@@ -109,7 +115,7 @@ function connectOnce() {
     });
 
     ws.on('close', () => {
-      authorized = false;
+      wsReady = false;
       connectPromise = null;
       rejectAllPending(new Error('Muunganiko wa Deriv umekatika'));
     });
@@ -125,30 +131,23 @@ function connectOnce() {
 
 async function connect() {
   if (connectPromise) return connectPromise;
-
-  if (!API_TOKEN) {
-    return Promise.reject(new Error('DERIV_API_TOKEN haipo kwenye env'));
-  }
+  checkEnv();
 
   connectPromise = (async () => {
-    let lastErr;
-    for (let attempt = 1; attempt <= CONNECT_RETRIES; attempt++) {
-      try {
-        return await connectOnce();
-      } catch (err) {
-        lastErr = err;
-        console.warn(`derivTrader: jaribio ${attempt}/${CONNECT_RETRIES} la kuunganisha limeshindwa —`, err.message);
-        if (attempt < CONNECT_RETRIES) await sleep(CONNECT_RETRY_DELAY_MS * attempt);
-      }
+    try {
+      const wsUrl = await fetchOtpWsUrl();
+      await connectWs(wsUrl);
+    } catch (err) {
+      connectPromise = null;
+      throw err;
     }
-    connectPromise = null;
-    throw new Error(
-      `Imeshindwa kuunganisha na Deriv baada ya majaribio ${CONNECT_RETRIES} (${lastErr?.message || 'sababu haijulikani'}). ` +
-      `Kama tatizo ni "520", mara nyingi ni la muda mfupi upande wa Deriv/Cloudflare — subiri dakika chache kisha jaribu tena.`
-    );
   })();
 
   return connectPromise;
+}
+
+async function ensureConnected() {
+  if (!wsReady) await connect();
 }
 
 function sendRaw(payload) {
@@ -174,10 +173,6 @@ function sendRaw(payload) {
   });
 }
 
-async function ensureConnected() {
-  if (!authorized) await connect();
-}
-
 async function send(payload) {
   await ensureConnected();
   return sendRaw(payload);
@@ -189,7 +184,8 @@ function toDerivSymbol(pair) {
 }
 
 // ─────────────────────────────────────────────
-// Utekelezaji wa trade
+// Utekelezaji wa trade — proposal kwanza, kisha buy (mfumo mpya hauruhusu
+// tena "buy:1, parameters:{...}" moja kwa moja bila proposal).
 // ─────────────────────────────────────────────
 async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, multiplier }) {
   const amt = Math.min(Number(stake), MAX_STAKE_USD);
@@ -203,26 +199,33 @@ async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, m
 
   const mult = Math.min(Number(multiplier) || DEFAULT_MULTIPLIER, MAX_MULTIPLIER);
   const contractType = direction === 'BUY' ? 'MULTUP' : 'MULTDOWN';
-  const symbol = toDerivSymbol(pair);
+  const underlyingSymbol = toDerivSymbol(pair);
 
-  const res = await send({
-    buy: 1,
-    price: amt,
-    parameters: {
-      amount: amt,
-      basis: 'stake',
-      contract_type: contractType,
-      currency: 'USD',
-      symbol,
-      multiplier: mult,
-      limit_order: {
-        stop_loss: sl,
-        take_profit: tp,
-      },
+  // Hatua A: proposal (bei ya sasa ya kufungua contract hii)
+  const proposalRes = await send({
+    proposal: 1,
+    amount: amt,
+    basis: 'stake',
+    contract_type: contractType,
+    currency: 'USD',
+    multiplier: mult,
+    underlying_symbol: underlyingSymbol,
+    limit_order: {
+      stop_loss: sl,
+      take_profit: tp,
     },
   });
 
-  return res.buy; // { contract_id, buy_price, longcode, ... }
+  const proposal = proposalRes.proposal;
+  if (!proposal?.id) throw new Error('Proposal haikupatikana kutoka Deriv');
+
+  // Hatua B: buy kwa kutumia proposal id
+  const buyRes = await send({
+    buy: proposal.id,
+    price: proposal.ask_price ?? amt,
+  });
+
+  return buyRes.buy; // { contract_id, buy_price, longcode, ... }
 }
 
 async function getOpenPositions() {
