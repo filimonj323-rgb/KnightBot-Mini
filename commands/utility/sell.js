@@ -6,13 +6,13 @@
 const { placeMultiplier, MAX_STAKE_USD, MAX_MULTIPLIER } = require('../../utils/derivTrader');
 
 module.exports = {
-  name: 'sell',
-  aliases: [],
+  name: 'fxsell',
+  aliases: ['sellfx'],
   category: 'utility',
   description: 'Fungua trade ya SELL (Deriv Multipliers) — SL/TP ni LAZIMA',
   usage:
-    '.sell <JOZI> <STAKE_USD> <SL_USD> <TP_USD> [MULTIPLIER]\n' +
-    'Mfano: .sell EURUSD 10 5 10 50',
+    '.fxsell <JOZI> <STAKE_USD> <SL_USD> <TP_USD> [MULTIPLIER]\n' +
+    'Mfano: .fxsell EURUSD 10 5 10 50',
 
   async execute(sock, msg, args) {
     const jid = msg.key.remoteJid;
@@ -23,8 +23,8 @@ module.exports = {
         jid,
         {
           text:
-            `❓ Tumia: .sell <JOZI> <STAKE_USD> <SL_USD> <TP_USD> [MULTIPLIER]\n` +
-            `Mfano: .sell EURUSD 10 5 10 50\n\n` +
+            `❓ Tumia: .fxsell <JOZI> <STAKE_USD> <SL_USD> <TP_USD> [MULTIPLIER]\n` +
+            `Mfano: .fxsell EURUSD 10 5 10 50\n\n` +
             `⚠️ Stop Loss na Take Profit ni LAZIMA — haziwezi kuachwa.\n` +
             `Kikomo: stake ≤ $${MAX_STAKE_USD}, multiplier ≤ ${MAX_MULTIPLIER}.`,
         },
