@@ -53,10 +53,39 @@ function checkEnv() {
   const missing = [];
   if (!APP_ID) missing.push('DERIV_APP_ID');
   if (!API_TOKEN) missing.push('DERIV_API_TOKEN');
-  if (!ACCOUNT_ID) missing.push('DERIV_ACCOUNT_ID');
   if (missing.length) {
     throw new Error(`Env zifuatazo hazipo: ${missing.join(', ')}`);
   }
+}
+
+let cachedAccountId = ACCOUNT_ID || null;
+
+// Badala ya kutegemea loginid ya kawaida (VRTC.../CR...) ambayo SI sahihi
+// kwenye mfumo huu mpya ("Options trading account"), tunauliza Deriv
+// yenyewe ni account ID gani ya kutumia — hii ndiyo sababu ya ile "404"
+// tuliyoiona (DERIV_ACCOUNT_ID iliyokisiwa haikutambulika).
+async function resolveAccountId() {
+  if (cachedAccountId) return cachedAccountId;
+
+  const { data } = await axios.get(`${API_BASE}/trading/v1/options/accounts`, {
+    headers: {
+      Authorization: `Bearer ${API_TOKEN}`,
+      'Deriv-App-ID': APP_ID,
+    },
+    timeout: REST_TIMEOUT_MS,
+  });
+
+  const accounts = data?.data || data?.accounts || [];
+  if (!Array.isArray(accounts) || !accounts.length) {
+    throw new Error('Hakuna Options trading account iliyopatikana kwenye Deriv (angalia DERIV_APP_ID/DERIV_API_TOKEN)');
+  }
+
+  const acc = accounts.find((a) => a.is_virtual || a.demo || a.account_type === 'demo') || accounts[0];
+  cachedAccountId = acc.account_id || acc.id;
+  if (!cachedAccountId) {
+    throw new Error('Account ID haikupatikana kwenye response ya Deriv (muundo umebadilika?)');
+  }
+  return cachedAccountId;
 }
 
 function rejectAllPending(err) {
@@ -66,8 +95,9 @@ function rejectAllPending(err) {
 
 // Hatua ya 1 (REST): pata WebSocket URL yenye OTP tayari imethibitishwa.
 async function fetchOtpWsUrl() {
+  const accountId = await resolveAccountId();
   const { data } = await axios.post(
-    `${API_BASE}/trading/v1/options/accounts/${ACCOUNT_ID}/otp`,
+    `${API_BASE}/trading/v1/options/accounts/${accountId}/otp`,
     {},
     {
       headers: {
