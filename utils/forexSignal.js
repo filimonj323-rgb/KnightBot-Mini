@@ -23,6 +23,11 @@
  *     mara nyingi ni "noise" ya muda mfupi (false breakout); kuhitaji 4h
  *     nayo ikubaliane kunapunguza sana signal za uongo. Angalia
  *     FOREX_HTF_INTERVAL kwenye env kubadilisha (mfano '1day').
+ *   - Economic calendar (utils/economicCalendar.js, feed ya bure ya
+ *     ForexFactory): (a) "surprise" vote ikiwa tukio la High/Medium impact
+ *     limeshatokea hivi karibuni kwa mojawapo ya currency za jozi, na
+ *     (b) bendera ya "newsRisk" ikiwa tukio la High impact liko karibu —
+ *     hii HAIONGEZI vote bali inazuia auto-trade (angalia utils/autoTrader.js).
  *
  * Cache: dakika 3 kwa kila jozi+interval — inapunguza matumizi ya credits
  * (tier bure ina mpaka wa 8 maombi/dakika, na ombi 1 la signal linatumia
@@ -33,6 +38,7 @@
  */
 
 const axios = require('axios');
+const { getCalendarContext, computeCalendarVote } = require('./economicCalendar');
 
 const API_KEY = process.env.TWELVE_DATA_API_KEY || null;
 const BASE_URL = 'https://api.twelvedata.com';
@@ -82,7 +88,9 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     return cached.data;
   }
 
-  const [price, rsi, macd, ema9, ema21, atr, htfEma9, htfEma21] = await Promise.all([
+  const [baseCcy, quoteCcy] = pairSymbol.split('/');
+
+  const [price, rsi, macd, ema9, ema21, atr, htfEma9, htfEma21, calendar] = await Promise.all([
     td('price', { symbol: pairSymbol }),
     td('rsi', { symbol: pairSymbol, interval, time_period: 14 }),
     td('macd', { symbol: pairSymbol, interval }),
@@ -92,6 +100,9 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     // Multi-timeframe confirmation — EMA9/EMA21 kwenye HTF_INTERVAL (4h).
     td('ema', { symbol: pairSymbol, interval: HTF_INTERVAL, time_period: 9 }),
     td('ema', { symbol: pairSymbol, interval: HTF_INTERVAL, time_period: 21 }),
+    // Economic calendar (feed tofauti, isiyotumia Twelve Data credits) —
+    // haizuii signal kama itashindwa (getCalendarContext haitupi error).
+    getCalendarContext(baseCcy, quoteCcy),
   ]);
 
   const htf9 = lastVal(htfEma9, 'ema');
@@ -113,6 +124,9 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     htfEma9: htf9,
     htfEma21: htf21,
     htfTrend,
+    baseCcy,
+    quoteCcy,
+    calendar,
     at: Date.now(),
   };
 
@@ -180,6 +194,19 @@ function computeSignal(s) {
     notes.push(`Mwelekeo wa ${s.htfInterval || '4h'}: SELL (uthibitisho wa muda mrefu)`);
   }
 
+  // Economic calendar — "surprise" vote (kutoka matukio ya hivi karibuni
+  // yenye "actual" dhidi ya "forecast") kwa mojawapo ya currency za jozi.
+  // Ni kura ya ZIADA (si "gate") — uzito sawa na vigezo vingine vya
+  // kiufundi hapo juu, ili strength% ibaki muundo uleule wa "votes".
+  let newsRisk = false;
+  if (s.calendar && s.baseCcy && s.quoteCcy) {
+    const calVote = computeCalendarVote(s.calendar, s.baseCcy, s.quoteCcy);
+    bullish += calVote.bullish;
+    bearish += calVote.bearish;
+    notes.push(...calVote.notes);
+    newsRisk = calVote.newsRisk;
+  }
+
   let direction = 'NEUTRAL';
   if (bullish > bearish) direction = 'BUY';
   else if (bearish > bullish) direction = 'SELL';
@@ -187,7 +214,7 @@ function computeSignal(s) {
   const total = bullish + bearish;
   const strength = total > 0 ? Math.round((Math.max(bullish, bearish) / total) * 100) : 0;
 
-  return { direction, strength, bullish, bearish, notes };
+  return { direction, strength, bullish, bearish, notes, newsRisk };
 }
 
 module.exports = { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL };

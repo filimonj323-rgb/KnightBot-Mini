@@ -36,6 +36,9 @@
  *     badala ya mwenendo halisi. TP inapandishwa kwa uwiano uleule.
  *   AUTO_TRADE_PAIR_STAGGER_MS       — muda wa kusubiri kati ya jozi moja
  *     na nyingine ili kuepuka 429 ya Twelve Data (default: sekunde 70)
+ *   NEWS_RISK_WINDOW_MIN             — dakika kabla/baada ya tukio la High
+ *     impact (utils/economicCalendar.js) ambazo auto-trade INASIMAMA
+ *     kufungua trade MPYA (default: 30). Haiathiri trade zilizo wazi tayari.
  *
  * ── Circuit breakers (kuzuia hasara za mfululizo) ──────────────────────
  *   AUTO_TRADE_MAX_DAILY_LOSS_USD    — ukifika hasara hii kwa siku (UTC),
@@ -240,6 +243,16 @@ async function checkPairAndTrade(pairInfo) {
   });
 
   if (sig.direction === 'NEUTRAL' || sig.strength < STRENGTH_THRESHOLD) return;
+
+  // Habari kubwa (High impact) iko karibu (dakika NEWS_RISK_WINDOW_MIN
+  // kabla/baada — angalia utils/economicCalendar.js) — spread/slippage
+  // huongezeka sana wakati huu, si wakati salama wa kufungua trade mpya
+  // hata kama technicals zinaonekana nzuri. Trade zilizo wazi TAYARI
+  // haziguswi (SL/TP zake zinaendelea Deriv) — hii inazuia trade MPYA tu.
+  if (sig.newsRisk) {
+    console.log(`[autoTrader] ${code}: skip — habari kubwa (High impact) iko karibu.`);
+    return;
+  }
 
   // Hesabu SL/TP kulingana na ATR (volatility halisi ya jozi wakati huo).
   const risk = computeAtrBasedRisk({
