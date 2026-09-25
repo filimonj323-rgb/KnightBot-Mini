@@ -455,4 +455,5 @@ module.exports = {
   getBalance,
   MAX_STAKE_USD,
   MAX_MULTIPLIER,
+  toDerivSymbol,
 };

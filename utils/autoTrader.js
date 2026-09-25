@@ -66,7 +66,13 @@ const {
   getContractDetails,
   getClosedContractFromHistory,
   ALLOWED_MULTIPLIERS,
+  toDerivSymbol,
 } = require('./derivTrader');
+// Turso (libSQL) — tayari inatumika na pairing/server.js kwa users/payments;
+// hapa tunatumia kuhifadhi openAutoTrades ili isipotee kila redeploy/restart
+// (angalia restoreOpenTradesFromDb() chini — hii ndiyo fix ya tatizo la
+// "auto-trade inafungua mara mbili kwa jozi ile ile baada ya redeploy").
+const fxTradesDb = require('../pairing/db');
 
 const ENABLED = String(process.env.AUTO_TRADE_ENABLED || 'false').toLowerCase() === 'true';
 const CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 * 60 * 1000); // saa 1
@@ -168,6 +174,84 @@ const openAutoTrades = new Map();
 // code -> { direction, strength, price, atr, notes, checkedAt }
 const lastSignals = new Map();
 
+// ── Uhifadhi wa openAutoTrades kwenye database (Turso) ──────────────────
+// Map ya RAM (openAutoTrades) pekee ilikuwa ikifutwa kila redeploy/restart
+// ya Railway, hivyo baada ya redeploy bot "ilisahau" kwamba tayari ina
+// trade wazi kwa jozi fulani na kufungua NYINGINE kwa jozi ile ile signal
+// ikionekana nzuri tena. Kazi hizi zinasoma/kuandika DB ili historia ya
+// trades ZILIZO WAZI iendelee kuwepo hata bot ikizima kabisa. DB
+// isipopatikana (Turso haijawekwa), kazi hizi zinashindwa kimya kimya
+// (bot inaendelea kufanya kazi na Map ya RAM pekee, kama awali).
+async function dbSaveOpenTrade({ contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt }) {
+  try {
+    await fxTradesDb.initSchema();
+    await fxTradesDb.query(
+      `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(contractId) DO UPDATE SET
+         code=excluded.code, symbol=excluded.symbol, direction=excluded.direction,
+         stake=excluded.stake, buyPrice=excluded.buyPrice, slUsd=excluded.slUsd,
+         tpUsd=excluded.tpUsd, openedAt=excluded.openedAt`,
+      [contractId, code, symbol, direction, stake, buyPrice ?? null, slUsd ?? null, tpUsd ?? null, openedAt]
+    );
+  } catch (err) {
+    console.error('[autoTrader] DB: imeshindwa kuhifadhi trade mpya (inaendelea na RAM pekee):', err.message);
+  }
+}
+
+async function dbMarkTradeClosed(contractId, { closedAt, sellPrice, profit }) {
+  try {
+    await fxTradesDb.initSchema();
+    await fxTradesDb.query(
+      `UPDATE fx_auto_trades SET closedAt = ?, sellPrice = ?, profit = ? WHERE contractId = ?`,
+      [closedAt, Number.isFinite(sellPrice) ? sellPrice : null, Number.isFinite(profit) ? profit : null, contractId]
+    );
+  } catch (err) {
+    console.error('[autoTrader] DB: imeshindwa kusasisha trade iliyofungwa:', err.message);
+  }
+}
+
+/**
+ * Inaitwa MARA MOJA kwenye start() — inasoma DB kwa trades ambazo bado
+ * hazijafungwa (closedAt IS NULL) kutoka mzunguko wa kabla ya redeploy/
+ * restart ya mwisho, na kuzirudisha kwenye openAutoTrades (Map ya RAM),
+ * ili checkPairAndTrade() "ione" kwamba jozi hizo tayari zina trade wazi
+ * na isifungue nyingine. pollClosedTrades() ya kwanza baada ya start()
+ * itagundua kama yoyote kati ya hizi tayari ilifungwa wakati bot ilikuwa
+ * imezimwa, na kusasisha DB + kutuma notification kama kawaida.
+ */
+async function restoreOpenTradesFromDb() {
+  let rows = [];
+  try {
+    await fxTradesDb.initSchema();
+    const result = await fxTradesDb.query(
+      'SELECT contractId, code, symbol, direction, stake, buyPrice, openedAt FROM fx_auto_trades WHERE closedAt IS NULL'
+    );
+    rows = result.rows || [];
+  } catch (err) {
+    console.error('[autoTrader] DB haipatikani — inaanza bila historia ya trades za awali:', err.message);
+    return;
+  }
+
+  for (const r of rows) {
+    openAutoTrades.set(String(r.contractId), {
+      code: r.code,
+      symbol: r.symbol,
+      direction: r.direction,
+      stake: Number(r.stake),
+      buyPrice: Number(r.buyPrice),
+      openedAt: Number(r.openedAt),
+    });
+  }
+
+  if (rows.length) {
+    console.log(
+      `[autoTrader] ✅ Trades ${rows.length} zilizokuwa wazi kabla ya restart/redeploy zimerejeshwa kutoka database: ` +
+        rows.map((r) => r.code).join(', ')
+    );
+  }
+}
+
 // Hali ya circuit breaker
 let dailyPnL = 0;
 let dailyKey = utcDateKey(Date.now());
@@ -225,6 +309,47 @@ async function checkPairAndTrade(pairInfo) {
   // Zuia kufungua trade nyingine kwa jozi ile ile wakati moja tayari iko wazi.
   const alreadyOpen = [...openAutoTrades.values()].some((t) => t.code === code);
   if (alreadyOpen) return;
+
+  // Ukaguzi wa ZIADA moja kwa moja Deriv (si Map/DB yetu pekee) — inazuia
+  // auto-trader kufungua trade NYINGINE kwa jozi ambayo tayari ina trade
+  // wazi iliyofunguliwa KWA MKONO kupitia dashboard (fxtrading.html →
+  // "Fungua Trade Mpya") au chanzo kingine chochote kisichopitia
+  // checkPairAndTrade — trade za namna hiyo HAZIPO kwenye openAutoTrades,
+  // hivyo ukaguzi wa juu (alreadyOpen) haziwezi kuziona. Ikigundulika,
+  // tunai-"adopt" (kuiingiza openAutoTrades + database) ili ifuatiliwe
+  // ipasavyo (arifa itakapofungwa, circuit breaker) badala ya kupuuzwa
+  // kimya kimya — na auto-trader HAIFUNGUI nyingine kwa jozi hii mzunguko huu.
+  let livePosition;
+  try {
+    const derivSymbol = toDerivSymbol(code);
+    const livePositions = await getOpenPositions();
+    livePosition = livePositions.find((p) => p.symbol === derivSymbol);
+  } catch (err) {
+    console.error(
+      `[autoTrader] ${code}: imeshindwa kuangalia positions za Deriv moja kwa moja (inaendelea na ukaguzi wa ndani pekee):`,
+      err.message
+    );
+  }
+
+  if (livePosition) {
+    const direction = /up/i.test(livePosition.contract_type || '') ? 'BUY' : 'SELL';
+    const openedAt = Number(livePosition.purchase_time) ? Number(livePosition.purchase_time) * 1000 : Date.now();
+    const adopted = {
+      code,
+      symbol,
+      direction,
+      stake: Number(livePosition.buy_price) || 0,
+      buyPrice: Number(livePosition.buy_price),
+      openedAt,
+    };
+    openAutoTrades.set(String(livePosition.contract_id), adopted);
+    await dbSaveOpenTrade({ contractId: String(livePosition.contract_id), ...adopted, slUsd: null, tpUsd: null });
+    console.log(
+      `[autoTrader] ${code}: trade wazi tayari ipo kwenye Deriv (imefunguliwa kwa mkono/chanzo kingine) — ` +
+        `imeandikishwa (adopted) 🆔 ${livePosition.contract_id}, auto-trader haitafungua nyingine mzunguko huu.`
+    );
+    return;
+  }
 
   let snapshot, sig;
   try {
@@ -296,13 +421,25 @@ async function checkPairAndTrade(pairInfo) {
       ? `\n_(Imerekebishwa kiotomatiki kutoka SL $${fmt(slUsd)}/TP $${fmt(tpUsd)} — Deriv ilihitaji kiwango cha juu zaidi kwa jozi hii wakati huo.)_\n`
       : '';
 
+    const openedAt = Date.now();
     openAutoTrades.set(result.contract_id, {
       code,
       symbol,
       direction: sig.direction,
       stake: STAKE_USD,
       buyPrice: result.buy_price,
-      openedAt: Date.now(),
+      openedAt,
+    });
+    await dbSaveOpenTrade({
+      contractId: String(result.contract_id),
+      code,
+      symbol,
+      direction: sig.direction,
+      stake: STAKE_USD,
+      buyPrice: result.buy_price,
+      slUsd: slFinal,
+      tpUsd: tpFinal,
+      openedAt,
     });
 
     await notify(
@@ -386,6 +523,12 @@ async function pollClosedTrades() {
       profit = sellPrice - info.buyPrice;
     }
 
+    // Sasisha DB SASA (kabla ya matawi ya notify hapa chini) — hii ndiyo
+    // "history hadi trade itakapo close": row inabaki (si kufutwa) lakini
+    // closedAt inajazwa, hivyo restoreOpenTradesFromDb() haitaigusa tena
+    // kwenye restart ijayo (query yake ni closedAt IS NULL pekee).
+    await dbMarkTradeClosed(contractId, { closedAt: Date.now(), sellPrice, profit });
+
     if (Number.isFinite(profit)) {
       const won = profit >= 0;
 
@@ -434,6 +577,7 @@ async function pollClosedTrades() {
 
 let cycleInterval = null;
 let pollInterval = null;
+let starting = false; // guard dhidi ya kuanza mara mbili wakati restore ya DB (async) bado inaendelea
 
 /**
  * Anzisha auto-trading. Itwe MARA MOJA tu, connection ya WhatsApp ikiwa
@@ -444,11 +588,12 @@ function start({ sock, notifyJid }) {
     console.log('[autoTrader] AUTO_TRADE_ENABLED si "true" — auto-trading imezimwa.');
     return;
   }
-  if (cycleInterval) return; // tayari imeanzishwa (mfano baada ya reconnect)
+  if (cycleInterval || starting) return; // tayari imeanzishwa (mfano baada ya reconnect)
 
   waSock = sock;
   ownerJid = notifyJid;
   startedAt = Date.now();
+  starting = true;
 
   console.log(
     `[autoTrader] ✅ Auto-trading IMEWASHWA — jozi: ${PAIRS.map((p) => p.code).join(', ')}, ` +
@@ -459,14 +604,29 @@ function start({ sock, notifyJid }) {
       `(cooldown saa ${Math.round(COOLDOWN_MS / 3600000)}), max ${MAX_CONCURRENT_TRADES} trades wazi kwa wakati mmoja.`
   );
 
-  runCycle().catch((err) => console.error('[autoTrader] runCycle error:', err.message));
-  cycleInterval = setInterval(() => {
-    runCycle().catch((err) => console.error('[autoTrader] runCycle error:', err.message));
-  }, CHECK_INTERVAL_MS);
+  // Kwanza rejesha trades zilizokuwa wazi kabla ya restart/redeploy hii
+  // (kutoka database), kisha angalia MARA MOJA kama yoyote kati yake
+  // tayari ilifungwa wakati bot ilikuwa imezimwa (reuse pollClosedTrades
+  // iliyopo — hakuna logic mpya ya kuhesabu faida/hasara). Cycle ya kwanza
+  // ya kuangalia signal mpya (runCycle) na interval zote HAZIANZI mpaka
+  // hatua hii ikamilike, ili checkPairAndTrade isipate nafasi ya kufungua
+  // trade "mpya" ya jozi ambayo kwa kweli tayari ina trade wazi.
+  (async () => {
+    await restoreOpenTradesFromDb();
+    await pollClosedTrades();
+  })()
+    .catch((err) => console.error('[autoTrader] Imeshindwa kurejesha/kusasisha trades kutoka DB:', err.message))
+    .finally(() => {
+      starting = false;
+      runCycle().catch((err) => console.error('[autoTrader] runCycle error:', err.message));
+      cycleInterval = setInterval(() => {
+        runCycle().catch((err) => console.error('[autoTrader] runCycle error:', err.message));
+      }, CHECK_INTERVAL_MS);
 
-  pollInterval = setInterval(() => {
-    pollClosedTrades().catch((err) => console.error('[autoTrader] pollClosedTrades error:', err.message));
-  }, POLL_CLOSED_MS);
+      pollInterval = setInterval(() => {
+        pollClosedTrades().catch((err) => console.error('[autoTrader] pollClosedTrades error:', err.message));
+      }, POLL_CLOSED_MS);
+    });
 }
 
 function stop() {
