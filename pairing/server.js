@@ -68,6 +68,8 @@ const db = require('./db');
 const derivTrader = require('../utils/derivTrader');
 const autoTrader = require('../utils/autoTrader');
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('../utils/forexSignal');
+const economicCalendar = require('../utils/economicCalendar');
+const fxPredictions = require('../utils/fxPredictions');
 const mainConfig = require('../config');
 
 // Jozi kuu 7 zinazoweza kuangaliwa kwenye dashboard (.fxtrading.html) —
@@ -646,6 +648,24 @@ async function handlePairingRequest(req, res) {
           atr: snapshot.atr,
           checkedAt: Date.now(),
         });
+      }
+
+      // Economic calendar (wiki hii) kwa currencies kuu 8 — inatumika
+      // kwenye fxtrading.html kuonyesha matukio yajayo/yaliyopita kwa
+      // wote (si jozi moja tu). Cache ya dakika 15 iko ndani ya
+      // economicCalendar.js yenyewe (feed haibadiliki mara kwa mara).
+      if (req.method === 'GET' && req.url === '/api/admin/fx/calendar') {
+        const calendar = await economicCalendar.getWeekView();
+        return sendJson(res, 200, { ok: true, ...calendar });
+      }
+
+      // AI predictions (calendar + technical signal kwa Groq) kwa jozi
+      // zote 7 — cached upande wa server (dakika ~20, angalia
+      // utils/fxPredictions.js) ili kuepuka gharama/rate-limit ya Groq.
+      if (req.method === 'GET' && req.url === '/api/admin/fx/predictions') {
+        const status = autoTrader.getStatus();
+        const data = await fxPredictions.getPredictions(status.signals);
+        return sendJson(res, 200, { ok: true, ...data });
       }
     }
 
