@@ -65,6 +65,8 @@ const adminAuth = require('./adminAuth');
 const clickpesa = require('./clickpesa');
 const cfg = require('./pairingConfig');
 const db = require('./db');
+const derivTrader = require('../utils/derivTrader');
+const autoTrader = require('../utils/autoTrader');
 
 // ── Pending payment orders (SQLite — survives redeploys via the Volume) ──
 // ── Pending payment orders (Turso — outside Railway, survives webhook
@@ -504,6 +506,56 @@ async function handlePairingRequest(req, res) {
         const query = new URLSearchParams(queryPart || '');
         const result = await adminGetGroupInviteLink(phone, query.get('groupId') || '');
         return sendJson(res, 200, { ok: true, ...result });
+      }
+
+      // ── FX Auto-Trader (Deriv Multipliers) — dashboard ya trading ──────
+      // Angalia pairing/public/fxtrading.html kwa UI. Zote hapa chini
+      // zinatumia derivTrader.js (Deriv moja kwa moja) na autoTrader.js
+      // (hali ya auto-trading ya saa moja).
+
+      // Muhtasari kamili: balance + positions wazi + hali ya auto-trader.
+      if (req.method === 'GET' && req.url === '/api/admin/fx/overview') {
+        const [positions, balance] = await Promise.all([
+          derivTrader.getOpenPositionsLive(),
+          derivTrader.getBalance(),
+        ]);
+        return sendJson(res, 200, {
+          ok: true,
+          balance,
+          positions,
+          autoTrade: autoTrader.getStatus(),
+        });
+      }
+
+      // Fungua trade mpya kwa mkono kutoka dashboard (sawa na .fxbuy/.fxsell).
+      if (req.method === 'POST' && req.url === '/api/admin/fx/open') {
+        const body = await readJsonBody(req);
+        const pair = String(body.pair || '').toUpperCase().replace(/[^A-Z]/g, '');
+        if (!pair) return sendJson(res, 400, { ok: false, error: 'Jozi (pair) inahitajika.' });
+
+        const result = await derivTrader.placeMultiplier({
+          pair,
+          direction: body.direction === 'SELL' ? 'SELL' : 'BUY',
+          stake: Number(body.stake),
+          stopLoss: Number(body.stopLoss),
+          takeProfit: Number(body.takeProfit),
+          multiplier: body.multiplier ? Number(body.multiplier) : undefined,
+        });
+        return sendJson(res, 200, { ok: true, result });
+      }
+
+      // Funga trade MOJA (kwa contract_id).
+      if (req.method === 'POST' && req.url === '/api/admin/fx/close') {
+        const body = await readJsonBody(req);
+        if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
+        const result = await derivTrader.closeContract(body.contract_id);
+        return sendJson(res, 200, { ok: true, result });
+      }
+
+      // Funga TRADES ZOTE zilizo wazi mara moja ("panic button").
+      if (req.method === 'POST' && req.url === '/api/admin/fx/close-all') {
+        const results = await derivTrader.closeAll();
+        return sendJson(res, 200, { ok: true, results });
       }
     }
 
