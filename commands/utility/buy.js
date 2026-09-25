@@ -3,7 +3,7 @@
  * Stop Loss na Take Profit ni LAZIMA — haziwezi kuachwa.
  */
 
-const { placeMultiplier, MAX_STAKE_USD, MAX_MULTIPLIER } = require('../../utils/derivTrader');
+const { placeMultiplier, MAX_STAKE_USD, MAX_MULTIPLIER, MIN_STAKE_USD, ALLOWED_MULTIPLIERS } = require('../../utils/derivTrader');
 
 module.exports = {
   name: 'fxbuy',
@@ -26,7 +26,8 @@ module.exports = {
             `❓ Tumia: .fxbuy <JOZI> <STAKE_USD> <SL_USD> <TP_USD> [MULTIPLIER]\n` +
             `Mfano: .fxbuy EURUSD 10 5 10 50\n\n` +
             `⚠️ Stop Loss na Take Profit ni LAZIMA — haziwezi kuachwa.\n` +
-            `Kikomo: stake ≤ $${MAX_STAKE_USD}, multiplier ≤ ${MAX_MULTIPLIER}.`,
+            `Kikomo: stake $${MIN_STAKE_USD}–$${MAX_STAKE_USD}.\n` +
+            `Multiplier zinazokubalika: ${ALLOWED_MULTIPLIERS.join(', ')} (kikomo ${MAX_MULTIPLIER}).`,
         },
         { quoted: msg }
       );
