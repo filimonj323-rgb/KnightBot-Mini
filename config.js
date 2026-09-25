@@ -26,6 +26,11 @@ module.exports = {
     selfMode: false,
     autoRead: false,
     autoTyping: false,
+    // Ikiwa true, ujumbe wa amri (mfano ".menu") unafutwa kiotomatiki mara
+    // baada ya bot kuutekeleza, ili wanachama wengine wa group wasione
+    // amri gani ulitumia. Inafuta tu kama bot ni admin (group) au ndiye
+    // aliyetuma ujumbe huo (chat binafsi / self-bot).
+    deleteCommandMessage: true,
     autoReplyStatus: true,
     autoLikeStatus: true,
     autoReactStatus: true,
