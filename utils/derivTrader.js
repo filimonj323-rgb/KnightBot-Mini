@@ -348,7 +348,42 @@ async function getOpenPositionsLive() {
 
 async function closeContract(contractId) {
   const res = await send({ sell: contractId, price: 0 }); // price:0 = kubali bei ya soko
-  return res.sell;
+  return res.sell; // { contract_id, sold_for, transaction_id, ... } — HAINA "profit"!
+}
+
+// closeContract() peke yake HAIRUDISHI profit — jibu la Deriv la "sell" lina
+// tu sold_for (fedha ulizopata), si faida/hasara halisi. Ndiyo maana
+// dashboard ilikuwa ikionyesha "$0.00" kila wakati (result.profit haikuwepo
+// kamwe). Function hii inahesabu faida/hasara HALISI: inapata buy_price
+// KABLA ya kuuza (contract ikiwa bado wazi), kisha profit = sold_for -
+// buy_price; ikishindikana, inaangukia profit_table (historia).
+async function closeContractWithPnL(contractId) {
+  let buyPrice;
+  try {
+    const before = await getContractDetails(contractId);
+    buyPrice = Number(before?.buy_price);
+  } catch (err) {
+    console.error(`[derivTrader] Imeshindwa kupata buy_price kabla ya kuuza ${contractId}:`, err.message);
+  }
+
+  const sellResult = await closeContract(contractId);
+  const soldFor = Number(sellResult?.sold_for);
+
+  let profit = Number.isFinite(soldFor) && Number.isFinite(buyPrice) ? soldFor - buyPrice : NaN;
+
+  if (!Number.isFinite(profit)) {
+    try {
+      const closed = await getClosedContractFromHistory(contractId);
+      if (closed) {
+        const cp = Number(closed.profit);
+        profit = Number.isFinite(cp) ? cp : Number(closed.sell_price) - Number(closed.buy_price);
+      }
+    } catch (err) {
+      console.error(`[derivTrader] profit_table imeshindwa (${contractId}):`, err.message);
+    }
+  }
+
+  return { ...sellResult, buy_price: buyPrice, sold_for: soldFor, profit };
 }
 
 async function closeAll() {
@@ -356,8 +391,8 @@ async function closeAll() {
   const results = [];
   for (const p of positions) {
     try {
-      const r = await closeContract(p.contract_id);
-      results.push({ contract_id: p.contract_id, ok: true, r });
+      const r = await closeContractWithPnL(p.contract_id);
+      results.push({ contract_id: p.contract_id, ok: true, profit: r.profit, r });
     } catch (err) {
       results.push({ contract_id: p.contract_id, ok: false, error: err.message });
     }
@@ -401,6 +436,7 @@ module.exports = {
   getContractDetails,
   getClosedContractFromHistory,
   closeContract,
+  closeContractWithPnL,
   closeAll,
   getBalance,
   MAX_STAKE_USD,
