@@ -23,9 +23,11 @@
  *   AUTO_TRADE_POLL_MS              — muda kati ya ukaguzi wa trade zilizofungwa (default: dakika 5)
  *   AUTO_TRADE_STRENGTH_THRESHOLD   — asilimia ya chini ya signal (default: 67)
  *   AUTO_TRADE_STAKE_USD            — stake ya kila auto-trade (default: 5)
- *   AUTO_TRADE_SL_USD               — Stop Loss ya kila auto-trade (default: 3)
- *   AUTO_TRADE_TP_USD               — Take Profit ya kila auto-trade (default: 6)
  *   AUTO_TRADE_MULTIPLIER           — moja ya 100/200/300/500/800 (default: 100)
+ *   AUTO_TRADE_SL_ATR_MULT          — SL = mara ngapi za ATR(14) (default: 1)
+ *   AUTO_TRADE_TP_ATR_MULT          — TP = mara ngapi za ATR(14) (default: 2 — risk:reward 1:2)
+ *   AUTO_TRADE_SL_USD / AUTO_TRADE_TP_USD — dola fasta, hutumika TU kama
+ *     ATR haipatikani kwa jozi husika (fallback)
  */
 
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('./forexSignal');
@@ -42,10 +44,36 @@ const POLL_CLOSED_MS = Number(process.env.AUTO_TRADE_POLL_MS || 5 * 60 * 1000); 
 const STRENGTH_THRESHOLD = Number(process.env.AUTO_TRADE_STRENGTH_THRESHOLD || 67);
 
 const STAKE_USD = Number(process.env.AUTO_TRADE_STAKE_USD || 5);
-const SL_USD = Number(process.env.AUTO_TRADE_SL_USD || 3);
-const TP_USD = Number(process.env.AUTO_TRADE_TP_USD || 6);
 const rawMultiplier = Number(process.env.AUTO_TRADE_MULTIPLIER || 100);
 const MULTIPLIER = ALLOWED_MULTIPLIERS.includes(rawMultiplier) ? rawMultiplier : 100;
+
+// SL/TP kwa kutumia ATR (Average True Range) — hukua/hupungua kulingana na
+// volatility halisi ya jozi wakati huo, badala ya dola fasta isiyobadilika.
+const SL_ATR_MULT = Number(process.env.AUTO_TRADE_SL_ATR_MULT || 1);
+const TP_ATR_MULT = Number(process.env.AUTO_TRADE_TP_ATR_MULT || 2); // risk:reward 1:2
+
+// Dola fasta — hutumika TU kama ATR haipatikani (fallback ya usalama).
+const FALLBACK_SL_USD = Number(process.env.AUTO_TRADE_SL_USD || 3);
+const FALLBACK_TP_USD = Number(process.env.AUTO_TRADE_TP_USD || 6);
+
+/**
+ * Badilisha ATR (katika bei, mfano 0.00120 kwa EURUSD) kuwa SL/TP kwa dola
+ * — kulingana na fomula rasmi ya Deriv Multipliers:
+ *   Profit/Loss ($) = Stake × Multiplier × (mabadiliko ya bei ÷ bei ya kuingia)
+ * Kwa hiyo: SL/TP ($) = Stake × Multiplier × (ATR × mult) ÷ bei ya sasa
+ */
+function computeAtrBasedRisk({ atr, price, stake, multiplier }) {
+  if (!(atr > 0) || !(price > 0)) return null;
+  const pctPerAtr = atr / price;
+  const sl = stake * multiplier * pctPerAtr * SL_ATR_MULT;
+  const tp = stake * multiplier * pctPerAtr * TP_ATR_MULT;
+  // SL haiwezi kuzidi stake yenyewe (Deriv Multipliers: hasara ya juu zaidi
+  // inayowezekana ni stake yote — no negative balance).
+  return {
+    sl: Math.min(Number(sl.toFixed(2)), stake),
+    tp: Number(tp.toFixed(2)),
+  };
+}
 
 // Jozi tatu maarufu/maarufu zaidi duniani kwenye forex trading.
 const PAIRS = [
@@ -56,9 +84,13 @@ const PAIRS = [
 
 let ownerJid = null;
 let waSock = null;
+let startedAt = null;
+let lastCycleAt = null;
 
 // contract_id -> { code, symbol, direction, stake, buyPrice, openedAt }
 const openAutoTrades = new Map();
+// code -> { direction, strength, price, atr, notes, checkedAt }
+const lastSignals = new Map();
 
 function fmt(n, d = 2) {
   return Number(n).toFixed(d);
@@ -86,18 +118,48 @@ async function checkPairAndTrade(pairInfo) {
     sig = computeSignal(snapshot);
   } catch (err) {
     console.error(`[autoTrader] Imeshindwa kupata signal ya ${code}:`, err.message);
+    lastSignals.set(code, { error: err.message, checkedAt: Date.now() });
     return;
   }
 
+  lastSignals.set(code, {
+    direction: sig.direction,
+    strength: sig.strength,
+    price: snapshot.price,
+    atr: snapshot.atr,
+    notes: sig.notes,
+    checkedAt: Date.now(),
+  });
+
   if (sig.direction === 'NEUTRAL' || sig.strength < STRENGTH_THRESHOLD) return;
+
+  // Hesabu SL/TP kulingana na ATR (volatility halisi ya jozi wakati huo).
+  const risk = computeAtrBasedRisk({
+    atr: snapshot.atr,
+    price: snapshot.price,
+    stake: STAKE_USD,
+    multiplier: MULTIPLIER,
+  });
+
+  let slUsd, tpUsd, riskSource;
+  if (risk && risk.sl > 0 && risk.tp > 0) {
+    slUsd = risk.sl;
+    tpUsd = risk.tp;
+    riskSource = `ATR(14): ${fmt(snapshot.atr, 5)}`;
+  } else {
+    // ATR haipatikani kwa jozi hii wakati huu — tumia dola fasta (fallback).
+    slUsd = FALLBACK_SL_USD;
+    tpUsd = FALLBACK_TP_USD;
+    riskSource = 'dola fasta (ATR haikupatikana)';
+  }
 
   try {
     const result = await placeMultiplier({
       pair: code,
       direction: sig.direction,
       stake: STAKE_USD,
-      stopLoss: SL_USD,
-      takeProfit: TP_USD,
+      stopLoss: slUsd,
+      takeProfit: tpUsd,
       multiplier: MULTIPLIER,
     });
 
@@ -115,8 +177,9 @@ async function checkPairAndTrade(pairInfo) {
         `Jozi: *${code}*\n` +
         `Mwelekeo: ${sig.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
         `Nguvu ya Signal: ${sig.strength}%\n` +
-        `Stake: $${fmt(STAKE_USD)}  |  SL: $${fmt(SL_USD)}  |  TP: $${fmt(TP_USD)}\n` +
+        `Stake: $${fmt(STAKE_USD)}  |  SL: $${fmt(slUsd)}  |  TP: $${fmt(tpUsd)}\n` +
         `Multiplier: x${MULTIPLIER}\n` +
+        `Msingi wa SL/TP: ${riskSource}\n` +
         `Bei ya ununuzi: $${fmt(result.buy_price)}\n` +
         `🆔 Contract ID: ${result.contract_id}\n\n` +
         (sig.notes.length ? `🧠 Sababu:\n${sig.notes.map((n) => `   • ${n}`).join('\n')}\n\n` : '') +
@@ -132,6 +195,7 @@ async function runCycle() {
   for (const pairInfo of PAIRS) {
     await checkPairAndTrade(pairInfo);
   }
+  lastCycleAt = Date.now();
 }
 
 async function pollClosedTrades() {
@@ -186,11 +250,13 @@ function start({ sock, notifyJid }) {
 
   waSock = sock;
   ownerJid = notifyJid;
+  startedAt = Date.now();
 
   console.log(
     `[autoTrader] ✅ Auto-trading IMEWASHWA — jozi: ${PAIRS.map((p) => p.code).join(', ')}, ` +
       `kila dakika ${Math.round(CHECK_INTERVAL_MS / 60000)}, threshold: ${STRENGTH_THRESHOLD}%, ` +
-      `stake: $${STAKE_USD}, SL: $${SL_USD}, TP: $${TP_USD}, multiplier: x${MULTIPLIER}.`
+      `stake: $${STAKE_USD}, multiplier: x${MULTIPLIER}, SL/TP: ATR×${SL_ATR_MULT}/ATR×${TP_ATR_MULT} ` +
+      `(fallback ya dola fasta: $${FALLBACK_SL_USD}/$${FALLBACK_TP_USD}).`
   );
 
   runCycle().catch((err) => console.error('[autoTrader] runCycle error:', err.message));
@@ -210,4 +276,30 @@ function stop() {
   pollInterval = null;
 }
 
-module.exports = { start, stop, PAIRS, STRENGTH_THRESHOLD, openAutoTrades };
+/**
+ * Muhtasari kamili wa hali ya sasa ya auto-trading — inatumika na
+ * commands/utility/fxautostatus.js kuonyesha kama iko ON/OFF, jozi
+ * zinazofuatiliwa, signal ya mwisho ya kila jozi, na trades wazi.
+ */
+function getStatus() {
+  return {
+    enabled: ENABLED,
+    running: cycleInterval !== null,
+    startedAt,
+    lastCycleAt,
+    checkIntervalMs: CHECK_INTERVAL_MS,
+    pollMs: POLL_CLOSED_MS,
+    strengthThreshold: STRENGTH_THRESHOLD,
+    stake: STAKE_USD,
+    multiplier: MULTIPLIER,
+    slAtrMult: SL_ATR_MULT,
+    tpAtrMult: TP_ATR_MULT,
+    fallbackSl: FALLBACK_SL_USD,
+    fallbackTp: FALLBACK_TP_USD,
+    pairs: PAIRS.map((p) => p.code),
+    signals: PAIRS.map((p) => ({ code: p.code, ...(lastSignals.get(p.code) || {}) })),
+    openTrades: [...openAutoTrades.entries()].map(([contractId, info]) => ({ contractId, ...info })),
+  };
+}
+
+module.exports = { start, stop, getStatus, PAIRS, STRENGTH_THRESHOLD, openAutoTrades };

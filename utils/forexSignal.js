@@ -16,10 +16,12 @@
  *   - EMA9 dhidi ya EMA21 (mwelekeo/trend)
  *   - RSI(14) (overbought >70 / oversold <30)
  *   - MACD dhidi ya Signal line (momentum)
+ *   - ATR(14) (Average True Range — volatility, inatumika kuhesabu SL/TP
+ *     ya auto-trade kiotomatiki kulingana na trend — angalia utils/autoTrader.js)
  *
  * Cache: dakika 3 kwa kila jozi+interval — inapunguza matumizi ya credits
  * (tier bure ina mpaka wa 8 maombi/dakika, na ombi 1 la signal linatumia
- * credits 5 — price+rsi+macd+ema9+ema21) na kuepuka 429.
+ * credits 6 — price+rsi+macd+ema9+ema21+atr) na kuepuka 429.
  */
 
 const axios = require('axios');
@@ -67,12 +69,13 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     return cached.data;
   }
 
-  const [price, rsi, macd, ema9, ema21] = await Promise.all([
+  const [price, rsi, macd, ema9, ema21, atr] = await Promise.all([
     td('price', { symbol: pairSymbol }),
     td('rsi', { symbol: pairSymbol, interval, time_period: 14 }),
     td('macd', { symbol: pairSymbol, interval }),
     td('ema', { symbol: pairSymbol, interval, time_period: 9 }),
     td('ema', { symbol: pairSymbol, interval, time_period: 21 }),
+    td('atr', { symbol: pairSymbol, interval, time_period: 14 }),
   ]);
 
   const snapshot = {
@@ -85,6 +88,7 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     macdHist: lastVal(macd, 'macd_hist'),
     ema9: lastVal(ema9, 'ema'),
     ema21: lastVal(ema21, 'ema'),
+    atr: lastVal(atr, 'atr'),
     at: Date.now(),
   };
 
