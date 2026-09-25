@@ -279,6 +279,29 @@ async function getOpenPositions() {
   return res.portfolio?.contracts || [];
 }
 
+// Kama getOpenPositions() lakini kwa kila contract inaongeza bid_price/profit
+// halisi ya SASA (portfolio pekee haitoi hizi — zinahitaji ombi la ziada la
+// proposal_open_contract kwa kila contract_id). Hii ndiyo inatoa namba za
+// "live" (kupanda/kushuka) kwenye admin dashboard (fxtrading.html).
+async function getOpenPositionsLive() {
+  const positions = await getOpenPositions();
+  return Promise.all(
+    positions.map(async (p) => {
+      try {
+        const details = await getContractDetails(p.contract_id);
+        return {
+          ...p,
+          bid_price: details?.bid_price ?? p.bid_price,
+          profit: details?.profit ?? p.profit,
+          current_spot: details?.current_spot,
+        };
+      } catch (err) {
+        return p; // ukiona hitilafu kwa contract moja, bado onyesha nyingine
+      }
+    })
+  );
+}
+
 async function closeContract(contractId) {
   const res = await send({ sell: contractId, price: 0 }); // price:0 = kubali bei ya soko
   return res.sell;
@@ -313,6 +336,7 @@ module.exports = {
   ALLOWED_MULTIPLIERS,
   MIN_STAKE_USD,
   getOpenPositions,
+  getOpenPositionsLive,
   getContractDetails,
   closeContract,
   closeAll,
