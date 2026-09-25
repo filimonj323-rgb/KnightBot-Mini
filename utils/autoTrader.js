@@ -176,6 +176,15 @@ async function checkPairAndTrade(pairInfo) {
       multiplier: MULTIPLIER,
     });
 
+    // result.stop_loss/take_profit ni SL/TP HALISI zilizotumika — derivTrader
+    // inaweza kuwa imezirekebisha kiotomatiki juu ya slUsd/tpUsd tulizoomba
+    // hapo juu, ikiwa Deriv ilikataa kama ndogo mno kwa jozi hii wakati huo.
+    const slFinal = Number.isFinite(result.stop_loss) ? result.stop_loss : slUsd;
+    const tpFinal = Number.isFinite(result.take_profit) ? result.take_profit : tpUsd;
+    const adjustedNote = (slFinal !== slUsd || tpFinal !== tpUsd)
+      ? `\n_(Imerekebishwa kiotomatiki kutoka SL $${fmt(slUsd)}/TP $${fmt(tpUsd)} — Deriv ilihitaji kiwango cha juu zaidi kwa jozi hii wakati huo.)_\n`
+      : '';
+
     openAutoTrades.set(result.contract_id, {
       code,
       symbol,
@@ -190,7 +199,8 @@ async function checkPairAndTrade(pairInfo) {
         `Jozi: *${code}*\n` +
         `Mwelekeo: ${sig.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
         `Nguvu ya Signal: ${sig.strength}%\n` +
-        `Stake: $${fmt(STAKE_USD)}  |  SL: $${fmt(slUsd)}  |  TP: $${fmt(tpUsd)}\n` +
+        `Stake: $${fmt(STAKE_USD)}  |  SL: $${fmt(slFinal)}  |  TP: $${fmt(tpFinal)}\n` +
+        adjustedNote +
         `Multiplier: x${MULTIPLIER}\n` +
         `Msingi wa SL/TP: ${riskSource}\n` +
         `Bei ya ununuzi: $${fmt(result.buy_price)}\n` +

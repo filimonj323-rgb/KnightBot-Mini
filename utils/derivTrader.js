@@ -247,8 +247,7 @@ async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, m
   const contractType = direction === 'BUY' ? 'MULTUP' : 'MULTDOWN';
   const underlyingSymbol = toDerivSymbol(pair);
 
-  // Hatua A: proposal (bei ya sasa ya kufungua contract hii)
-  const proposalRes = await send({
+  const buildProposalPayload = (slAmt, tpAmt) => ({
     proposal: 1,
     amount: amt,
     basis: 'stake',
@@ -257,10 +256,39 @@ async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, m
     multiplier: mult,
     underlying_symbol: underlyingSymbol,
     limit_order: {
-      stop_loss: sl,
-      take_profit: tp,
+      stop_loss: slAmt,
+      take_profit: tpAmt,
     },
   });
+
+  let slUsed = sl;
+  let tpUsed = tp;
+
+  // Hatua A: proposal (bei ya sasa ya kufungua contract hii)
+  let proposalRes;
+  try {
+    proposalRes = await send(buildProposalPayload(slUsed, tpUsed));
+  } catch (err) {
+    // Deriv inakataa SL (na wakati mwingine TP) ikiwa ni ndogo mno kuliko
+    // kiwango cha chini kinachohitajika kwa jozi/stake hiyo wakati huo —
+    // ujumbe wake una muundo kama: "Please enter a stop loss amount
+    // that's equal to or higher than 0.45". Kiwango hicho hutofautiana
+    // kwa jozi na stake, hivyo hakiwezi kuwekwa fasta mapema — badala
+    // yake tunakisoma moja kwa moja kutoka kwenye ujumbe wa hitilafu na
+    // kujaribu tena MARA MOJA na SL/TP iliyorekebishwa (uwiano wa
+    // risk:reward wa awali unabaki uleule).
+    const min = parseMinLimitOrderAmount(err.message);
+    if (min == null) throw err;
+
+    const ratio = slUsed > 0 ? tpUsed / slUsed : 2;
+    slUsed = Number((min + 0.01).toFixed(2));
+    tpUsed = Number((slUsed * ratio).toFixed(2));
+    console.warn(
+      `[derivTrader] SL/TP ndogo mno kwa ${pair} (kiwango cha chini: $${min}) — ` +
+        `imerekebishwa: SL $${slUsed}, TP $${tpUsed} (uwiano uleule) na kujaribu tena.`
+    );
+    proposalRes = await send(buildProposalPayload(slUsed, tpUsed));
+  }
 
   const proposal = proposalRes.proposal;
   if (!proposal?.id) throw new Error('Proposal haikupatikana kutoka Deriv');
@@ -271,7 +299,23 @@ async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, m
     price: proposal.ask_price ?? amt,
   });
 
-  return buyRes.buy; // { contract_id, buy_price, longcode, ... }
+  // Rudisha SL/TP HALISI zilizotumika (zinaweza kuwa zimerekebishwa hapo
+  // juu) ili mwito wa nje (mfano autoTrader.js) aonyeshe namba sahihi
+  // kwenye notification, si zile alizoomba awali.
+  return { ...buyRes.buy, stop_loss: slUsed, take_profit: tpUsed };
+}
+
+// Inachambua ujumbe wa hitilafu wa Deriv kutafuta kiwango cha chini
+// kinachohitajika, mfano: "...equal to or higher than 0.45" au
+// "...amount of at least 0.45" -> 0.45. Inarudisha null isipokuwa
+// ilipopata namba.
+function parseMinLimitOrderAmount(message) {
+  const m = String(message || '').match(
+    /(?:equal to or higher than|higher than|greater than|at least)\s*\$?\s*([\d.]+)/i
+  );
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 async function getOpenPositions() {
