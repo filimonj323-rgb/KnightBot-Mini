@@ -1018,7 +1018,7 @@ const handleMessageImpl = async (sock, msg) => {
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+            reply: (text) => sock.sendMessage(from, { text }),
             react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
           });
         }
@@ -1036,7 +1036,7 @@ const handleMessageImpl = async (sock, msg) => {
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+            reply: (text) => sock.sendMessage(from, { text }),
             react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
           });
         }
@@ -1054,7 +1054,7 @@ const handleMessageImpl = async (sock, msg) => {
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+            reply: (text) => sock.sendMessage(from, { text }),
             react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
           });
         }
@@ -1216,7 +1216,7 @@ const handleMessageImpl = async (sock, msg) => {
                   isAdmin: await isAdmin(sock, sender, from, groupMetadata),
                   isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
                   isMod: isMod(sender),
-                  reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+                  reply: (text) => sock.sendMessage(from, { text }),
                   react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
                 });
                 return; // Don't process as command after auto-converting
@@ -1246,7 +1246,7 @@ const handleMessageImpl = async (sock, msg) => {
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+            reply: (text) => sock.sendMessage(from, { text }),
             react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
           });
           return; // Don't process as command
@@ -1278,7 +1278,7 @@ const handleMessageImpl = async (sock, msg) => {
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+            reply: (text) => sock.sendMessage(from, { text }),
             react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
           });
           if (handled) return; // Don't process as command if move was handled
@@ -1307,29 +1307,29 @@ const handleMessageImpl = async (sock, msg) => {
     
     // Permission checks
     if (command.ownerOnly && !isOwner(sender, sock)) {
-      return sock.sendMessage(from, { text: config.messages.ownerOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: config.messages.ownerOnly });
     }
     
     if (command.modOnly && !isMod(sender) && !isOwner(sender, sock)) {
-      return sock.sendMessage(from, { text: '🔒 This command is only for moderators!' }, { quoted: msg });
+      return sock.sendMessage(from, { text: '🔒 This command is only for moderators!' });
     }
     
     if (command.groupOnly && !isGroup) {
-      return sock.sendMessage(from, { text: config.messages.groupOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: config.messages.groupOnly });
     }
     
     if (command.privateOnly && isGroup) {
-      return sock.sendMessage(from, { text: config.messages.privateOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: config.messages.privateOnly });
     }
     
     if (command.adminOnly && !(await isAdmin(sock, sender, from, groupMetadata)) && !isOwner(sender, sock)) {
-      return sock.sendMessage(from, { text: config.messages.adminOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: config.messages.adminOnly });
     }
     
     if (command.botAdminNeeded) {
       const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
       if (!botIsAdmin) {
-        return sock.sendMessage(from, { text: config.messages.botAdminNeeded }, { quoted: msg });
+        return sock.sendMessage(from, { text: config.messages.botAdminNeeded });
       }
     }
     
@@ -1354,7 +1354,7 @@ const handleMessageImpl = async (sock, msg) => {
       isAdmin: await isAdmin(sock, sender, from, groupMetadata),
       isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
       isMod: isMod(sender),
-      reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+      reply: (text) => sock.sendMessage(from, { text }),
       react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
     });
     
