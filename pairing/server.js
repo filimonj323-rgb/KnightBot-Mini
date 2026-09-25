@@ -67,6 +67,41 @@ const cfg = require('./pairingConfig');
 const db = require('./db');
 const derivTrader = require('../utils/derivTrader');
 const autoTrader = require('../utils/autoTrader');
+const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('../utils/forexSignal');
+const mainConfig = require('../config');
+
+// Jozi kuu 7 zinazoweza kuangaliwa kwenye dashboard (.fxtrading.html) —
+// EURUSD/GBPUSD/USDJPY ndizo zinazofuatiliwa na auto-trader kiotomatiki;
+// nyingine 4 zinaangaliwa TU mtu akibonyeza "Angalia" (kuepuka 429).
+const FX_SYMBOL_MAP = {
+  EURUSD: 'EUR/USD',
+  GBPUSD: 'GBP/USD',
+  USDJPY: 'USD/JPY',
+  AUDUSD: 'AUD/USD',
+  USDCHF: 'USD/CHF',
+  USDCAD: 'USD/CAD',
+  NZDUSD: 'NZD/USD',
+};
+
+// Bot kuu (WhatsApp namba ya owner, config.js) — hii ndiyo inayotumika
+// kutuma notifications za trade zilizofunguliwa/kufungwa kupitia dashboard,
+// sawa na zile za auto-trader.
+function getOwnerJid() {
+  const raw = Array.isArray(mainConfig.ownerNumber) ? mainConfig.ownerNumber[0] : mainConfig.ownerNumber;
+  return raw?.includes('@') ? raw : `${raw}@s.whatsapp.net`;
+}
+
+async function notifyOwnerWA(text) {
+  try {
+    if (!global.currentSock) {
+      console.error('[fx dashboard] Bot kuu haijaunganishwa na WhatsApp - notification imepotea.');
+      return;
+    }
+    await global.currentSock.sendMessage(getOwnerJid(), { text });
+  } catch (err) {
+    console.error('[fx dashboard] Imeshindwa kutuma notification:', err.message);
+  }
+}
 
 // ── Pending payment orders (SQLite — survives redeploys via the Volume) ──
 // ── Pending payment orders (Turso — outside Railway, survives webhook
@@ -533,14 +568,27 @@ async function handlePairingRequest(req, res) {
         const pair = String(body.pair || '').toUpperCase().replace(/[^A-Z]/g, '');
         if (!pair) return sendJson(res, 400, { ok: false, error: 'Jozi (pair) inahitajika.' });
 
+        const direction = body.direction === 'SELL' ? 'SELL' : 'BUY';
         const result = await derivTrader.placeMultiplier({
           pair,
-          direction: body.direction === 'SELL' ? 'SELL' : 'BUY',
+          direction,
           stake: Number(body.stake),
           stopLoss: Number(body.stopLoss),
           takeProfit: Number(body.takeProfit),
           multiplier: body.multiplier ? Number(body.multiplier) : undefined,
         });
+
+        notifyOwnerWA(
+          `🖥️ *TRADE IMEFUNGULIWA (Dashboard)*\n\n` +
+            `Jozi: *${pair}*\n` +
+            `Mwelekeo: ${direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
+            `Stake: $${body.stake}  |  SL: $${body.stopLoss}  |  TP: $${body.takeProfit}\n` +
+            `Multiplier: x${body.multiplier || 100}\n` +
+            `Bei ya ununuzi: $${result.buy_price}\n` +
+            `🆔 Contract ID: ${result.contract_id}\n\n` +
+            `⚠️ Trade hii ilifunguliwa KWA MKONO kupitia admin dashboard.`
+        );
+
         return sendJson(res, 200, { ok: true, result });
       }
 
@@ -549,13 +597,47 @@ async function handlePairingRequest(req, res) {
         const body = await readJsonBody(req);
         if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
         const result = await derivTrader.closeContract(body.contract_id);
+
+        const profit = Number(result?.profit ?? 0);
+        notifyOwnerWA(
+          `🖥️ *TRADE IMEFUNGWA (Dashboard)*\n\n` +
+            `${profit >= 0 ? '✅ FAIDA' : '🔴 HASARA'}: $${Math.abs(profit).toFixed(2)}\n` +
+            `🆔 Contract ID: ${body.contract_id}`
+        );
+
         return sendJson(res, 200, { ok: true, result });
       }
 
       // Funga TRADES ZOTE zilizo wazi mara moja ("panic button").
       if (req.method === 'POST' && req.url === '/api/admin/fx/close-all') {
         const results = await derivTrader.closeAll();
+        notifyOwnerWA(
+          `🖥️ *TRADES ZOTE ZIMEFUNGWA (Dashboard)*\n\nJumla: ${results.length}\n` +
+            `Zilizofanikiwa: ${results.filter((r) => r.ok).length}`
+        );
         return sendJson(res, 200, { ok: true, results });
+      }
+
+      // Signal ya jozi MOJA kwa hiari (bonyeza "Angalia" kwenye dashboard) —
+      // haihusiani na auto-trader, inatumika kuangalia jozi yoyote papo hapo.
+      if (req.method === 'GET' && req.url.split('?')[0] === '/api/admin/fx/signal') {
+        const query = new URLSearchParams(req.url.split('?')[1] || '');
+        const code = (query.get('pair') || '').toUpperCase();
+        const symbol = FX_SYMBOL_MAP[code];
+        if (!symbol) return sendJson(res, 400, { ok: false, error: `Jozi "${code}" haitambuliki.` });
+
+        const snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL);
+        const sig = computeSignal(snapshot);
+        return sendJson(res, 200, {
+          ok: true,
+          code,
+          direction: sig.direction,
+          strength: sig.strength,
+          notes: sig.notes,
+          price: snapshot.price,
+          atr: snapshot.atr,
+          checkedAt: Date.now(),
+        });
       }
     }
 
