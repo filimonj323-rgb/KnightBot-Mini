@@ -37,8 +37,14 @@ const ACCOUNT_ID = process.env.DERIV_ACCOUNT_ID || null;
 const API_BASE = 'https://api.derivws.com';
 
 const MAX_STAKE_USD = Number(process.env.DERIV_MAX_STAKE_USD || 50);
+const MIN_STAKE_USD = Number(process.env.DERIV_MIN_STAKE_USD || 1);
 const MAX_MULTIPLIER = Number(process.env.DERIV_MAX_MULTIPLIER || 100);
 const DEFAULT_MULTIPLIER = Number(process.env.DERIV_DEFAULT_MULTIPLIER || 20);
+
+// Deriv Multipliers (MULTUP/MULTDOWN) hukubali TU thamani hizi maalum.
+// Ukituma namba nyingine yoyote, Deriv API inakataa na kurudisha:
+// "Multiplier is not in acceptable range. Accepts 100,200,300,500,800."
+const ALLOWED_MULTIPLIERS = [100, 200, 300, 500, 800];
 
 const REQUEST_TIMEOUT_MS = 15000;
 const REST_TIMEOUT_MS = 15000;
@@ -221,13 +227,23 @@ async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, m
   const amt = Math.min(Number(stake), MAX_STAKE_USD);
   if (!(amt > 0)) throw new Error('Stake si sahihi (lazima iwe namba > 0)');
 
+  if (amt < MIN_STAKE_USD) {
+    throw new Error(`Stake ni ndogo mno (chini ya $${MIN_STAKE_USD}). Weka stake ya angalau $${MIN_STAKE_USD}.`);
+  }
+
   const sl = Number(stopLoss);
   const tp = Number(takeProfit);
   if (!(sl > 0) || !(tp > 0)) {
     throw new Error('Stop Loss na Take Profit ni LAZIMA (namba > 0)');
   }
 
-  const mult = Math.min(Number(multiplier) || DEFAULT_MULTIPLIER, MAX_MULTIPLIER);
+  const rawMult = Number(multiplier) || DEFAULT_MULTIPLIER;
+  if (!ALLOWED_MULTIPLIERS.includes(rawMult)) {
+    throw new Error(
+      `Multiplier "${rawMult}" si sahihi. Deriv inakubali TU: ${ALLOWED_MULTIPLIERS.join(', ')}.`
+    );
+  }
+  const mult = Math.min(rawMult, MAX_MULTIPLIER);
   const contractType = direction === 'BUY' ? 'MULTUP' : 'MULTDOWN';
   const underlyingSymbol = toDerivSymbol(pair);
 
@@ -289,6 +305,8 @@ async function getBalance() {
 
 module.exports = {
   placeMultiplier,
+  ALLOWED_MULTIPLIERS,
+  MIN_STAKE_USD,
   getOpenPositions,
   closeContract,
   closeAll,
