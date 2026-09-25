@@ -217,9 +217,56 @@ function computeCalendarVote(context, baseCurrency, quoteCurrency) {
   return { bullish, bearish, notes, newsRisk: context.newsRisk };
 }
 
+// Currencies kuu 8 zinazoonekana kwenye FX_SYMBOL_MAP (pairing/server.js) —
+// ndizo zinazotumika kama default ya getWeekView() kwa ajili ya dashboard
+// (fxtrading.html), ili kutoonyesha "noise" ya currencies zisizohusika.
+const MAJOR_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD'];
+
+/**
+ * Rudisha matukio YOTE ya wiki hii kwa currencies zilizoombwa (default:
+ * MAJOR_CURRENCIES), yamepangwa kwa tarehe — kwa ajili ya kuonyesha
+ * "economic calendar" nzima kwenye dashboard (tofauti na getCalendarContext
+ * ambayo inarudisha "vote"/muktasari kwa jozi MOJA tu).
+ *
+ * Haitupi error kamwe kwa juu — ikishindwa, inarudisha { available:false }.
+ */
+async function getWeekView(currencies = MAJOR_CURRENCIES) {
+  const wanted = currencies.filter(Boolean).map((c) => c.toUpperCase());
+
+  let events;
+  try {
+    events = await fetchCalendarRaw();
+  } catch (err) {
+    console.error('economicCalendar getWeekView error:', err.message);
+    return { available: false, events: [], error: err.message };
+  }
+
+  const now = Date.now();
+  const list = events
+    .filter((e) => wanted.includes((e.country || '').toUpperCase()))
+    .map((e) => {
+      const t = e.date ? new Date(e.date).getTime() : NaN;
+      return {
+        title: e.title,
+        country: (e.country || '').toUpperCase(),
+        date: e.date,
+        impact: e.impact || 'Low',
+        forecast: e.forecast ?? null,
+        previous: e.previous ?? null,
+        actual: e.actual ?? null,
+        isPast: !Number.isNaN(t) && t < now,
+      };
+    })
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  return { available: true, events: list };
+}
+
 module.exports = {
   getCalendarContext,
   computeCalendarVote,
+  getWeekView,
+  MAJOR_CURRENCIES,
   NEWS_RISK_WINDOW_MIN,
   SURPRISE_WINDOW_MIN,
 };
