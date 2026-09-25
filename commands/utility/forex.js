@@ -98,6 +98,8 @@ function buildForexMessage(pairSymbol, s, sig) {
         ['EMA21', fmtPrice(s.ema21)],
         ['MACD', s.macd != null ? s.macd.toFixed(5) : 'N/A'],
         ['Signal', s.macdSignal != null ? s.macdSignal.toFixed(5) : 'N/A'],
+        [`EMA9 (${(s.htfInterval || '4h').toUpperCase()})`, fmtPrice(s.htfEma9)],
+        [`EMA21 (${(s.htfInterval || '4h').toUpperCase()})`, fmtPrice(s.htfEma21)],
       ],
       ['KIGEZO', 'THAMANI'],
       [10, 14]
