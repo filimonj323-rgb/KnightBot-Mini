@@ -91,7 +91,22 @@ async function initSchema() {
       messageCount INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (phoneNumber, date)
     )`,
+    `CREATE TABLE IF NOT EXISTS fx_auto_trades (
+      contractId  TEXT PRIMARY KEY,
+      code        TEXT NOT NULL,
+      symbol      TEXT NOT NULL,
+      direction   TEXT NOT NULL,
+      stake       REAL NOT NULL,
+      buyPrice    REAL,
+      slUsd       REAL,
+      tpUsd       REAL,
+      openedAt    INTEGER NOT NULL,
+      closedAt    INTEGER,
+      sellPrice   REAL,
+      profit      REAL
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
+    `CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_open ON fx_auto_trades(closedAt)`,
   ], 'write');
 
   // Migration for a DB created before the `automation` column existed —
