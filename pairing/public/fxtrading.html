@@ -92,6 +92,7 @@
   .muted { color: var(--muted); }
   .signal-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .signal-row:last-child { border-bottom: none; }
+  .sig-notes { font-size: 11px; color: var(--muted); margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -124,6 +125,11 @@
     <div class="card">
       <div class="section-label">🤖 Auto-Trader</div>
       <div id="autoTraderBox"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">📡 Signal za Soko (BUY/SELL + Strength)</div>
+      <div id="signalsBox"></div>
     </div>
 
     <div class="card">
@@ -194,6 +200,8 @@
 
   let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
   let pollTimer = null;
+  const FX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'NZDUSD'];
+  const signalState = {}; // code -> { direction, strength, notes, checkedAt, loading, error }
 
   async function api(path, opts = {}) {
     const res = await fetch(API_BASE + path, {
@@ -280,6 +288,64 @@
     `;
   }
 
+  function directionBadge(direction) {
+    if (direction === 'BUY') return '<span class="dir-buy">🟢 BUY</span>';
+    if (direction === 'SELL') return '<span class="dir-sell">🔴 SELL</span>';
+    if (direction === 'NEUTRAL') return '<span class="muted">⚪ NEUTRAL</span>';
+    return '<span class="muted">—</span>';
+  }
+
+  function renderSignals() {
+    const rows = FX_PAIRS.map((code) => {
+      const s = signalState[code];
+      let mid;
+      if (!s) {
+        mid = `<td colspan="3" class="muted">Bado hujaangaliwa</td>`;
+      } else if (s.loading) {
+        mid = `<td colspan="3" class="muted">⏳ Inaangalia...</td>`;
+      } else if (s.error) {
+        mid = `<td colspan="3" class="muted">❌ ${s.error}</td>`;
+      } else {
+        mid = `
+          <td>${directionBadge(s.direction)}</td>
+          <td>${s.strength}%</td>
+          <td class="muted" style="font-size:11px;">${timeAgo(s.checkedAt)}</td>
+        `;
+      }
+      return `<tr>
+        <td><strong>${code}</strong></td>
+        ${mid}
+        <td><button onclick="checkSignal('${code}')">🔍 Angalia</button></td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('signalsBox').innerHTML = `
+      <table>
+        <thead><tr><th>Jozi</th><th>Signal</th><th>Strength</th><th>Ilipoangaliwa</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="muted" style="margin-top:8px; font-size:11px;">
+        EURUSD/GBPUSD/USDJPY zinaangaliwa kiotomatiki na Auto-Trader kila saa (bure).
+        Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.
+      </div>
+    `;
+  }
+
+  async function checkSignal(code) {
+    signalState[code] = { ...(signalState[code] || {}), loading: true, error: null };
+    renderSignals();
+    try {
+      const data = await api('/api/admin/fx/signal?pair=' + encodeURIComponent(code));
+      signalState[code] = {
+        direction: data.direction, strength: data.strength, notes: data.notes,
+        checkedAt: data.checkedAt, loading: false,
+      };
+    } catch (e) {
+      signalState[code] = { error: e.message, loading: false };
+    }
+    renderSignals();
+  }
+
   function renderPositions(positions) {
     if (!positions.length) {
       document.getElementById('positionsBox').innerHTML = `<div class="empty">📭 Hakuna trade iliyo wazi kwa sasa.</div>`;
@@ -316,6 +382,18 @@
       renderStats(data.balance, data.positions);
       renderAutoTrader(data.autoTrade);
       renderPositions(data.positions);
+
+      // Auto-trader tayari ina signal ya EURUSD/GBPUSD/USDJPY (bila gharama
+      // ya ziada ya API) — itumie kujaza jedwali la Signals moja kwa moja.
+      (data.autoTrade.signals || []).forEach((s) => {
+        if (s.checkedAt || s.error) {
+          signalState[s.code] = {
+            direction: s.direction, strength: s.strength,
+            checkedAt: s.checkedAt, error: s.error, loading: false,
+          };
+        }
+      });
+      renderSignals();
     } catch (e) {
       console.error('[fxtrading] refresh error:', e.message);
     }
@@ -371,6 +449,7 @@
   function showApp() {
     document.getElementById('loginCard').style.display = 'none';
     document.getElementById('app').style.display = 'block';
+    renderSignals(); // jedwali tupu mara moja, kabla ya refresh ya kwanza
     refresh();
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(refresh, 5000); // "live" — kila sekunde 5
