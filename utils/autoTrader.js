@@ -28,6 +28,10 @@
  *   AUTO_TRADE_TP_ATR_MULT          — TP = mara ngapi za ATR(14) (default: 2 — risk:reward 1:2)
  *   AUTO_TRADE_SL_USD / AUTO_TRADE_TP_USD — dola fasta, hutumika TU kama
  *     ATR haipatikani kwa jozi husika (fallback)
+ *   AUTO_TRADE_MIN_SL_USD            — kiwango cha chini cha SL (default: $1)
+ *     — inazuia SL kuwa ndogo mno (senti chache) wakati wa soko tulivu,
+ *     ambayo ilikuwa ikisababisha trade kufungwa haraka kwa noise ya bei
+ *     badala ya mwenendo halisi. TP inapandishwa kwa uwiano uleule.
  *   AUTO_TRADE_PAIR_STAGGER_MS       — muda wa kusubiri kati ya jozi moja
  *     na nyingine ili kuepuka 429 ya Twelve Data (default: sekunde 70)
  */
@@ -69,6 +73,13 @@ const TP_ATR_MULT = Number(process.env.AUTO_TRADE_TP_ATR_MULT || 2); // risk:rew
 const FALLBACK_SL_USD = Number(process.env.AUTO_TRADE_SL_USD || 3);
 const FALLBACK_TP_USD = Number(process.env.AUTO_TRADE_TP_USD || 6);
 
+// Kiwango cha chini cha SL kwa auto-trade — ATR ndogo (soko tulivu)
+// ilikuwa ikitoa SL ya senti chache, na Deriv ilikuwa inafunga trade
+// kirahisi kwa mzunguko wa kawaida wa bei (noise) badala ya mwenendo
+// halisi wa soko, hivyo hasara za mara kwa mara. SL haiwezi kuwa chini
+// ya hii sasa (isipokuwa stake yenyewe iko chini yake).
+const MIN_SL_USD = Number(process.env.AUTO_TRADE_MIN_SL_USD || 1);
+
 /**
  * Badilisha ATR (katika bei, mfano 0.00120 kwa EURUSD) kuwa SL/TP kwa dola
  * — kulingana na fomula rasmi ya Deriv Multipliers:
@@ -78,12 +89,25 @@ const FALLBACK_TP_USD = Number(process.env.AUTO_TRADE_TP_USD || 6);
 function computeAtrBasedRisk({ atr, price, stake, multiplier }) {
   if (!(atr > 0) || !(price > 0)) return null;
   const pctPerAtr = atr / price;
-  const sl = stake * multiplier * pctPerAtr * SL_ATR_MULT;
-  const tp = stake * multiplier * pctPerAtr * TP_ATR_MULT;
+  let sl = stake * multiplier * pctPerAtr * SL_ATR_MULT;
+  let tp = stake * multiplier * pctPerAtr * TP_ATR_MULT;
+
   // SL haiwezi kuzidi stake yenyewe (Deriv Multipliers: hasara ya juu zaidi
   // inayowezekana ni stake yote — no negative balance).
+  sl = Math.min(sl, stake);
+
+  // Zuia SL isiwe chini ya MIN_SL_USD (ikiwa stake inaruhusu). Tunapopandisha
+  // SL, tunapandisha TP kwa UWIANO ULEULE wa risk:reward uliokusudiwa
+  // (SL_ATR_MULT : TP_ATR_MULT), si namba fasta — ili mkakati wa hatari
+  // usibadilike, tu ukubwa wake.
+  if (sl < MIN_SL_USD && stake >= MIN_SL_USD) {
+    const ratio = sl > 0 ? tp / sl : TP_ATR_MULT / SL_ATR_MULT;
+    sl = MIN_SL_USD;
+    tp = sl * ratio;
+  }
+
   return {
-    sl: Math.min(Number(sl.toFixed(2)), stake),
+    sl: Number(sl.toFixed(2)),
     tp: Number(tp.toFixed(2)),
   };
 }
