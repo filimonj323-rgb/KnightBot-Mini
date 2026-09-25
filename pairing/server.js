@@ -596,12 +596,14 @@ async function handlePairingRequest(req, res) {
       if (req.method === 'POST' && req.url === '/api/admin/fx/close') {
         const body = await readJsonBody(req);
         if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
-        const result = await derivTrader.closeContract(body.contract_id);
+        const result = await derivTrader.closeContractWithPnL(body.contract_id);
 
-        const profit = Number(result?.profit ?? 0);
+        const profit = Number(result?.profit);
         notifyOwnerWA(
           `🖥️ *TRADE IMEFUNGWA (Dashboard)*\n\n` +
-            `${profit >= 0 ? '✅ FAIDA' : '🔴 HASARA'}: $${Math.abs(profit).toFixed(2)}\n` +
+            (Number.isFinite(profit)
+              ? `${profit >= 0 ? '✅ FAIDA' : '🔴 HASARA'}: $${Math.abs(profit).toFixed(2)}\n`
+              : `ℹ️ Imeshindwa kupata faida/hasara halisi — angalia .positions au Deriv moja kwa moja.\n`) +
             `🆔 Contract ID: ${body.contract_id}`
         );
 
@@ -611,9 +613,15 @@ async function handlePairingRequest(req, res) {
       // Funga TRADES ZOTE zilizo wazi mara moja ("panic button").
       if (req.method === 'POST' && req.url === '/api/admin/fx/close-all') {
         const results = await derivTrader.closeAll();
+        const totalProfit = results
+          .filter((r) => r.ok && Number.isFinite(r.profit))
+          .reduce((sum, r) => sum + r.profit, 0);
+        const missingCount = results.filter((r) => r.ok && !Number.isFinite(r.profit)).length;
         notifyOwnerWA(
           `🖥️ *TRADES ZOTE ZIMEFUNGWA (Dashboard)*\n\nJumla: ${results.length}\n` +
-            `Zilizofanikiwa: ${results.filter((r) => r.ok).length}`
+            `Zilizofanikiwa: ${results.filter((r) => r.ok).length}\n` +
+            `${totalProfit >= 0 ? '✅ FAIDA' : '🔴 HASARA'} (jumla): $${Math.abs(totalProfit).toFixed(2)}` +
+            (missingCount ? `\n_(${missingCount} bila faida/hasara halisi)_` : '')
         );
         return sendJson(res, 200, { ok: true, results });
       }
