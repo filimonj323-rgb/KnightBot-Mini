@@ -93,6 +93,36 @@
   .signal-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .signal-row:last-child { border-bottom: none; }
   .sig-notes { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* Economic calendar */
+  .cal-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .cal-row:last-child { border-bottom: none; }
+  .cal-row.past { opacity: 0.6; }
+  .impact-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; margin-top: 4px; }
+  .impact-High .impact-dot { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .impact-Medium .impact-dot { background: var(--amber); }
+  .impact-Low .impact-dot { background: var(--muted); }
+  .cal-main { flex: 1; min-width: 0; }
+  .cal-title { font-weight: 600; }
+  .cal-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .cal-numbers { font-size: 11px; margin-top: 3px; }
+  .cal-numbers span { margin-right: 10px; }
+  .cal-time { flex-shrink: 0; text-align: right; font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .surprise-bullish { color: var(--accent); }
+  .surprise-bearish { color: var(--red); }
+  .cal-filters { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .cal-filters button { padding: 5px 10px; font-size: 11px; }
+  .cal-filters button.active { background: var(--accent); color: #041008; border-color: var(--accent); }
+
+  /* AI predictions */
+  .pred-card { border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 10px; background: rgba(255,255,255,0.015); }
+  .pred-card:last-child { margin-bottom: 0; }
+  .pred-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .pred-summary { font-size: 12px; line-height: 1.5; color: var(--text); }
+  .pred-drivers { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: var(--muted); }
+  .pred-drivers li { margin-bottom: 2px; }
+  .news-risk-tag { display: inline-block; margin-left: 8px; font-size: 10px; color: var(--amber); border: 1px solid var(--amber); border-radius: 10px; padding: 1px 7px; }
+  .ai-tag { font-size: 10px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -125,6 +155,20 @@
     <div class="card">
       <div class="section-label">🤖 Auto-Trader</div>
       <div id="autoTraderBox"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>🧠 AI Predictions (Technical + Calendar)</span>
+        <span class="ai-tag" id="predGeneratedAt"></span>
+      </div>
+      <div id="predictionsBox"><div class="empty">Inapakia...</div></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">📅 Economic Calendar (Wiki Hii)</div>
+      <div class="cal-filters" id="calFilters"></div>
+      <div id="calendarBox" style="max-height:420px; overflow-y:auto;"><div class="empty">Inapakia...</div></div>
     </div>
 
     <div class="card">
@@ -202,6 +246,9 @@
   let pollTimer = null;
   const FX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'NZDUSD'];
   const signalState = {}; // code -> { direction, strength, notes, checkedAt, loading, error }
+  let slowPollTimer = null;
+  let calendarEvents = [];
+  let calFilter = 'all'; // all | high | upcoming
 
   async function api(path, opts = {}) {
     const res = await fetch(API_BASE + path, {
@@ -346,6 +393,117 @@
     renderSignals();
   }
 
+  // ── 🧠 AI Predictions ────────────────────────────────────────────────
+  function directionText(o) {
+    if (o === 'BUY') return '🟢 BUY';
+    if (o === 'SELL') return '🔴 SELL';
+    return '⚪ NEUTRAL';
+  }
+
+  function renderPredictions(data) {
+    document.getElementById('predGeneratedAt').textContent = data.generatedAt
+      ? 'Imesasishwa ' + timeAgo(data.generatedAt) + (data.source === 'ai' ? ' · AI' : ' · technical tu')
+      : '';
+
+    const preds = data.predictions || [];
+    if (!preds.length) {
+      document.getElementById('predictionsBox').innerHTML = `<div class="empty">Hakuna prediction bado.</div>`;
+      return;
+    }
+
+    document.getElementById('predictionsBox').innerHTML = preds.map((p) => {
+      const dirClass = p.outlook === 'BUY' ? 'dir-buy' : p.outlook === 'SELL' ? 'dir-sell' : 'muted';
+      const drivers = (p.keyDrivers || []).length
+        ? `<ul class="pred-drivers">${p.keyDrivers.map((d) => `<li>${d}</li>`).join('')}</ul>` : '';
+      return `<div class="pred-card">
+        <div class="pred-head">
+          <span><strong>${p.pair}</strong> <span class="${dirClass}">${directionText(p.outlook)}</span> (${p.confidence}%)
+            ${p.newsRisk ? '<span class="news-risk-tag">⚠️ habari karibu</span>' : ''}
+          </span>
+          ${p.price ? `<span class="muted">${fmt(p.price, 5)}</span>` : ''}
+        </div>
+        <div class="pred-summary">${p.summary || ''}</div>
+        ${drivers}
+      </div>`;
+    }).join('');
+  }
+
+  async function refreshPredictions() {
+    try {
+      const data = await api('/api/admin/fx/predictions');
+      renderPredictions(data);
+    } catch (e) {
+      document.getElementById('predictionsBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+    }
+  }
+
+  // ── 📅 Economic Calendar ─────────────────────────────────────────────
+  function fmtEventTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('sw-TZ', { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Dar_es_Salaam' });
+  }
+
+  function renderCalendarFilters() {
+    const opts = [
+      { key: 'all', label: 'Zote' },
+      { key: 'high', label: '🔴 High Impact' },
+      { key: 'upcoming', label: '⏳ Zinazokuja' },
+    ];
+    document.getElementById('calFilters').innerHTML = opts.map((o) =>
+      `<button class="${calFilter === o.key ? 'active' : 'ghost'}" onclick="setCalFilter('${o.key}')">${o.label}</button>`
+    ).join('');
+  }
+
+  function setCalFilter(key) {
+    calFilter = key;
+    renderCalendarFilters();
+    renderCalendar();
+  }
+
+  function renderCalendar() {
+    let events = calendarEvents;
+    if (calFilter === 'high') events = events.filter((e) => e.impact === 'High');
+    if (calFilter === 'upcoming') events = events.filter((e) => !e.isPast);
+
+    if (!events.length) {
+      document.getElementById('calendarBox').innerHTML = `<div class="empty">📭 Hakuna matukio ya kuonyesha.</div>`;
+      return;
+    }
+
+    document.getElementById('calendarBox').innerHTML = events.map((e) => {
+      const hasActual = e.actual !== null && e.actual !== undefined && e.actual !== '';
+      let numbers = '';
+      if (hasActual || e.forecast != null || e.previous != null) {
+        numbers = `<div class="cal-numbers">
+          ${hasActual ? `<span>Actual: <strong>${e.actual}</strong></span>` : ''}
+          ${e.forecast != null ? `<span>Forecast: ${e.forecast}</span>` : ''}
+          ${e.previous != null ? `<span class="muted">Previous: ${e.previous}</span>` : ''}
+        </div>`;
+      }
+      return `<div class="cal-row impact-${e.impact} ${e.isPast ? 'past' : ''}">
+        <span class="impact-dot"></span>
+        <div class="cal-main">
+          <div class="cal-title">${e.country} — ${e.title}</div>
+          <div class="cal-meta">${e.impact} impact</div>
+          ${numbers}
+        </div>
+        <div class="cal-time">${fmtEventTime(e.date)}${e.isPast ? '<br>imepita' : ''}</div>
+      </div>`;
+    }).join('');
+  }
+
+  async function refreshCalendar() {
+    try {
+      const data = await api('/api/admin/fx/calendar');
+      calendarEvents = data.events || [];
+      renderCalendar();
+    } catch (e) {
+      document.getElementById('calendarBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+    }
+  }
+
   function renderPositions(positions) {
     if (!positions.length) {
       document.getElementById('positionsBox').innerHTML = `<div class="empty">📭 Hakuna trade iliyo wazi kwa sasa.</div>`;
@@ -450,9 +608,17 @@
     document.getElementById('loginCard').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     renderSignals(); // jedwali tupu mara moja, kabla ya refresh ya kwanza
+    renderCalendarFilters();
     refresh();
+    refreshCalendar();
+    refreshPredictions();
     if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(refresh, 5000); // "live" — kila sekunde 5
+    pollTimer = setInterval(refresh, 5000); // "live" — bei/positions kila sekunde 5
+    if (slowPollTimer) clearInterval(slowPollTimer);
+    // Calendar + AI predictions hazibadiliki mara kwa mara (calendar: cache
+    // dakika 15 upande wa server; predictions: cache dakika ~20 + Groq call) —
+    // kila dakika 1 kwenye dashboard inatosha, hakuna sababu ya sekunde 5.
+    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); }, 60000);
   }
 
   if (ADMIN_TOKEN) showApp();
