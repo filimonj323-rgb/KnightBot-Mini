@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FX Trading — Mr. IT MEDIATOR</title>
+<style>
+  :root {
+    --bg: #05100a;
+    --panel: #0b1b12;
+    --panel-2: #0f2318;
+    --border: #1d3a28;
+    --text: #d8ffe6;
+    --muted: #5f9678;
+    --accent: #39ff88;
+    --accent-dim: #1f7a48;
+    --amber: #ffb84d;
+    --red: #ff5566;
+    --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--mono);
+    background:
+      radial-gradient(ellipse at top, rgba(57,255,136,0.05), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  #loginCard {
+    max-width: 380px; margin: 12vh auto 0; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 14px; padding: 34px;
+  }
+  #loginCard h1 { font-size: 16px; margin: 0 0 20px; text-align: center; }
+  label { display: block; font-size: 11px; color: var(--muted); margin: 0 0 5px; }
+  input, select { width: 100%; padding: 10px 11px; background: #071009; border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text); font-family: var(--mono); font-size: 13px; margin-bottom: 12px; }
+  input:focus, select:focus { outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 2px rgba(57,255,136,0.15); }
+  button { font-family: var(--mono); cursor: pointer; border-radius: 3px; border: 1px solid var(--accent-dim);
+    background: rgba(57,255,136,0.08); color: var(--accent); padding: 9px 14px; font-size: 12px; font-weight: 600; }
+  button:hover { background: rgba(57,255,136,0.16); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #041008; border-color: var(--accent); width: 100%; padding: 11px; }
+  button.primary:hover { background: #55ffa0; }
+  button.danger { border-color: rgba(255,85,102,0.5); background: rgba(255,85,102,0.08); color: var(--red); }
+  button.danger:hover { background: rgba(255,85,102,0.18); }
+  button.ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+  .error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 14px; }
+
+  #app { display: none; min-height: 100vh; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px;
+    border-bottom: 1px solid var(--border); background: rgba(11,27,18,0.7); position: sticky; top: 0; z-index: 20; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .content { padding: 18px 20px 60px; max-width: 1080px; margin: 0 auto; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; }
+  .stat .n { font-size: 20px; font-weight: 700; }
+  .stat .l { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+  .stat.accent .n { color: var(--accent); }
+  .stat.amber .n { color: var(--amber); }
+  .stat.red .n { color: var(--red); }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+  .section-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px; border-bottom: 1px solid var(--border); }
+  tbody td { padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  .pl-pos { color: var(--accent); font-weight: 700; }
+  .pl-neg { color: var(--red); font-weight: 700; }
+  .dir-buy { color: var(--accent); font-weight: 700; }
+  .dir-sell { color: var(--red); font-weight: 700; }
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 10px; font-weight: 700; }
+  .badge.on { background: rgba(57,255,136,0.12); color: var(--accent); }
+  .badge.off { background: rgba(255,85,102,0.12); color: var(--red); }
+  .empty { text-align: center; color: var(--muted); padding: 24px 10px; font-size: 12px; }
+  .toast { margin-top: 10px; padding: 10px 12px; border-radius: 3px; font-size: 12px; display: none; white-space: pre-wrap; }
+  .toast.success { display: block; background: rgba(57,255,136,0.1); color: var(--accent); }
+  .toast.error { display: block; background: rgba(255,85,102,0.1); color: var(--red); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  @media (max-width: 560px) { .grid2, .grid3 { grid-template-columns: 1fr; } .content { padding: 14px 12px 60px; } }
+  .row-actions { display: flex; gap: 6px; }
+  .row-actions button { padding: 6px 10px; font-size: 11px; }
+  .muted { color: var(--muted); }
+  .signal-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .signal-row:last-child { border-bottom: none; }
+</style>
+</head>
+<body>
+
+<div id="loginCard">
+  <h1>📈 FX Trading Login</h1>
+  <label>Username</label>
+  <input id="username" type="text" autocomplete="username" />
+  <label>Password</label>
+  <input id="password" type="password" autocomplete="current-password" />
+  <button class="primary" onclick="doLogin()">Ingia</button>
+  <div class="error" id="loginError"></div>
+</div>
+
+<div id="app">
+  <div class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <strong>FX TRADING · Deriv Multipliers</strong>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="ghost" onclick="location.href='admin.html'">← Ops Console</button>
+      <button class="ghost" onclick="logout()">Toka</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="stats" id="statsRow"></div>
+
+    <div class="card">
+      <div class="section-label">🤖 Auto-Trader</div>
+      <div id="autoTraderBox"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>📊 Trade Zilizo Wazi</span>
+        <button class="danger" onclick="closeAll()">🛑 Funga Zote</button>
+      </div>
+      <div id="positionsBox"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-label">➕ Fungua Trade Mpya (Mkono)</div>
+      <div class="grid3">
+        <div>
+          <label>Jozi</label>
+          <select id="fPair">
+            <option value="EURUSD">EUR/USD</option>
+            <option value="GBPUSD">GBP/USD</option>
+            <option value="USDJPY">USD/JPY</option>
+            <option value="AUDUSD">AUD/USD</option>
+            <option value="USDCHF">USD/CHF</option>
+            <option value="USDCAD">USD/CAD</option>
+            <option value="NZDUSD">NZD/USD</option>
+          </select>
+        </div>
+        <div>
+          <label>Mwelekeo</label>
+          <select id="fDirection">
+            <option value="BUY">BUY 🟢</option>
+            <option value="SELL">SELL 🔴</option>
+          </select>
+        </div>
+        <div>
+          <label>Multiplier</label>
+          <select id="fMultiplier">
+            <option value="100">100</option>
+            <option value="200">200</option>
+            <option value="300">300</option>
+            <option value="500">500</option>
+            <option value="800">800</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid3">
+        <div>
+          <label>Stake ($)</label>
+          <input id="fStake" type="number" value="5" min="1" step="0.5" />
+        </div>
+        <div>
+          <label>Stop Loss ($)</label>
+          <input id="fSL" type="number" value="3" min="0.1" step="0.1" />
+        </div>
+        <div>
+          <label>Take Profit ($)</label>
+          <input id="fTP" type="number" value="6" min="0.1" step="0.1" />
+        </div>
+      </div>
+      <button class="primary" onclick="openTrade()" id="openBtn">Fungua Trade</button>
+      <div class="toast" id="openToast"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // EDIT hii iwe URL kamili ya Railway service yako (ile ile inayotumika
+  // kwenye admin.html — API_BASE).
+  const API_BASE = 'https://botkuusite.up.railway.app';
+
+  let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
+  let pollTimer = null;
+
+  async function api(path, opts = {}) {
+    const res = await fetch(API_BASE + path, {
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(ADMIN_TOKEN ? { Authorization: 'Bearer ' + ADMIN_TOKEN } : {}),
+        ...(opts.headers || {}),
+      },
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) throw new Error(data.error || 'Hitilafu');
+    return data;
+  }
+
+  async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    document.getElementById('loginError').textContent = '';
+    try {
+      const data = await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+      ADMIN_TOKEN = data.token;
+      sessionStorage.setItem('adminToken', ADMIN_TOKEN);
+      showApp();
+    } catch (e) {
+      document.getElementById('loginError').textContent = e.message;
+    }
+  }
+
+  function logout() {
+    sessionStorage.removeItem('adminToken');
+    location.reload();
+  }
+
+  function fmt(n, d = 2) {
+    return Number(n || 0).toFixed(d);
+  }
+
+  function timeAgo(ts) {
+    if (!ts) return '—';
+    const secs = Math.floor((Date.now() - ts) / 1000);
+    if (secs < 60) return `sekunde ${secs} zilizopita`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `dakika ${mins} zilizopita`;
+    return `saa ${Math.floor(mins / 60)} zilizopita`;
+  }
+
+  function renderStats(balance, positions) {
+    const totalPL = positions.reduce((sum, p) => sum + Number(p.profit || 0), 0);
+    document.getElementById('statsRow').innerHTML = `
+      <div class="stat accent"><div class="n">$${fmt(balance?.balance)}</div><div class="l">Balance (${balance?.currency || ''})</div></div>
+      <div class="stat ${totalPL >= 0 ? 'accent' : 'red'}"><div class="n">${totalPL >= 0 ? '+' : ''}$${fmt(totalPL)}</div><div class="l">P/L ya Sasa</div></div>
+      <div class="stat"><div class="n">${positions.length}</div><div class="l">Trade Wazi</div></div>
+    `;
+  }
+
+  function renderAutoTrader(a) {
+    if (!a.enabled) {
+      document.getElementById('autoTraderBox').innerHTML = `
+        <span class="badge off">OFF</span>
+        <div class="muted" style="margin-top:10px;">AUTO_TRADE_ENABLED si "true" kwenye env.</div>
+      `;
+      return;
+    }
+    const signalsHtml = (a.signals || []).map((s) => {
+      if (s.error) return `<div class="signal-row"><span>${s.code}</span><span class="muted">❌ ${s.error}</span></div>`;
+      if (!s.checkedAt) return `<div class="signal-row"><span>${s.code}</span><span class="muted">bado hujaangaliwa</span></div>`;
+      const dirClass = s.direction === 'BUY' ? 'dir-buy' : s.direction === 'SELL' ? 'dir-sell' : 'muted';
+      const ok = s.direction !== 'NEUTRAL' && s.strength >= a.strengthThreshold;
+      return `<div class="signal-row">
+        <span>${s.code}</span>
+        <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}</span>
+      </div>`;
+    }).join('');
+
+    document.getElementById('autoTraderBox').innerHTML = `
+      <span class="badge on">ON</span>
+      <span class="muted" style="margin-left:10px;">
+        Interval: dakika ${Math.round(a.checkIntervalMs / 60000)} · Threshold: ≥${a.strengthThreshold}% ·
+        Stake: $${a.stake} · Multiplier: x${a.multiplier} · SL/TP: ATR×${a.slAtrMult}/ATR×${a.tpAtrMult}
+      </span>
+      <div style="margin-top:12px;">${signalsHtml}</div>
+      <div class="muted" style="margin-top:8px; font-size:11px;">Ukaguzi wa mwisho: ${timeAgo(a.lastCycleAt)}</div>
+    `;
+  }
+
+  function renderPositions(positions) {
+    if (!positions.length) {
+      document.getElementById('positionsBox').innerHTML = `<div class="empty">📭 Hakuna trade iliyo wazi kwa sasa.</div>`;
+      return;
+    }
+    const rows = positions.map((p) => {
+      const pl = Number(p.profit || 0);
+      const plClass = pl >= 0 ? 'pl-pos' : 'pl-neg';
+      const dirClass = /up/i.test(p.contract_type || '') ? 'dir-buy' : 'dir-sell';
+      const dirLabel = /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL';
+      return `<tr>
+        <td>${p.symbol || p.shortcode || p.underlying || '—'}</td>
+        <td class="${dirClass}">${dirLabel}</td>
+        <td>$${fmt(p.buy_price)}</td>
+        <td>$${fmt(p.bid_price)}</td>
+        <td class="${plClass}">${pl >= 0 ? '+' : ''}$${fmt(pl)}</td>
+        <td class="row-actions">
+          <button class="danger" onclick="closeOne('${p.contract_id}')">Funga</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('positionsBox').innerHTML = `
+      <table>
+        <thead><tr><th>Jozi</th><th>Mwelekeo</th><th>Bei ya Kuingia</th><th>Bei ya Sasa</th><th>P/L</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  async function refresh() {
+    try {
+      const data = await api('/api/admin/fx/overview');
+      renderStats(data.balance, data.positions);
+      renderAutoTrader(data.autoTrade);
+      renderPositions(data.positions);
+    } catch (e) {
+      console.error('[fxtrading] refresh error:', e.message);
+    }
+  }
+
+  async function closeOne(contractId) {
+    if (!confirm('Una uhakika unataka kufunga trade hii?')) return;
+    try {
+      await api('/api/admin/fx/close', { method: 'POST', body: JSON.stringify({ contract_id: contractId }) });
+      refresh();
+    } catch (e) {
+      alert('Imeshindwa kufunga: ' + e.message);
+    }
+  }
+
+  async function closeAll() {
+    if (!confirm('Una uhakika unataka kufunga TRADE ZOTE zilizo wazi?')) return;
+    try {
+      await api('/api/admin/fx/close-all', { method: 'POST' });
+      refresh();
+    } catch (e) {
+      alert('Imeshindwa kufunga zote: ' + e.message);
+    }
+  }
+
+  async function openTrade() {
+    const btn = document.getElementById('openBtn');
+    const toast = document.getElementById('openToast');
+    toast.className = 'toast';
+    toast.textContent = '';
+    btn.disabled = true;
+    try {
+      const body = {
+        pair: document.getElementById('fPair').value,
+        direction: document.getElementById('fDirection').value,
+        multiplier: Number(document.getElementById('fMultiplier').value),
+        stake: Number(document.getElementById('fStake').value),
+        stopLoss: Number(document.getElementById('fSL').value),
+        takeProfit: Number(document.getElementById('fTP').value),
+      };
+      const data = await api('/api/admin/fx/open', { method: 'POST', body: JSON.stringify(body) });
+      toast.className = 'toast success';
+      toast.textContent = `✅ Trade imefunguliwa — Contract ID: ${data.result.contract_id}`;
+      refresh();
+    } catch (e) {
+      toast.className = 'toast error';
+      toast.textContent = '❌ ' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function showApp() {
+    document.getElementById('loginCard').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    refresh();
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(refresh, 5000); // "live" — kila sekunde 5
+  }
+
+  if (ADMIN_TOKEN) showApp();
+</script>
+</body>
+</html>
