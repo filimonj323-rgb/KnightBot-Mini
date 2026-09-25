@@ -1358,6 +1358,17 @@ const handleMessageImpl = async (sock, msg) => {
       react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
     });
     
+    // Futa ujumbe wa amri (mfano ".menu") baada ya kuutekeleza, kama
+    // deleteCommandMessage imewashwa. Haizuii amri kutofanya kazi hata
+    // ikishindikana kufuta (mf. bot si admin kwenye group).
+    if (effectiveConfig.deleteCommandMessage) {
+      try {
+        await sock.sendMessage(from, { delete: msg.key });
+      } catch (e) {
+        console.error('Failed to delete command message:', e);
+      }
+    }
+    
   } catch (error) {
     console.error('Error in message handler:', error);
     
