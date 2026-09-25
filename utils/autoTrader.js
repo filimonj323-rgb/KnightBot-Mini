@@ -28,6 +28,8 @@
  *   AUTO_TRADE_TP_ATR_MULT          — TP = mara ngapi za ATR(14) (default: 2 — risk:reward 1:2)
  *   AUTO_TRADE_SL_USD / AUTO_TRADE_TP_USD — dola fasta, hutumika TU kama
  *     ATR haipatikani kwa jozi husika (fallback)
+ *   AUTO_TRADE_PAIR_STAGGER_MS       — muda wa kusubiri kati ya jozi moja
+ *     na nyingine ili kuepuka 429 ya Twelve Data (default: sekunde 70)
  */
 
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('./forexSignal');
@@ -46,6 +48,16 @@ const STRENGTH_THRESHOLD = Number(process.env.AUTO_TRADE_STRENGTH_THRESHOLD || 6
 const STAKE_USD = Number(process.env.AUTO_TRADE_STAKE_USD || 5);
 const rawMultiplier = Number(process.env.AUTO_TRADE_MULTIPLIER || 100);
 const MULTIPLIER = ALLOWED_MULTIPLIERS.includes(rawMultiplier) ? rawMultiplier : 100;
+
+// Twelve Data (tier bure): 8 credits/dakika. Kila jozi inatumia credits 6
+// (price+rsi+macd+ema9+ema21+atr) — kuangalia jozi zote mara moja
+// kunavuka kikomo (18 credits > 8/dakika) na kusababisha "429". Kwa hiyo
+// tunasubiri kidogo kati ya jozi moja na nyingine (stagger).
+const PAIR_STAGGER_MS = Number(process.env.AUTO_TRADE_PAIR_STAGGER_MS || 70 * 1000); // sekunde 70
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 // SL/TP kwa kutumia ATR (Average True Range) — hukua/hupungua kulingana na
 // volatility halisi ya jozi wakati huo, badala ya dola fasta isiyobadilika.
@@ -192,8 +204,9 @@ async function checkPairAndTrade(pairInfo) {
 }
 
 async function runCycle() {
-  for (const pairInfo of PAIRS) {
-    await checkPairAndTrade(pairInfo);
+  for (let i = 0; i < PAIRS.length; i++) {
+    if (i > 0) await sleep(PAIR_STAGGER_MS); // epuka 429 (kikomo cha Twelve Data)
+    await checkPairAndTrade(PAIRS[i]);
   }
   lastCycleAt = Date.now();
 }
