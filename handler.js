@@ -834,6 +834,29 @@ const handleAutoViewOnce = async (sock, msg) => {
 // (index.js) never sets it, so it keeps its original unscoped behavior.
 const withOwnerScope = (sock, fn) => database.runWithOwnerScope(sock?.pairingOwnerId, fn);
 
+// Returns a sock whose sendMessage() silently drops a `quoted` option, so
+// command replies stop embedding the (about to be auto-deleted) command
+// message. `shouldStrip` false returns `sock` itself unchanged — zero
+// overhead and zero behavior change for every other command run.
+const commandSockFor = (sock, shouldStrip) => {
+  if (!shouldStrip) return sock;
+  return new Proxy(sock, {
+    get(target, prop, receiver) {
+      if (prop === 'sendMessage') {
+        return (jid, content, options, ...rest) => {
+          if (options && Object.prototype.hasOwnProperty.call(options, 'quoted')) {
+            const { quoted, ...withoutQuoted } = options;
+            options = withoutQuoted;
+          }
+          return target.sendMessage(jid, content, options, ...rest);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
+};
+
 const handleMessageImpl = async (sock, msg) => {
   try {
     // Debug logging to see all messages
@@ -1345,7 +1368,20 @@ const handleMessageImpl = async (sock, msg) => {
     // Execute command
     console.log(`Executing command: ${commandName} from ${sender}`);
     
-    await command.execute(sock, msg, args, {
+    // When deleteCommandMessage is on, the command message (msg) is about
+    // to be deleted right after this. But `quoted: msg` doesn't fetch the
+    // quoted content live — Baileys embeds it directly into the reply's
+    // contextInfo at send time — so a response sent with `quoted: msg`
+    // keeps showing the "deleted" command inside its own quote preview
+    // forever, defeating the whole point of deleting it. ~95 command files
+    // pass `{ quoted: msg }` straight through their `sock` param, so rather
+    // than touch every one of them, hand command.execute() a wrapped sock
+    // that transparently strips `quoted` from sendMessage() calls only for
+    // this invocation. When deleteCommandMessage is off, cmdSock === sock
+    // (no wrapping, no behavior change).
+    const cmdSock = commandSockFor(sock, effectiveConfig.deleteCommandMessage);
+    
+    await command.execute(cmdSock, msg, args, {
       from,
       sender,
       isGroup,
@@ -1354,8 +1390,8 @@ const handleMessageImpl = async (sock, msg) => {
       isAdmin: await isAdmin(sock, sender, from, groupMetadata),
       isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
       isMod: isMod(sender),
-      reply: (text) => sock.sendMessage(from, { text }),
-      react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
+      reply: (text) => cmdSock.sendMessage(from, { text }),
+      react: (emoji) => cmdSock.sendMessage(from, { react: { text: emoji, key: msg.key } })
     });
     
     // Futa ujumbe wa amri (mfano ".menu") baada ya kuutekeleza, kama
