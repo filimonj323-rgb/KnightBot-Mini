@@ -89,6 +89,11 @@ function buildForexMessage(pairSymbol, s, sig) {
   );
   L.push('');
 
+  if (sig.newsRisk) {
+    L.push(`🚨 *TAHADHARI: Habari kubwa (High impact) iko karibu* — spread/slippage inaweza kuongezeka, epuka kuingia trade mpya sasa hivi.`);
+    L.push('');
+  }
+
   L.push(`📊 *Vigezo vya Kiufundi*`);
   L.push(
     buildTable(
@@ -98,8 +103,6 @@ function buildForexMessage(pairSymbol, s, sig) {
         ['EMA21', fmtPrice(s.ema21)],
         ['MACD', s.macd != null ? s.macd.toFixed(5) : 'N/A'],
         ['Signal', s.macdSignal != null ? s.macdSignal.toFixed(5) : 'N/A'],
-        [`EMA9 (${(s.htfInterval || '4h').toUpperCase()})`, fmtPrice(s.htfEma9)],
-        [`EMA21 (${(s.htfInterval || '4h').toUpperCase()})`, fmtPrice(s.htfEma21)],
       ],
       ['KIGEZO', 'THAMANI'],
       [10, 14]
@@ -119,7 +122,7 @@ function buildForexMessage(pairSymbol, s, sig) {
     `mwenyewe (DYOR) na tumia risk management (Stop Loss) kabla ya biashara.`
   );
   L.push('');
-  L.push(`_Chanzo: bei + vigezo = Twelve Data (interval ${s.interval.toUpperCase()})._`);
+  L.push(`_Chanzo: bei + vigezo = Twelve Data (interval ${s.interval.toUpperCase()}); habari za kiuchumi = ForexFactory calendar._`);
   L.push('');
   L.push(buildFooter());
   return L.join('\n');
