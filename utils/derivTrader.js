@@ -298,6 +298,11 @@ async function closeAll() {
   return results;
 }
 
+async function getContractDetails(contractId) {
+  const res = await send({ proposal_open_contract: 1, contract_id: contractId });
+  return res.proposal_open_contract;
+}
+
 async function getBalance() {
   const res = await send({ balance: 1 });
   return res.balance; // { balance, currency, ... }
@@ -308,6 +313,7 @@ module.exports = {
   ALLOWED_MULTIPLIERS,
   MIN_STAKE_USD,
   getOpenPositions,
+  getContractDetails,
   closeContract,
   closeAll,
   getBalance,
