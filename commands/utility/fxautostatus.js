@@ -16,6 +16,17 @@ function timeAgo(ts) {
   return `saa ${hrs} zilizopita`;
 }
 
+function timeUntil(ts) {
+  if (!ts) return 'haijulikani';
+  const secs = Math.floor((ts - Date.now()) / 1000);
+  if (secs <= 0) return 'sasa hivi';
+  if (secs < 60) return `baada ya sekunde ${secs}`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `baada ya dakika ${mins}`;
+  const hrs = Math.floor(mins / 60);
+  return `baada ya saa ${hrs}`;
+}
+
 function directionEmoji(d) {
   if (d === 'BUY') return '🟢 BUY';
   if (d === 'SELL') return '🔴 SELL';
@@ -51,6 +62,23 @@ module.exports = {
     lines.push(`🎯 Kikomo cha signal: ≥${s.strengthThreshold}%`);
     lines.push(`💵 Stake: $${s.stake}  •  Multiplier: x${s.multiplier}`);
     lines.push(`🛡️ SL/TP: ATR×${s.slAtrMult} / ATR×${s.tpAtrMult} (fallback $${s.fallbackSl}/$${s.fallbackTp})`);
+    lines.push('');
+
+    lines.push(`🧯 *Circuit Breaker*`);
+    lines.push(
+      `   • Faida/Hasara ya leo (UTC): ${s.dailyPnL >= 0 ? '✅ +' : '🔴 '}$${Math.abs(s.dailyPnL).toFixed(2)}` +
+        ` (kikomo: $${s.maxDailyLossUsd})`
+    );
+    lines.push(`   • Hasara mfululizo sasa: ${s.consecutiveLosses}/${s.maxConsecutiveLosses}`);
+    lines.push(`   • Trades wazi: ${s.openTrades.length}/${s.maxConcurrentTrades}`);
+    if (s.isPaused) {
+      const reasonText = s.pauseReason === 'daily_loss_limit'
+        ? 'kikomo cha hasara ya leo kimefikiwa'
+        : 'hasara mfululizo zimefikia kikomo (cooldown)';
+      lines.push(`   • 🛑 *IMESIMAMA* (${reasonText}) — itaendelea: ${timeUntil(s.pausedUntil)}`);
+    } else {
+      lines.push(`   • ✅ Haijasimama — inaendelea kufungua trades kwa kawaida`);
+    }
     lines.push('');
 
     lines.push(`📡 *Signal ya Mwisho kwa Jozi*`);
