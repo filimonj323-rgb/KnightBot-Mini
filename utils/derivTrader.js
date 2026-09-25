@@ -326,6 +326,23 @@ async function getContractDetails(contractId) {
   return res.proposal_open_contract;
 }
 
+// getContractDetails (proposal_open_contract) mara nyingi HAITOI tena
+// sell_price/profit sahihi baada ya contract kufungwa kikamilifu na
+// kutoweka kwenye portfolio (hasa ikiwa imefungwa muda mrefu uliopita au
+// baada ya WebSocket kuunganishwa upya). Kwa contract iliyofungwa, chanzo
+// cha kuaminika zaidi ni "profit_table" — historia ya transactions
+// zilizokamilika — hivyo tunatafuta contract_id husika humo.
+async function getClosedContractFromHistory(contractId) {
+  const res = await send({
+    profit_table: 1,
+    description: 1,
+    limit: 25,
+    sort: 'DESC',
+  });
+  const rows = res.profit_table?.transactions || [];
+  return rows.find((t) => String(t.contract_id) === String(contractId)) || null;
+}
+
 async function getBalance() {
   const res = await send({ balance: 1 });
   return res.balance; // { balance, currency, ... }
@@ -338,6 +355,7 @@ module.exports = {
   getOpenPositions,
   getOpenPositionsLive,
   getContractDetails,
+  getClosedContractFromHistory,
   closeContract,
   closeAll,
   getBalance,

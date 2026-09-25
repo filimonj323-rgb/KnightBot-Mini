@@ -37,6 +37,7 @@ const {
   placeMultiplier,
   getOpenPositions,
   getContractDetails,
+  getClosedContractFromHistory,
   ALLOWED_MULTIPLIERS,
 } = require('./derivTrader');
 
@@ -227,21 +228,56 @@ async function pollClosedTrades() {
     if (openIds.has(contractId)) continue; // bado wazi
 
     openAutoTrades.delete(contractId);
+
+    // Hatua 1: proposal_open_contract — kazi vizuri contract ikitoka tu
+    // kwenye portfolio, lakini mara nyingi haitoi tena sell_price/profit
+    // sahihi contract ikishafungwa kikamilifu.
+    let sellPrice, profit;
     try {
       const details = await getContractDetails(contractId);
-      const profit = Number(details?.profit ?? 0);
+      sellPrice = Number(details?.sell_price);
+      profit = Number(details?.profit);
+    } catch (err) {
+      console.error(`[autoTrader] proposal_open_contract imeshindwa (${contractId}):`, err.message);
+    }
+
+    // Hatua 2: profit_table (historia ya transactions zilizofungwa) — chanzo
+    // cha kuaminika zaidi kwa contract iliyoshafungwa kabisa.
+    if (!Number.isFinite(profit) || !Number.isFinite(sellPrice)) {
+      try {
+        const closed = await getClosedContractFromHistory(contractId);
+        if (closed) {
+          sellPrice = Number.isFinite(sellPrice) ? sellPrice : Number(closed.sell_price);
+          profit = Number.isFinite(Number(closed.profit))
+            ? Number(closed.profit)
+            : sellPrice - Number(closed.buy_price);
+        }
+      } catch (err) {
+        console.error(`[autoTrader] profit_table imeshindwa (${contractId}):`, err.message);
+      }
+    }
+
+    // Hatua 3: fallback ya mwisho — kama tuna bei ya kufunga (sellPrice) tu,
+    // hesabu faida/hasara halisi wenyewe kutoka bei ya ununuzi tuliyohifadhi
+    // wakati trade ilipofunguliwa (info.buyPrice). Kwa Multipliers, profit
+    // halisi = sellPrice - buyPrice (thamani tayari ina multiplier ndani).
+    if (!Number.isFinite(profit) && Number.isFinite(sellPrice) && Number.isFinite(info.buyPrice)) {
+      profit = sellPrice - info.buyPrice;
+    }
+
+    if (Number.isFinite(profit)) {
       const won = profit >= 0;
       await notify(
         `${won ? '✅' : '🔴'} *AUTO-TRADE IMEFUNGWA — ${info.code}*\n\n` +
           `Mwelekeo: ${info.direction}\n` +
           `Matokeo: ${won ? 'FAIDA 📈' : 'HASARA 📉'}  $${fmt(Math.abs(profit))}\n` +
-          `Bei ya kufunga: $${fmt(details?.sell_price ?? 0)}\n` +
+          `Bei ya ununuzi: $${fmt(info.buyPrice)}\n` +
+          `Bei ya kufunga: $${Number.isFinite(sellPrice) ? fmt(sellPrice) : 'N/A'}\n` +
           `🆔 Contract ID: ${contractId}`
       );
-    } catch (err) {
-      console.error(`[autoTrader] Imeshindwa kupata matokeo ya ${contractId}:`, err.message);
+    } else {
       await notify(
-        `ℹ️ *AUTO-TRADE IMEFUNGWA — ${info.code}*\n(Imeshindwa kupata faida/hasara halisi — angalia .positions au Deriv moja kwa moja.)`
+        `ℹ️ *AUTO-TRADE IMEFUNGWA — ${info.code}*\n(Imeshindwa kupata faida/hasara halisi hata baada ya kuangalia historia ya transactions — angalia .positions au Deriv moja kwa moja.)\n🆔 Contract ID: ${contractId}`
       );
     }
   }
