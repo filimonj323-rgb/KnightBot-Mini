@@ -1311,6 +1311,38 @@ async function updateSettingsForToken(token, { prefix, botName }) {
 }
 
 /**
+ * In-chat `.setprefix` for a PAIRED customer's own bot (commands/owner/
+ * setprefix.js). Mirrors updateSettingsForToken's prefix half, but keyed by
+ * phoneNumber directly (the command already has sock.pairingOwnerId, no
+ * dashboard token involved). Deliberately writes ONLY to this phoneNumber's
+ * own settings row — never to the shared config.js — so one customer
+ * running .setprefix can never change another customer's (or the main
+ * bot's) prefix. See the settingsIndex comment near getInstanceSettings for
+ * why mutating config.js is unsafe here.
+ */
+async function setPrefixForOwnInstance(phoneNumber, prefix) {
+  const trimmed = typeof prefix === 'string' ? prefix.trim() : '';
+  if (!trimmed) throw new Error('Prefix haiwezi kuwa tupu.');
+  if (trimmed.length > 3) throw new Error('Prefix isiwe zaidi ya herufi 3.');
+
+  const current = await getInstanceSettings(phoneNumber); // keeps botName intact
+  await db.query(
+    `INSERT INTO settings (phoneNumber, prefix, botName) VALUES (?, ?, ?)
+     ON CONFLICT(phoneNumber) DO UPDATE SET prefix = excluded.prefix`,
+    [phoneNumber, trimmed, current.botName || null]
+  );
+
+  // Live-update the running connection so it applies instantly, without a
+  // restart — same mechanism as updateSettingsForToken/updateAutomationForToken.
+  const inst = instances.get(phoneNumber);
+  if (inst?.sock) {
+    inst.sock.instanceSettings = await getInstanceSettings(phoneNumber);
+  }
+
+  return trimmed;
+}
+
+/**
  * Dashboard "Vipengele vya Kiotomatiki" — save a customer's automation
  * toggles (autoTyping, autoRecording, n.k). Applies to the whole instance
  * (not one group), takes effect immediately on the live connection via
@@ -2138,6 +2170,7 @@ module.exports = {
   resolveMediaDownloadForToken,
   getSettingsForToken,
   updateSettingsForToken,
+  setPrefixForOwnInstance,
   updateAutomationForToken,
   getProtectionForToken,
   updateProtectionForToken,
