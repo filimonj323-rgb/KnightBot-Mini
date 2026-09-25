@@ -34,6 +34,21 @@
  *     badala ya mwenendo halisi. TP inapandishwa kwa uwiano uleule.
  *   AUTO_TRADE_PAIR_STAGGER_MS       — muda wa kusubiri kati ya jozi moja
  *     na nyingine ili kuepuka 429 ya Twelve Data (default: sekunde 70)
+ *
+ * ── Circuit breakers (kuzuia hasara za mfululizo) ──────────────────────
+ *   AUTO_TRADE_MAX_DAILY_LOSS_USD    — ukifika hasara hii kwa siku (UTC),
+ *     bot inasimamisha kufungua trade mpya hadi siku ifuatayo (default: $15)
+ *   AUTO_TRADE_MAX_CONSECUTIVE_LOSSES — hasara mfululizo (bila FAIDA
+ *     katikati) zinazosababisha "cooldown" ya muda (default: 3)
+ *   AUTO_TRADE_COOLDOWN_MS           — muda wa kusimama baada ya hasara
+ *     mfululizo kufika kikomo (default: saa 4)
+ *   AUTO_TRADE_MAX_CONCURRENT        — trades wazi kiwango cha juu wakati
+ *     mmoja (jumla ya jozi zote) — inazuia exposure kubwa mno ikiwa jozi
+ *     nyingi zinatoa signal wakati mmoja (default: idadi ya PAIRS, yaani 3)
+ *
+ * Trades wazi TAYARI hazighairishwi na circuit breaker — SL/TP zake
+ * zinaendelea kufanya kazi Deriv kama kawaida; kinachosimama ni KUFUNGUA
+ * trade MPYA tu.
  */
 
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('./forexSignal');
@@ -119,6 +134,22 @@ const PAIRS = [
   { code: 'USDJPY', symbol: 'USD/JPY' },
 ];
 
+// ── Circuit breakers — hulinda dhidi ya hasara za mfululizo/kubwa mno ──
+const MAX_DAILY_LOSS_USD = Number(process.env.AUTO_TRADE_MAX_DAILY_LOSS_USD || 15);
+const MAX_CONSECUTIVE_LOSSES = Number(process.env.AUTO_TRADE_MAX_CONSECUTIVE_LOSSES || 3);
+const COOLDOWN_MS = Number(process.env.AUTO_TRADE_COOLDOWN_MS || 4 * 60 * 60 * 1000); // saa 4
+const MAX_CONCURRENT_TRADES = Number(process.env.AUTO_TRADE_MAX_CONCURRENT || PAIRS.length);
+
+function utcDateKey(ts) {
+  return new Date(ts).toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+function endOfUtcDay(ts) {
+  const d = new Date(ts);
+  d.setUTCHours(24, 0, 0, 0); // saa 00:00 UTC ya kesho
+  return d.getTime();
+}
+
 let ownerJid = null;
 let waSock = null;
 let startedAt = null;
@@ -128,6 +159,37 @@ let lastCycleAt = null;
 const openAutoTrades = new Map();
 // code -> { direction, strength, price, atr, notes, checkedAt }
 const lastSignals = new Map();
+
+// Hali ya circuit breaker
+let dailyPnL = 0;
+let dailyKey = utcDateKey(Date.now());
+let consecutiveLosses = 0;
+let pausedUntil = null; // timestamp (ms) — null = hakuna pause
+let pauseReason = null; // 'daily_loss_limit' | 'consecutive_losses' | null
+
+function ensureDailyResetIfNewDay() {
+  const key = utcDateKey(Date.now());
+  if (key === dailyKey) return;
+  dailyKey = key;
+  dailyPnL = 0;
+  consecutiveLosses = 0;
+  // Siku mpya = anza upya — ondoa pause ya "hasara ya siku" (si ya cooldown).
+  if (pauseReason === 'daily_loss_limit') {
+    pausedUntil = null;
+    pauseReason = null;
+  }
+}
+
+// true = bot isifungue trade mpya sasa hivi (bado katika kipindi cha pause).
+function isPaused() {
+  ensureDailyResetIfNewDay();
+  if (!pausedUntil) return false;
+  if (Date.now() < pausedUntil) return true;
+  // Muda wa pause umekwisha — fungua tena kiotomatiki.
+  pausedUntil = null;
+  pauseReason = null;
+  return false;
+}
 
 function fmt(n, d = 2) {
   return Number(n).toFixed(d);
@@ -144,6 +206,13 @@ async function notify(text) {
 
 async function checkPairAndTrade(pairInfo) {
   const { code, symbol } = pairInfo;
+
+  // Circuit breaker: hasara ya siku au mfululizo imefika kikomo — usifungue
+  // trade mpya (trades zilizo wazi tayari haziguswi, zinaendelea Deriv).
+  if (isPaused()) return;
+
+  // Zuia trades wazi nyingi mno kwa wakati mmoja (exposure kubwa).
+  if (openAutoTrades.size >= MAX_CONCURRENT_TRADES) return;
 
   // Zuia kufungua trade nyingine kwa jozi ile ile wakati moja tayari iko wazi.
   const alreadyOpen = [...openAutoTrades.values()].some((t) => t.code === code);
@@ -301,6 +370,12 @@ async function pollClosedTrades() {
 
     if (Number.isFinite(profit)) {
       const won = profit >= 0;
+
+      // Circuit breaker — sasisha takwimu za siku (UTC) na mfululizo wa hasara.
+      ensureDailyResetIfNewDay();
+      dailyPnL += profit;
+      consecutiveLosses = won ? 0 : consecutiveLosses + 1;
+
       await notify(
         `${won ? '✅' : '🔴'} *AUTO-TRADE IMEFUNGWA — ${info.code}*\n\n` +
           `Mwelekeo: ${info.direction}\n` +
@@ -309,6 +384,28 @@ async function pollClosedTrades() {
           `Bei ya kufunga: $${Number.isFinite(sellPrice) ? fmt(sellPrice) : 'N/A'}\n` +
           `🆔 Contract ID: ${contractId}`
       );
+
+      // Kikomo cha hasara ya SIKU (UTC) — kinapewa kipaumbele juu ya
+      // "consecutive losses" (havichanganywi — kimoja tu kwa wakati mmoja).
+      if (dailyPnL <= -MAX_DAILY_LOSS_USD && pauseReason !== 'daily_loss_limit') {
+        pausedUntil = endOfUtcDay(Date.now());
+        pauseReason = 'daily_loss_limit';
+        await notify(
+          `🛑 *AUTO-TRADE IMESIMAMISHWA KWA LEO*\n\n` +
+            `Hasara ya jumla ya leo imefika $${fmt(Math.abs(dailyPnL))} (kikomo: $${fmt(MAX_DAILY_LOSS_USD)}).\n` +
+            `Bot HAITAFUNGUA trade mpya hadi saa 24 UTC ijayo. Trades zilizo wazi tayari haziguswi na zitaendelea kufunga zenyewe (SL/TP).`
+        );
+      } else if (consecutiveLosses >= MAX_CONSECUTIVE_LOSSES && !pauseReason) {
+        pausedUntil = Date.now() + COOLDOWN_MS;
+        pauseReason = 'consecutive_losses';
+        consecutiveLosses = 0; // anza kuhesabu upya baada ya cooldown kwisha
+        await notify(
+          `🛑 *AUTO-TRADE IMESIMAMISHWA KWA MUDA*\n\n` +
+            `Hasara ${MAX_CONSECUTIVE_LOSSES} mfululizo bila FAIDA katikati — inaashiria soko ` +
+            `halilingani na signal yetu wakati huu. Bot inasimama kwa saa ${Math.round(COOLDOWN_MS / 3600000)} ` +
+            `kabla ya kuendelea kufungua trade mpya.`
+        );
+      }
     } else {
       await notify(
         `ℹ️ *AUTO-TRADE IMEFUNGWA — ${info.code}*\n(Imeshindwa kupata faida/hasara halisi hata baada ya kuangalia historia ya transactions — angalia .positions au Deriv moja kwa moja.)\n🆔 Contract ID: ${contractId}`
@@ -339,7 +436,9 @@ function start({ sock, notifyJid }) {
     `[autoTrader] ✅ Auto-trading IMEWASHWA — jozi: ${PAIRS.map((p) => p.code).join(', ')}, ` +
       `kila dakika ${Math.round(CHECK_INTERVAL_MS / 60000)}, threshold: ${STRENGTH_THRESHOLD}%, ` +
       `stake: $${STAKE_USD}, multiplier: x${MULTIPLIER}, SL/TP: ATR×${SL_ATR_MULT}/ATR×${TP_ATR_MULT} ` +
-      `(fallback ya dola fasta: $${FALLBACK_SL_USD}/$${FALLBACK_TP_USD}).`
+      `(fallback ya dola fasta: $${FALLBACK_SL_USD}/$${FALLBACK_TP_USD}). ` +
+      `Circuit breakers: max daily loss $${MAX_DAILY_LOSS_USD}, max ${MAX_CONSECUTIVE_LOSSES} hasara mfululizo ` +
+      `(cooldown saa ${Math.round(COOLDOWN_MS / 3600000)}), max ${MAX_CONCURRENT_TRADES} trades wazi kwa wakati mmoja.`
   );
 
   runCycle().catch((err) => console.error('[autoTrader] runCycle error:', err.message));
@@ -382,6 +481,15 @@ function getStatus() {
     pairs: PAIRS.map((p) => p.code),
     signals: PAIRS.map((p) => ({ code: p.code, ...(lastSignals.get(p.code) || {}) })),
     openTrades: [...openAutoTrades.entries()].map(([contractId, info]) => ({ contractId, ...info })),
+    // Circuit breaker
+    dailyPnL: Number(dailyPnL.toFixed(2)),
+    consecutiveLosses,
+    maxDailyLossUsd: MAX_DAILY_LOSS_USD,
+    maxConsecutiveLosses: MAX_CONSECUTIVE_LOSSES,
+    maxConcurrentTrades: MAX_CONCURRENT_TRADES,
+    isPaused: isPaused(),
+    pausedUntil,
+    pauseReason,
   };
 }
 
