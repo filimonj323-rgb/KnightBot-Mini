@@ -35,7 +35,10 @@
  *     ambayo ilikuwa ikisababisha trade kufungwa haraka kwa noise ya bei
  *     badala ya mwenendo halisi. TP inapandishwa kwa uwiano uleule.
  *   AUTO_TRADE_PAIR_STAGGER_MS       — muda wa kusubiri kati ya jozi moja
- *     na nyingine ili kuepuka 429 ya Twelve Data (default: sekunde 70)
+ *     na nyingine ili kuepuka 429 ya Twelve Data (default: sekunde 70 —
+ *     tahadhari, si lazima kwa ukali tena tangu forexSignal.js ibadilike
+ *     kutumia raw candles (credits 2 tu kwa signal badala ya ~11), lakini
+ *     bado ni desturi nzuri kuepuka mabump ya bahati mbaya)
  *   NEWS_RISK_WINDOW_MIN             — dakika kabla/baada ya tukio la High
  *     impact (utils/economicCalendar.js) ambazo auto-trade INASIMAMA
  *     kufungua trade MPYA (default: 30). Haiathiri trade zilizo wazi tayari.
