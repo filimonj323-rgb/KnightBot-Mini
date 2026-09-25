@@ -311,7 +311,7 @@ async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, m
 // ilipopata namba.
 function parseMinLimitOrderAmount(message) {
   const m = String(message || '').match(
-    /(?:equal to or higher than|higher than|greater than|at least)\s*\$?\s*([\d.]+)/i
+    /(?:equal to or higher than|higher than|greater than|at least)\s*\$?\s*(\d+(?:\.\d+)?)/i
   );
   if (!m) return null;
   const n = Number(m[1]);
