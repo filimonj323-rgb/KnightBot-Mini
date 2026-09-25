@@ -4,10 +4,12 @@
  * ile ile ya utils/forexSignal.js (EMA9/EMA21, RSI14, MACD).
  *
  * Kanuni: kila saa (AUTO_TRADE_CHECK_INTERVAL_MS), bot inaangalia signal
- * ya kila jozi. Ikiwa signal INA MWELEKEO (BUY/SELL) na nguvu (strength)
- * >= AUTO_TRADE_STRENGTH_THRESHOLD (default 67%, yaani angalau vigezo 2
- * kati ya 3: EMA crossover, RSI, MACD vinakubaliana), bot inafungua trade
- * KIOTOMATIKO (Deriv Multipliers) na kutuma notification WhatsApp kwa DM
+ * ya kila jozi (kutoka utils/forexSignal.js — EMA9/EMA21, RSI14, MACD kwa
+ * 1h, PAMOJA na uthibitisho wa mwelekeo wa 4h/HTF). Ikiwa signal INA
+ * MWELEKEO (BUY/SELL) na nguvu (strength) >= AUTO_TRADE_STRENGTH_THRESHOLD
+ * (default 67%, yaani angalau vigezo 3 kati ya 4: EMA crossover, RSI,
+ * MACD, na mwelekeo wa 4h — signal lazima ithibitishwe na TIMEFRAME MBILI,
+ * si moja), bot inafungua trade KIOTOMATIKO (Deriv Multipliers) na kutuma notification WhatsApp kwa DM
  * ya owner. Bot pia inaangalia kila baada ya dakika chache (POLL_MS) kama
  * trade yoyote iliyofunguliwa kiotomatiki imefungwa (SL/TP imegusa) na
  * kutuma notification ya matokeo (faida/hasara).

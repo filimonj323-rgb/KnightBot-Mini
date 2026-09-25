@@ -13,15 +13,23 @@
  *
  * Vigezo vinavyotumika (vyote kutoka Twelve Data moja kwa moja):
  *   - Bei ya sasa
- *   - EMA9 dhidi ya EMA21 (mwelekeo/trend)
+ *   - EMA9 dhidi ya EMA21 (mwelekeo/trend) — kwenye `interval` (default 1h)
  *   - RSI(14) (overbought >70 / oversold <30)
  *   - MACD dhidi ya Signal line (momentum)
  *   - ATR(14) (Average True Range — volatility, inatumika kuhesabu SL/TP
  *     ya auto-trade kiotomatiki kulingana na trend — angalia utils/autoTrader.js)
+ *   - Multi-timeframe confirmation: EMA9 dhidi ya EMA21 kwenye `htfInterval`
+ *     (default 4h) — mwelekeo wa muda mrefu zaidi. Signal ya 1h peke yake
+ *     mara nyingi ni "noise" ya muda mfupi (false breakout); kuhitaji 4h
+ *     nayo ikubaliane kunapunguza sana signal za uongo. Angalia
+ *     FOREX_HTF_INTERVAL kwenye env kubadilisha (mfano '1day').
  *
  * Cache: dakika 3 kwa kila jozi+interval — inapunguza matumizi ya credits
  * (tier bure ina mpaka wa 8 maombi/dakika, na ombi 1 la signal linatumia
- * credits 6 — price+rsi+macd+ema9+ema21+atr) na kuepuka 429.
+ * credits 8 — price+rsi+macd+ema9+ema21+atr (1h) + ema9+ema21 (4h)) na
+ * kuepuka 429. Kwa vile hii iko KARIBU sana na kikomo cha 8/dakika,
+ * AUTO_TRADE_PAIR_STAGGER_MS (utils/autoTrader.js) LAZIMA ibaki angalau
+ * sekunde 60-70 kati ya jozi moja na nyingine.
  */
 
 const axios = require('axios');
@@ -31,6 +39,11 @@ const BASE_URL = 'https://api.twelvedata.com';
 const TIMEOUT_MS = 12000;
 const CACHE_MS = 3 * 60 * 1000; // dakika 3
 const DEFAULT_INTERVAL = '1h';
+// Timeframe ya juu zaidi kwa uthibitisho wa mwelekeo (higher-timeframe
+// confirmation) — 4h ni chaguo la kawaida kati ya kuwa na maana (si noise
+// ya dakika chache) na kutoa signal za kutosha kwa siku (si polepole mno
+// kama daily).
+const HTF_INTERVAL = process.env.FOREX_HTF_INTERVAL || '4h';
 
 const cache = new Map(); // "PAIR|interval" -> { data, at }
 
@@ -63,20 +76,27 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     throw new Error('TWELVE_DATA_API_KEY haipo kwenye env');
   }
 
-  const key = `${pairSymbol}|${interval}`;
+  const key = `${pairSymbol}|${interval}|${HTF_INTERVAL}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.at < CACHE_MS) {
     return cached.data;
   }
 
-  const [price, rsi, macd, ema9, ema21, atr] = await Promise.all([
+  const [price, rsi, macd, ema9, ema21, atr, htfEma9, htfEma21] = await Promise.all([
     td('price', { symbol: pairSymbol }),
     td('rsi', { symbol: pairSymbol, interval, time_period: 14 }),
     td('macd', { symbol: pairSymbol, interval }),
     td('ema', { symbol: pairSymbol, interval, time_period: 9 }),
     td('ema', { symbol: pairSymbol, interval, time_period: 21 }),
     td('atr', { symbol: pairSymbol, interval, time_period: 14 }),
+    // Multi-timeframe confirmation — EMA9/EMA21 kwenye HTF_INTERVAL (4h).
+    td('ema', { symbol: pairSymbol, interval: HTF_INTERVAL, time_period: 9 }),
+    td('ema', { symbol: pairSymbol, interval: HTF_INTERVAL, time_period: 21 }),
   ]);
+
+  const htf9 = lastVal(htfEma9, 'ema');
+  const htf21 = lastVal(htfEma21, 'ema');
+  const htfTrend = htf9 != null && htf21 != null ? (htf9 > htf21 ? 'BUY' : 'SELL') : null;
 
   const snapshot = {
     pair: pairSymbol,
@@ -89,6 +109,10 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     ema9: lastVal(ema9, 'ema'),
     ema21: lastVal(ema21, 'ema'),
     atr: lastVal(atr, 'atr'),
+    htfInterval: HTF_INTERVAL,
+    htfEma9: htf9,
+    htfEma21: htf21,
+    htfTrend,
     at: Date.now(),
   };
 
@@ -106,7 +130,7 @@ function computeSignal(s) {
   let bullish = 0;
   let bearish = 0;
 
-  // Mwelekeo (EMA crossover)
+  // Mwelekeo (EMA crossover) — timeframe ya signal yenyewe (1h)
   if (s.ema9 != null && s.ema21 != null) {
     if (s.ema9 > s.ema21) {
       bullish += 1;
@@ -142,6 +166,20 @@ function computeSignal(s) {
     }
   }
 
+  // Multi-timeframe confirmation (mwelekeo wa 4h kwa default) — kura ya 4,
+  // uzito sawa na nyingine (si "gate" ngumu, bado ni sehemu ya muundo
+  // uleule wa "votes" unaoeleweka). Athari yake halisi: kwa threshold ya
+  // default (67%), sasa LAZIMA angalau 3/4 (75%) zikubaliane badala ya
+  // 2/3 (67%) za awali — signal lazima ithibitishwe na TIMEFRAME MBILI
+  // (1h na 4h), si moja tu, kabla auto-trade haijafunguliwa.
+  if (s.htfTrend === 'BUY') {
+    bullish += 1;
+    notes.push(`Mwelekeo wa ${s.htfInterval || '4h'}: BUY (uthibitisho wa muda mrefu)`);
+  } else if (s.htfTrend === 'SELL') {
+    bearish += 1;
+    notes.push(`Mwelekeo wa ${s.htfInterval || '4h'}: SELL (uthibitisho wa muda mrefu)`);
+  }
+
   let direction = 'NEUTRAL';
   if (bullish > bearish) direction = 'BUY';
   else if (bearish > bullish) direction = 'SELL';
@@ -152,4 +190,4 @@ function computeSignal(s) {
   return { direction, strength, bullish, bearish, notes };
 }
 
-module.exports = { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL };
+module.exports = { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL };
