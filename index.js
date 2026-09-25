@@ -113,6 +113,7 @@ const qrcode = require('qrcode-terminal');
 // bots za wateja (wale wanatumia pairing code pekee, si QR).
 const qrImage = require('qrcode');
 const config = require('./config');
+const autoTrader = require('./utils/autoTrader');
 let handler; // populated by loadBaileysBridge()
 // Rejea ya sock kuu ya bot — inatumika na SIGTERM/SIGINT handler chini ili
 // kufunga connection vizuri wakati Railway inapoanza deploy mpya (bila hii,
@@ -630,6 +631,17 @@ async function startBot() {
         }
       }
       console.log(`🧹 Store cleaned. Active chats: ${store.messages.size}`);
+
+      // Auto-trading (forex, Deriv Multipliers) — inawashwa TU kama
+      // AUTO_TRADE_ENABLED=true kwenye env. Notifications zinatumwa DM
+      // kwa owner wa kwanza kwenye config.ownerNumber.
+      try {
+        const ownerRaw = Array.isArray(config.ownerNumber) ? config.ownerNumber[0] : config.ownerNumber;
+        const ownerJid = ownerRaw?.includes('@') ? ownerRaw : `${ownerRaw}@s.whatsapp.net`;
+        autoTrader.start({ sock, notifyJid: ownerJid });
+      } catch (err) {
+        console.error('❌ Imeshindwa kuanzisha auto-trader:', err.message);
+      }
     }
   });
 
