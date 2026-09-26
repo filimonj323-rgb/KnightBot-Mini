@@ -74,12 +74,18 @@ const fxPredictions = require('../utils/fxPredictions');
 const mainConfig = require('../config');
 
 // Jozi kuu 7 zinazoweza kuangaliwa kwenye dashboard (.fxtrading.html) —
-// EURUSD/GBPUSD/USDJPY ndizo zinazofuatiliwa na auto-trader kiotomatiki;
-// nyingine 4 zinaangaliwa TU mtu akibonyeza "Angalia" (kuepuka 429).
+// EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY ndizo zinazofuatiliwa na
+// auto-trader kiotomatiki (crosses zimeongezwa MAKUSUDI kupunguza
+// correlation risk, hazina USD); nyingine 3 zinaangaliwa TU mtu akibonyeza
+// "Angalia" (kuepuka 429).
 const FX_SYMBOL_MAP = {
   EURUSD: 'EUR/USD',
   GBPUSD: 'GBP/USD',
   USDJPY: 'USD/JPY',
+  EURGBP: 'EUR/GBP',
+  EURJPY: 'EUR/JPY',
+  GBPJPY: 'GBP/JPY',
+  AUDJPY: 'AUD/JPY',
   AUDUSD: 'AUD/USD',
   USDCHF: 'USD/CHF',
   USDCAD: 'USD/CAD',
