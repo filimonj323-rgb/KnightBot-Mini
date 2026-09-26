@@ -89,6 +89,7 @@
     background: rgba(255,184,77,0.08); border: 1px solid rgba(255,184,77,0.25); border-radius: 4px; }
 
   table { width: 100%; border-collapse: collapse; }
+  .table-wrap { overflow-x: auto; }
   thead th { text-align: left; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px; border-bottom: 1px solid var(--border); }
   tbody td { padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; }
   tbody tr:last-child td { border-bottom: none; }
@@ -602,6 +603,27 @@
     }
   }
 
+  function pairFromContract(p) {
+    // Baadhi ya matoleo ya Deriv API hayarudishi "symbol" safi kwenye
+    // portfolio — yanaacha field hiyo wazi na field pekee inayobaki na jina
+    // la jozi ni "shortcode" (mfano "MULTUP_FRXEURUSD_5.00_100_..._...").
+    // Tunajaribu field safi kwanza, kisha tunachomoa jozi kutoka shortcode
+    // badala ya kuonyesha namba zisizo na maana kwa mtumiaji.
+    const raw = p.symbol || p.underlying || p.display_name || '';
+    let m = String(raw).match(/^frx([A-Z]{6})$/i);
+    if (m) return `${m[1].slice(0, 3).toUpperCase()}/${m[1].slice(3).toUpperCase()}`;
+    m = String(p.shortcode || '').match(/FRX([A-Z]{6})/i);
+    if (m) return `${m[1].slice(0, 3).toUpperCase()}/${m[1].slice(3).toUpperCase()}`;
+    return raw || '—';
+  }
+
+  function fmtTradeDate(unixSeconds) {
+    if (!unixSeconds) return '—';
+    const d = new Date(Number(unixSeconds) * 1000);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('sw-TZ', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
   function renderPositions(positions) {
     if (!positions.length) {
       document.getElementById('positionsBox').innerHTML = `<div class="empty">📭 Hakuna trade iliyo wazi kwa sasa.</div>`;
@@ -613,9 +635,10 @@
       const dirClass = /up/i.test(p.contract_type || '') ? 'dir-buy' : 'dir-sell';
       const dirLabel = /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL';
       return `<tr>
-        <td>${p.symbol || p.shortcode || p.underlying || '—'}</td>
+        <td>${pairFromContract(p)}</td>
         <td class="${dirClass}">${dirLabel}</td>
         <td>$${fmt(p.buy_price)}</td>
+        <td>${fmtTradeDate(p.purchase_time || p.date_start)}</td>
         <td>$${fmt(p.bid_price)}</td>
         <td class="${plClass}">${pl >= 0 ? '+' : ''}$${fmt(pl)}</td>
         <td class="row-actions">
@@ -625,10 +648,12 @@
     }).join('');
 
     document.getElementById('positionsBox').innerHTML = `
-      <table>
-        <thead><tr><th>Jozi</th><th>Mwelekeo</th><th>Bei ya Kuingia</th><th>Bei ya Sasa</th><th>P/L</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Jozi</th><th>Mwelekeo</th><th>Stake</th><th>Tarehe</th><th>Thamani Sasa</th><th>P/L (Live)</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     `;
   }
 
@@ -744,10 +769,12 @@
 
     const table = `
       <div class="section-label">Trades za Mwisho ${r.trades.length > 30 ? '(30 kati ya ' + r.trades.length + ')' : ''}</div>
-      <table>
-        <thead><tr><th>Muda wa Kuingia</th><th>Mwelekeo</th><th>Matokeo</th><th>P/L</th><th>Bars</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Muda wa Kuingia</th><th>Mwelekeo</th><th>Matokeo</th><th>P/L</th><th>Bars</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     `;
 
     const warning = `
