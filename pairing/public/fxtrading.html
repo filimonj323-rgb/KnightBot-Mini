@@ -648,7 +648,7 @@
         <td>${fmtTradeDate(p.purchase_time || p.date_start)}</td>
         <td>$${fmt(p.bid_price)}</td>
         <td class="${plClass}">${pl >= 0 ? '+' : ''}$${fmt(pl)}</td>
-        <td class="sltp-cell" data-sl="${Number.isFinite(Number(slAmt)) ? Math.abs(Number(slAmt)) : ''}" data-tp="${Number.isFinite(Number(tpAmt)) ? Math.abs(Number(tpAmt)) : ''}">🔻${slTxt} / 🎯${tpTxt}</td>
+        <td class="sltp-cell" data-sl="${Number.isFinite(Number(slAmt)) ? Math.abs(Number(slAmt)) : ''}" data-tp="${Number.isFinite(Number(tpAmt)) ? Math.abs(Number(tpAmt)) : ''}">${slTxt}/${tpTxt}</td>
         <td class="row-actions">
           <button class="ghost" onclick="startEditLimits('${p.contract_id}')">✏️ Hariri</button>
           <button class="danger" onclick="closeOne('${p.contract_id}')">Funga</button>
