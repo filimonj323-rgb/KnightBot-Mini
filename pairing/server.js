@@ -595,6 +595,27 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, result });
       }
 
+      // Badilisha Stop Loss/Take Profit ya trade iliyo WAZI TAYARI (bila
+      // kuifunga) — tumia sehemu ya "Hariri" kwenye jedwali la Trades.
+      if (req.method === 'POST' && req.url === '/api/admin/fx/update-limits') {
+        const body = await readJsonBody(req);
+        if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
+
+        const result = await derivTrader.updateContractLimits(body.contract_id, {
+          stopLoss: body.stop_loss,
+          takeProfit: body.take_profit,
+        });
+
+        notifyOwnerWA(
+          `🖥️ *SL/TP IMEBADILISHWA (Dashboard)*\n\n` +
+            `🆔 Contract ID: ${body.contract_id}\n` +
+            (body.stop_loss ? `SL mpya: $${body.stop_loss}\n` : '') +
+            (body.take_profit ? `TP mpya: $${body.take_profit}\n` : '')
+        );
+
+        return sendJson(res, 200, { ok: true, result });
+      }
+
       // Funga trade MOJA (kwa contract_id).
       if (req.method === 'POST' && req.url === '/api/admin/fx/close') {
         const body = await readJsonBody(req);
