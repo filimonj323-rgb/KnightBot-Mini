@@ -108,7 +108,10 @@
   .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
   @media (max-width: 560px) { .grid2, .grid3 { grid-template-columns: 1fr; } .content { padding: 14px 12px 60px; } }
   .row-actions { display: flex; gap: 6px; }
-  .row-actions button { padding: 6px 10px; font-size: 11px; }
+  .row-actions button { padding: 6px 10px; font-size: 11px; width: auto; }
+  .row-actions button.save { background: var(--accent); color: #041008; border-color: var(--accent); }
+  .sltp-edit { display: flex; gap: 4px; }
+  .sltp-edit input { width: 62px; padding: 5px 6px; font-size: 11px; }
   .muted { color: var(--muted); }
   .signal-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
   .signal-row:last-child { border-bottom: none; }
@@ -634,14 +637,20 @@
       const plClass = pl >= 0 ? 'pl-pos' : 'pl-neg';
       const dirClass = /up/i.test(p.contract_type || '') ? 'dir-buy' : 'dir-sell';
       const dirLabel = /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL';
-      return `<tr>
+      const slAmt = p.limit_order?.stop_loss?.order_amount;
+      const tpAmt = p.limit_order?.take_profit?.order_amount;
+      const slTxt = Number.isFinite(Number(slAmt)) ? `$${fmt(Math.abs(Number(slAmt)))}` : '—';
+      const tpTxt = Number.isFinite(Number(tpAmt)) ? `$${fmt(Math.abs(Number(tpAmt)))}` : '—';
+      return `<tr data-contract-id="${p.contract_id}">
         <td>${pairFromContract(p)}</td>
         <td class="${dirClass}">${dirLabel}</td>
         <td>$${fmt(p.buy_price)}</td>
         <td>${fmtTradeDate(p.purchase_time || p.date_start)}</td>
         <td>$${fmt(p.bid_price)}</td>
         <td class="${plClass}">${pl >= 0 ? '+' : ''}$${fmt(pl)}</td>
+        <td class="sltp-cell" data-sl="${Number.isFinite(Number(slAmt)) ? Math.abs(Number(slAmt)) : ''}" data-tp="${Number.isFinite(Number(tpAmt)) ? Math.abs(Number(tpAmt)) : ''}">🔻${slTxt} / 🎯${tpTxt}</td>
         <td class="row-actions">
+          <button class="ghost" onclick="startEditLimits('${p.contract_id}')">✏️ Hariri</button>
           <button class="danger" onclick="closeOne('${p.contract_id}')">Funga</button>
         </td>
       </tr>`;
@@ -650,11 +659,50 @@
     document.getElementById('positionsBox').innerHTML = `
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Jozi</th><th>Mwelekeo</th><th>Stake</th><th>Tarehe</th><th>Thamani Sasa</th><th>P/L (Live)</th><th></th></tr></thead>
+          <thead><tr><th>Jozi</th><th>Mwelekeo</th><th>Stake</th><th>Tarehe</th><th>Thamani Sasa</th><th>P/L (Live)</th><th>SL / TP</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
     `;
+  }
+
+  // Hariri Stop Loss/Take Profit ya trade iliyo wazi bila kuifunga.
+  function startEditLimits(contractId) {
+    const row = document.querySelector(`tr[data-contract-id="${contractId}"]`);
+    if (!row) return;
+    const cell = row.querySelector('.sltp-cell');
+    const sl = cell.dataset.sl || '';
+    const tp = cell.dataset.tp || '';
+    cell.innerHTML = `
+      <div class="sltp-edit">
+        <input type="number" step="0.1" min="0.1" placeholder="SL $" value="${sl}" id="edSL-${contractId}" />
+        <input type="number" step="0.1" min="0.1" placeholder="TP $" value="${tp}" id="edTP-${contractId}" />
+      </div>
+    `;
+    row.querySelector('.row-actions').innerHTML = `
+      <button class="save" onclick="saveLimits('${contractId}')">💾 Hifadhi</button>
+      <button class="ghost" onclick="refresh()">Ghairi</button>
+    `;
+  }
+
+  async function saveLimits(contractId) {
+    const slInput = document.getElementById(`edSL-${contractId}`);
+    const tpInput = document.getElementById(`edTP-${contractId}`);
+    const stop_loss = slInput && slInput.value ? Number(slInput.value) : undefined;
+    const take_profit = tpInput && tpInput.value ? Number(tpInput.value) : undefined;
+    if (!stop_loss && !take_profit) {
+      alert('Weka angalau Stop Loss au Take Profit mpya.');
+      return;
+    }
+    try {
+      await api('/api/admin/fx/update-limits', {
+        method: 'POST',
+        body: JSON.stringify({ contract_id: contractId, stop_loss, take_profit }),
+      });
+      refresh();
+    } catch (e) {
+      alert('❌ ' + e.message);
+    }
   }
 
   async function refresh() {
