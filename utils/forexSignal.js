@@ -128,6 +128,9 @@ async function td(endpoint, params) {
 // ili candles ziwe kongwe→mpya moja kwa moja (rahisi kwa indicators.js
 // bila kuhitaji kugeuza array).
 async function fetchCandles(pairSymbol, interval, outputsize) {
+  if (!API_KEY) {
+    throw new Error('TWELVE_DATA_API_KEY haipo kwenye env');
+  }
   const res = await td('time_series', {
     symbol: pairSymbol,
     interval,
@@ -383,4 +386,13 @@ function computeSignal(s) {
   return { direction, strength, bullish, bearish, notes, newsRisk };
 }
 
-module.exports = { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL };
+module.exports = {
+  fetchForexSnapshot,
+  computeSignal,
+  DEFAULT_INTERVAL,
+  HTF_INTERVAL,
+  // ── Kwa ajili ya utils/backtest.js pekee ──────────────────────────────
+  fetchCandles,
+  getActiveSessions,
+  CCY_PRIMARY_SESSION,
+};

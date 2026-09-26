@@ -54,6 +54,25 @@
  *     mmoja (jumla ya jozi zote) — inazuia exposure kubwa mno ikiwa jozi
  *     nyingi zinatoa signal wakati mmoja (default: idadi ya PAIRS, yaani 3)
  *
+ * ── Regime filter (walk-forward validation dhidi ya utils/backtest.js) ─
+ *   AUTO_TRADE_REGIME_FILTER_ENABLED  — "true"/"false" (default: "true").
+ *     Kabla ya kufungua trade MPYA, bot inaendesha backtest FUPI ya bars
+ *     za HIVI KARIBUNI (si historia yote) kwa jozi husika. Ikiwa profit
+ *     factor ya hivi karibuni iko CHINI ya kiwango, bot INAZUIA kufungua
+ *     trade mpya kwa jozi hiyo — hata kama signal ya SASA "inaonekana
+ *     nzuri" — mpaka mkakati uonyeshe tena una edge kwenye hali ya sasa
+ *     ya soko. Trades zilizo wazi tayari HAZIGUSWI.
+ *   AUTO_TRADE_REGIME_MIN_PROFIT_FACTOR — kiwango cha chini (default 1.2)
+ *   AUTO_TRADE_REGIME_MIN_TRADES        — trades za chini kabisa ndani ya
+ *     backtest fupi kabla ya kuamini profit factor yake (default 5) — sampuli
+ *     ndogo mno haiaminiki, kwa hiyo bot HAIZUII kama data ni chache mno.
+ *   AUTO_TRADE_REGIME_BACKTEST_BARS      — bars za backtest fupi (default 500)
+ *   AUTO_TRADE_REGIME_CHECK_INTERVAL_MS  — mara ngapi backtest inarudiwa kwa
+ *     jozi ile ile (cache) — default saa 24 (si kila mzunguko, ingekula
+ *     credits nyingi za Twelve Data bure)
+ *   Backtest ikishindwa (mfano rate limit ya API), regime filter "inashindwa
+ *     wazi" (fail-open) — HAIZUII trade, inarudi kwenye tabia ya awali.
+ *
  * Trades wazi TAYARI hazighairishwi na circuit breaker — SL/TP zake
  * zinaendelea kufanya kazi Deriv kama kawaida; kinachosimama ni KUFUNGUA
  * trade MPYA tu.
@@ -161,6 +180,64 @@ const MAX_DAILY_LOSS_USD = Number(process.env.AUTO_TRADE_MAX_DAILY_LOSS_USD || 1
 const MAX_CONSECUTIVE_LOSSES = Number(process.env.AUTO_TRADE_MAX_CONSECUTIVE_LOSSES || 3);
 const COOLDOWN_MS = Number(process.env.AUTO_TRADE_COOLDOWN_MS || 4 * 60 * 60 * 1000); // saa 4
 const MAX_CONCURRENT_TRADES = Number(process.env.AUTO_TRADE_MAX_CONCURRENT || PAIRS.length);
+
+// ── Regime filter (walk-forward validation) ─────────────────────────────
+// Kabla ya kufungua trade MPYA, bot inaangalia kama mkakati bado una "edge"
+// kwenye DATA YA HIVI KARIBUNI (backtest fupi, si historia yote) — kama
+// profit factor imeshuka chini ya kiwango, bot INAZUIA trade mpya kwa jozi
+// hiyo hata kama signal ya SASA inaonekana nzuri. Matokeo yanahifadhiwa
+// (cache) kwa REGIME_CHECK_INTERVAL_MS ili kila mzunguko usiendeshe
+// backtest upya (ingekula credits za Twelve Data bila sababu).
+const REGIME_FILTER_ENABLED = String(process.env.AUTO_TRADE_REGIME_FILTER_ENABLED ?? 'true').toLowerCase() === 'true';
+const REGIME_MIN_PROFIT_FACTOR = Number(process.env.AUTO_TRADE_REGIME_MIN_PROFIT_FACTOR || 1.2);
+const REGIME_MIN_TRADES = Number(process.env.AUTO_TRADE_REGIME_MIN_TRADES || 5);
+const REGIME_BACKTEST_BARS = Number(process.env.AUTO_TRADE_REGIME_BACKTEST_BARS || 500);
+const REGIME_CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_REGIME_CHECK_INTERVAL_MS || 24 * 60 * 60 * 1000); // saa 24
+
+// code -> { ok, skipped, profitFactor, winRate, totalTrades, enoughData, checkedAt, error? }
+const regimeCache = new Map();
+
+async function checkRegimeFilter(code, symbol) {
+  if (!REGIME_FILTER_ENABLED) return { ok: true, skipped: true };
+
+  const cached = regimeCache.get(code);
+  if (cached && Date.now() - cached.checkedAt < REGIME_CHECK_INTERVAL_MS) {
+    return cached;
+  }
+
+  try {
+    // Lazy require (SI juu ya faili) — inazuia mzunguko wa require():
+    // utils/backtest.js nayo inahitaji autoTrader.js (getStatus,
+    // computeAtrBasedRisk). Kwa kuwa hii inaitwa WAKATI WA RUNTIME (bot
+    // tayari inaendesha, si mwanzoni mwa module load), module zote mbili
+    // huwa zimeshamaliza kupakia kikamilifu kabla hii haijaitwa.
+    const { runBacktest } = require('./backtest');
+    const result = await runBacktest({ code, symbol, bars: REGIME_BACKTEST_BARS });
+
+    const enoughData = result.totalTrades >= REGIME_MIN_TRADES;
+    const ok = !enoughData || (result.profitFactor !== null && result.profitFactor >= REGIME_MIN_PROFIT_FACTOR);
+
+    const entry = {
+      ok,
+      skipped: false,
+      profitFactor: result.profitFactor,
+      winRate: result.winRate,
+      totalTrades: result.totalTrades,
+      enoughData,
+      checkedAt: Date.now(),
+    };
+    regimeCache.set(code, entry);
+    return entry;
+  } catch (err) {
+    console.error(
+      `[autoTrader] Regime filter imeshindwa kwa ${code} (inaendelea BILA kuzuia — "fail-open"):`,
+      err.message
+    );
+    const entry = { ok: true, skipped: true, error: err.message, checkedAt: Date.now() };
+    regimeCache.set(code, entry);
+    return entry;
+  }
+}
 
 function utcDateKey(ts) {
   return new Date(ts).toISOString().slice(0, 10); // "YYYY-MM-DD"
@@ -450,6 +527,19 @@ async function checkPairAndTrade(pairInfo) {
     return;
   }
 
+  // Regime filter (walk-forward validation) — angalia kama mkakati bado
+  // una edge kwenye data ya HIVI KARIBUNI kabla ya kufungua trade mpya.
+  // Matokeo yanahifadhiwa kwenye lastSignals ili .fxautostatus ionyeshe.
+  const regime = await checkRegimeFilter(code, symbol);
+  lastSignals.set(code, { ...lastSignals.get(code), regime });
+  if (!regime.ok) {
+    console.log(
+      `[autoTrader] ${code}: skip — regime filter (profit factor ya hivi karibuni ${regime.profitFactor} ` +
+        `< kiwango ${REGIME_MIN_PROFIT_FACTOR}, kutoka trades ${regime.totalTrades} za backtest fupi).`
+    );
+    return;
+  }
+
   // Hesabu SL/TP kulingana na ATR (volatility halisi ya jozi wakati huo).
   const risk = computeAtrBasedRisk({
     atr: snapshot.atr,
@@ -669,7 +759,8 @@ function start({ sock, notifyJid }) {
       `stake: $${STAKE_USD}, multiplier: x${MULTIPLIER}, SL/TP: ATR×${SL_ATR_MULT}/ATR×${TP_ATR_MULT} ` +
       `(fallback ya dola fasta: $${FALLBACK_SL_USD}/$${FALLBACK_TP_USD}). ` +
       `Circuit breakers: max daily loss $${MAX_DAILY_LOSS_USD}, max ${MAX_CONSECUTIVE_LOSSES} hasara mfululizo ` +
-      `(cooldown saa ${Math.round(COOLDOWN_MS / 3600000)}), max ${MAX_CONCURRENT_TRADES} trades wazi kwa wakati mmoja.`
+      `(cooldown saa ${Math.round(COOLDOWN_MS / 3600000)}), max ${MAX_CONCURRENT_TRADES} trades wazi kwa wakati mmoja. ` +
+      `Regime filter: ${REGIME_FILTER_ENABLED ? `ON (min PF ${REGIME_MIN_PROFIT_FACTOR}, bars ${REGIME_BACKTEST_BARS})` : 'OFF'}.`
   );
 
   // Kwanza rejesha trades zilizokuwa wazi kabla ya restart/redeploy hii
@@ -737,7 +828,26 @@ function getStatus() {
     isPaused: isPaused(),
     pausedUntil,
     pauseReason,
+    // Regime filter (walk-forward validation)
+    regimeFilter: {
+      enabled: REGIME_FILTER_ENABLED,
+      minProfitFactor: REGIME_MIN_PROFIT_FACTOR,
+      minTrades: REGIME_MIN_TRADES,
+      backtestBars: REGIME_BACKTEST_BARS,
+      checkIntervalMs: REGIME_CHECK_INTERVAL_MS,
+    },
   };
 }
 
-module.exports = { start, stop, getStatus, setStakeUsd, PAIRS, STRENGTH_THRESHOLD, openAutoTrades };
+module.exports = {
+  start,
+  stop,
+  getStatus,
+  setStakeUsd,
+  PAIRS,
+  STRENGTH_THRESHOLD,
+  openAutoTrades,
+  // Kwa ajili ya utils/backtest.js — formula HII HII inatumika live, ili
+  // matokeo ya backtest yaendane na kile bot inachofanya kweli.
+  computeAtrBasedRisk,
+};

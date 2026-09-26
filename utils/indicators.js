@@ -274,6 +274,202 @@ function computeAllIndicators(candles) {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// SERIES VERSIONS — kwa ajili ya BACKTESTING pekee (utils/backtest.js).
+//
+// Functions za juu (*Latest) zinahesabu kutoka mwanzo na kurudisha thamani
+// MOJA TU ya mwisho — sahihi kwa live trading (tunataka thamani ya SASA
+// pekee), lakini kwa backtest tunahitaji indicator kwa KILA bar ya
+// kihistoria. Kuita *Latest() kwa kila bar (kwa kuongeza dirisha la candles
+// kidogo kidogo) ingekuwa O(n²) — polepole mno kwa bars 1000+.
+//
+// Kila function hapa chini inarudisha ARRAY yenye URefu SAWA na candles/
+// closes ya awali (null kabla ya kuwa na data ya kutosha), IMEHESABIWA
+// kwa PASS MOJA (O(n)) — index `i` ya matokeo inalingana MOJA KWA MOJA
+// na candle/close ya index `i` ile ile. Formula ni ZILE ZILE (Wilder/
+// standard) na *Latest husika — thamani ya index ya MWISHO ya kila array
+// hapa lazima ifanane na *Latest() ikiitwa kwa candles/closes zote.
+// ─────────────────────────────────────────────────────────────────────────
+
+function atrSeries(candles, period = 14) {
+  const n = candles.length;
+  const out = new Array(n).fill(null);
+  const tr = trueRangeSeries(candles);
+
+  const trValues = [];
+  const trCandleIndex = [];
+  for (let i = 0; i < n; i++) {
+    if (tr[i] != null) {
+      trValues.push(tr[i]);
+      trCandleIndex.push(i);
+    }
+  }
+  if (trValues.length < period) return out;
+
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += trValues[i];
+  let atr = sum / period;
+  out[trCandleIndex[period - 1]] = atr;
+  for (let i = period; i < trValues.length; i++) {
+    atr = (atr * (period - 1) + trValues[i]) / period;
+    out[trCandleIndex[i]] = atr;
+  }
+  return out;
+}
+
+function adxSeries(candles, period = 14) {
+  const n = candles.length;
+  const out = new Array(n).fill(null);
+  if (n < period * 2 + 1) return out;
+
+  const highs = candles.map((c) => toNum(c.high));
+  const lows = candles.map((c) => toNum(c.low));
+  const tr = trueRangeSeries(candles);
+
+  const plusDM = new Array(n).fill(null);
+  const minusDM = new Array(n).fill(null);
+  for (let i = 1; i < n; i++) {
+    const upMove = highs[i] - highs[i - 1];
+    const downMove = lows[i - 1] - lows[i];
+    plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0;
+  }
+
+  let smTR = 0;
+  let smPlusDM = 0;
+  let smMinusDM = 0;
+  for (let i = 1; i <= period; i++) {
+    smTR += tr[i] || 0;
+    smPlusDM += plusDM[i] || 0;
+    smMinusDM += minusDM[i] || 0;
+  }
+
+  const dxSeries = [];
+  const dxCandleIndex = [];
+  for (let i = period + 1; i < n; i++) {
+    smTR = smTR - smTR / period + (tr[i] || 0);
+    smPlusDM = smPlusDM - smPlusDM / period + (plusDM[i] || 0);
+    smMinusDM = smMinusDM - smMinusDM / period + (minusDM[i] || 0);
+
+    const plusDI = smTR === 0 ? 0 : (100 * smPlusDM) / smTR;
+    const minusDI = smTR === 0 ? 0 : (100 * smMinusDM) / smTR;
+    const diSum = plusDI + minusDI;
+    const dx = diSum === 0 ? 0 : (100 * Math.abs(plusDI - minusDI)) / diSum;
+    dxSeries.push(dx);
+    dxCandleIndex.push(i);
+  }
+
+  if (dxSeries.length < period) return out;
+
+  let adx = dxSeries.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out[dxCandleIndex[period - 1]] = adx;
+  for (let i = period; i < dxSeries.length; i++) {
+    adx = (adx * (period - 1) + dxSeries[i]) / period;
+    out[dxCandleIndex[i]] = adx;
+  }
+  return out;
+}
+
+function bbandsSeries(closes, period = 20, mult = 2) {
+  const n = closes.length;
+  const upper = new Array(n).fill(null);
+  const middle = new Array(n).fill(null);
+  const lower = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i++) {
+    const window = closes.slice(i - period + 1, i + 1);
+    const mean = window.reduce((a, b) => a + b, 0) / period;
+    const variance = window.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
+    const sd = Math.sqrt(variance);
+    upper[i] = mean + mult * sd;
+    middle[i] = mean;
+    lower[i] = mean - mult * sd;
+  }
+  return { upper, middle, lower };
+}
+
+function stochRsiSeries(closes, rsiPeriod = 14, stochPeriod = 14, kSmooth = 3, dSmooth = 3) {
+  const n = closes.length;
+  const kOut = new Array(n).fill(null);
+  const dOut = new Array(n).fill(null);
+  const rsiFull = rsiSeries(closes, rsiPeriod); // tayari null-padded, aligned
+
+  const rawK = new Array(n).fill(null);
+  for (let i = stochPeriod - 1; i < n; i++) {
+    const window = rsiFull.slice(i - stochPeriod + 1, i + 1);
+    if (window.some((v) => v == null)) continue;
+    const lo = Math.min(...window);
+    const hi = Math.max(...window);
+    rawK[i] = hi === lo ? 0 : ((rsiFull[i] - lo) / (hi - lo)) * 100;
+  }
+
+  for (let i = kSmooth - 1; i < n; i++) {
+    const window = rawK.slice(i - kSmooth + 1, i + 1);
+    if (window.some((v) => v == null)) continue;
+    kOut[i] = window.reduce((a, b) => a + b, 0) / kSmooth;
+  }
+  for (let i = dSmooth - 1; i < n; i++) {
+    const window = kOut.slice(i - dSmooth + 1, i + 1);
+    if (window.some((v) => v == null)) continue;
+    dOut[i] = window.reduce((a, b) => a + b, 0) / dSmooth;
+  }
+  return { k: kOut, d: dOut };
+}
+
+function macdSeries(closes, fast = 12, slow = 26, signalPeriod = 9) {
+  const n = closes.length;
+  const emaFast = emaSeries(closes, fast);
+  const emaSlow = emaSeries(closes, slow);
+  const macdArr = closes.map((_, i) => (emaFast[i] != null && emaSlow[i] != null ? emaFast[i] - emaSlow[i] : null));
+
+  const macdValuesOnly = [];
+  const macdCandleIndex = [];
+  for (let i = 0; i < n; i++) {
+    if (macdArr[i] != null) {
+      macdValuesOnly.push(macdArr[i]);
+      macdCandleIndex.push(i);
+    }
+  }
+  const signalOnlyArr = emaSeries(macdValuesOnly, signalPeriod);
+  const signalArr = new Array(n).fill(null);
+  const histArr = new Array(n).fill(null);
+  for (let k = 0; k < macdValuesOnly.length; k++) {
+    if (signalOnlyArr[k] != null) {
+      const idx = macdCandleIndex[k];
+      signalArr[idx] = signalOnlyArr[k];
+      histArr[idx] = macdArr[idx] - signalOnlyArr[k];
+    }
+  }
+  return { macd: macdArr, signal: signalArr, hist: histArr };
+}
+
+/**
+ * Bundle ya series ZOTE kwa candles moja — inatumika na utils/backtest.js
+ * kuhesabu indicator za kila bar kwa PASS MOJA (badala ya kuita *Latest
+ * mara elfu moja kwa dirisha linaloongezeka, ambayo ingekuwa O(n²)).
+ */
+function computeAllIndicatorSeries(candles) {
+  const closes = closesOf(candles); // aligned (null ikiwa close haipo), SI kuchujwa
+  const macd = macdSeries(closes, 12, 26, 9);
+  const bb = bbandsSeries(closes, 20, 2);
+  const stoch = stochRsiSeries(closes, 14, 14, 3, 3);
+  return {
+    price: closes,
+    ema9: emaSeries(closes, 9),
+    ema21: emaSeries(closes, 21),
+    rsi: rsiSeries(closes, 14),
+    macd: macd.macd,
+    macdSignal: macd.signal,
+    macdHist: macd.hist,
+    atr: atrSeries(candles, 14),
+    adx: adxSeries(candles, 14),
+    bbUpper: bb.upper,
+    bbMiddle: bb.middle,
+    bbLower: bb.lower,
+    stochK: stoch.k,
+    stochD: stoch.d,
+  };
+}
+
 module.exports = {
   computeAllIndicators,
   emaSeries,
@@ -284,4 +480,11 @@ module.exports = {
   bbandsLatest,
   stochRsiLatest,
   MIN_CANDLES_RECOMMENDED,
+  // ── Series versions (backtest) — angalia maelezo juu ya kila function ──
+  atrSeries,
+  adxSeries,
+  bbandsSeries,
+  stochRsiSeries,
+  macdSeries,
+  computeAllIndicatorSeries,
 };
