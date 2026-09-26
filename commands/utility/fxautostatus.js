@@ -62,6 +62,9 @@ module.exports = {
     lines.push(`🎯 Kikomo cha signal: ≥${s.strengthThreshold}%`);
     lines.push(`💵 Stake: $${s.stake}  •  Multiplier: x${s.multiplier}`);
     lines.push(`🛡️ SL/TP: ATR×${s.slAtrMult} / ATR×${s.tpAtrMult} (fallback $${s.fallbackSl}/$${s.fallbackTp})`);
+    lines.push(
+      `🧭 Regime Filter: ${s.regimeFilter.enabled ? `ON (min PF ${s.regimeFilter.minProfitFactor}, min trades ${s.regimeFilter.minTrades}, bars ${s.regimeFilter.backtestBars})` : 'OFF'}`
+    );
     lines.push('');
 
     lines.push(`🧯 *Circuit Breaker*`);
@@ -93,6 +96,15 @@ module.exports = {
           `   • ${sig.code}: ${directionEmoji(sig.direction)} (${sig.strength}%)` +
             `${meetsThreshold ? ' ✅ ingekubalika' : ''} — ${timeAgo(sig.checkedAt)}`
         );
+        if (sig.regime && !sig.regime.skipped) {
+          const pf = sig.regime.profitFactor === null ? 'N/A' : sig.regime.profitFactor;
+          lines.push(
+            `     ↳ Regime: PF ${pf} (trades ${sig.regime.totalTrades} za hivi karibuni) ` +
+              `${sig.regime.ok ? '✅' : '🛑 chini ya kiwango — auto-trade imezuiwa kwa jozi hii'}`
+          );
+        } else if (sig.regime && sig.regime.error) {
+          lines.push(`     ↳ Regime: ⚠️ imeshindwa (${sig.regime.error}) — haizuii trade (fail-open)`);
+        }
       }
     });
     lines.push('');
