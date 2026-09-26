@@ -67,6 +67,7 @@ const {
   getClosedContractFromHistory,
   ALLOWED_MULTIPLIERS,
   toDerivSymbol,
+  MIN_STAKE_USD,
 } = require('./derivTrader');
 // Turso (libSQL) — tayari inatumika na pairing/server.js kwa users/payments;
 // hapa tunatumia kuhifadhi openAutoTrades ili isipotee kila redeploy/restart
@@ -79,7 +80,14 @@ const CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 
 const POLL_CLOSED_MS = Number(process.env.AUTO_TRADE_POLL_MS || 5 * 60 * 1000); // dakika 5
 const STRENGTH_THRESHOLD = Number(process.env.AUTO_TRADE_STRENGTH_THRESHOLD || 67);
 
-const STAKE_USD = Number(process.env.AUTO_TRADE_STAKE_USD || 5);
+// `let` badala ya `const` — inaweza kubadilishwa "live" wakati bot inaendelea
+// kukimbia kupitia .fxautostake <kiasi>, bila kuhitaji ku-restart au
+// kuhariri env var. Thamani ya AUTO_TRADE_STAKE_USD (au default 5) ni
+// "chaguo-msingi ya kuanzia" tu — setStakeUsd() chini inaruhusu kuibadilisha
+// na inahifadhi mabadiliko hayo kwenye database (fx_auto_settings) ili
+// yasipotee baada ya redeploy/restart (angalia loadStakeOverrideFromDb()).
+let STAKE_USD = Number(process.env.AUTO_TRADE_STAKE_USD || 5);
+const STAKE_SETTING_KEY = 'stakeUsd';
 const rawMultiplier = Number(process.env.AUTO_TRADE_MULTIPLIER || 100);
 const MULTIPLIER = ALLOWED_MULTIPLIERS.includes(rawMultiplier) ? rawMultiplier : 100;
 
@@ -250,6 +258,66 @@ async function restoreOpenTradesFromDb() {
         rows.map((r) => r.code).join(', ')
     );
   }
+}
+
+/**
+ * Inaitwa MARA MOJA kwenye start() — ikiwa mtu ameshabadilisha stake kupitia
+ * .fxautostake kabla ya redeploy/restart ya mwisho, hii inarejesha thamani
+ * hiyo badala ya kurudi kwenye AUTO_TRADE_STAKE_USD/default 5 kimya kimya.
+ */
+async function loadStakeOverrideFromDb() {
+  try {
+    await fxTradesDb.initSchema();
+    const result = await fxTradesDb.query(
+      'SELECT settingValue FROM fx_auto_settings WHERE settingKey = ?',
+      [STAKE_SETTING_KEY]
+    );
+    const row = (result.rows || [])[0];
+    if (row) {
+      const saved = Number(row.settingValue);
+      if (Number.isFinite(saved) && saved > 0) {
+        STAKE_USD = saved;
+        console.log(`[autoTrader] 💵 Stake imerejeshwa kutoka database: $${STAKE_USD}`);
+      }
+    }
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kusoma stake override kutoka DB (inaendelea na default/env):', err.message);
+  }
+}
+
+/**
+ * Inaitwa na commands/owner/fxautostake.js — inabadilisha STAKE_USD "live"
+ * (bila restart) na kuihifadhi kwenye database ili ibaki hivyo hata baada
+ * ya redeploy. Inarudisha { ok, stake } au { ok: false, error }.
+ */
+async function setStakeUsd(newStake) {
+  const amount = Number(newStake);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { ok: false, error: 'Weka namba sahihi, kubwa kuliko 0 (mfano 1 au 2.5).' };
+  }
+  if (amount < MIN_STAKE_USD) {
+    return { ok: false, error: `Stake ni ndogo mno — Deriv inahitaji angalau $${MIN_STAKE_USD}.` };
+  }
+
+  const previous = STAKE_USD;
+  STAKE_USD = amount;
+
+  try {
+    await fxTradesDb.initSchema();
+    await fxTradesDb.query(
+      `INSERT INTO fx_auto_settings (settingKey, settingValue, updatedAt) VALUES (?, ?, ?)
+       ON CONFLICT(settingKey) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = excluded.updatedAt`,
+      [STAKE_SETTING_KEY, String(amount), Date.now()]
+    );
+  } catch (err) {
+    // Thamani ya RAM (STAKE_USD) tayari imebadilika, hivyo trade zijazo
+    // zitatumia stake mpya hata kama kuhifadhi DB kumeshindwa — lakini
+    // baada ya restart/redeploy itarudi kwenye ile ya awali (previous).
+    console.error('[autoTrader] Imeshindwa kuhifadhi stake mpya kwenye DB (itafanya kazi hadi restart ijayo):', err.message);
+  }
+
+  console.log(`[autoTrader] 💵 Stake imebadilishwa: $${previous} → $${STAKE_USD}`);
+  return { ok: true, stake: STAKE_USD, previous };
 }
 
 // Hali ya circuit breaker
@@ -612,6 +680,7 @@ function start({ sock, notifyJid }) {
   // hatua hii ikamilike, ili checkPairAndTrade isipate nafasi ya kufungua
   // trade "mpya" ya jozi ambayo kwa kweli tayari ina trade wazi.
   (async () => {
+    await loadStakeOverrideFromDb();
     await restoreOpenTradesFromDb();
     await pollClosedTrades();
   })()
@@ -671,4 +740,4 @@ function getStatus() {
   };
 }
 
-module.exports = { start, stop, getStatus, PAIRS, STRENGTH_THRESHOLD, openAutoTrades };
+module.exports = { start, stop, getStatus, setStakeUsd, PAIRS, STRENGTH_THRESHOLD, openAutoTrades };
