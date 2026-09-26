@@ -69,6 +69,25 @@
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
   .section-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
 
+  /* Top-level section switcher (tabs) — muundo kama dashboard.html */
+  .section-tabs { display: flex; gap: 4px; margin-bottom: 18px; background: var(--panel);
+    padding: 6px; border-radius: 10px; border: 1px solid var(--border); overflow-x: auto; }
+  .section-tab { flex: 1; min-width: 62px; text-align: center; padding: 10px 4px; border-radius: 7px;
+    color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 600; line-height: 1.4;
+    transition: background 0.15s ease, color 0.15s ease; white-space: nowrap; }
+  .section-tab .icon { font-size: 16px; display: block; margin-bottom: 2px; }
+  .section-tab.active { background: var(--accent); color: #041008; }
+  .page-section { display: none; animation: fadeIn 0.2s ease; }
+  .page-section.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* Backtest */
+  .bt-stat { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; }
+  .bt-stat .n { font-size: 17px; font-weight: 700; }
+  .bt-stat .l { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+  .bt-warning { font-size: 11px; color: var(--amber); line-height: 1.5; margin-top: 12px; padding: 10px 12px;
+    background: rgba(255,184,77,0.08); border: 1px solid rgba(255,184,77,0.25); border-radius: 4px; }
+
   table { width: 100%; border-collapse: collapse; }
   thead th { text-align: left; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 8px 8px; border-bottom: 1px solid var(--border); }
   tbody td { padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 12.5px; vertical-align: middle; }
@@ -152,87 +171,151 @@
   <div class="content">
     <div class="stats" id="statsRow"></div>
 
-    <div class="card">
-      <div class="section-label">🤖 Auto-Trader</div>
-      <div id="autoTraderBox"></div>
+    <div class="section-tabs" id="sectionTabs">
+      <div class="section-tab active" data-section="overview"><span class="icon">🤖</span>Muhtasari</div>
+      <div class="section-tab" data-section="calendar"><span class="icon">📅</span>Calendar</div>
+      <div class="section-tab" data-section="signals"><span class="icon">📡</span>Signals</div>
+      <div class="section-tab" data-section="trades"><span class="icon">📊</span>Trades</div>
+      <div class="section-tab" data-section="backtest"><span class="icon">🧪</span>Backtest</div>
     </div>
 
-    <div class="card">
-      <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>🧠 AI Predictions (Technical + Calendar)</span>
-        <span class="ai-tag" id="predGeneratedAt"></span>
+    <div class="page-section active" id="section-overview">
+      <div class="card">
+        <div class="section-label">🤖 Auto-Trader</div>
+        <div id="autoTraderBox"></div>
       </div>
-      <div id="predictionsBox"><div class="empty">Inapakia...</div></div>
-    </div>
 
-    <div class="card">
-      <div class="section-label">📅 Economic Calendar (Wiki Hii)</div>
-      <div class="cal-filters" id="calFilters"></div>
-      <div id="calendarBox" style="max-height:420px; overflow-y:auto;"><div class="empty">Inapakia...</div></div>
-    </div>
-
-    <div class="card">
-      <div class="section-label">📡 Signal za Soko (BUY/SELL + Strength)</div>
-      <div id="signalsBox"></div>
-    </div>
-
-    <div class="card">
-      <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>📊 Trade Zilizo Wazi</span>
-        <button class="danger" onclick="closeAll()">🛑 Funga Zote</button>
+      <div class="card">
+        <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>🧠 AI Predictions (Technical + Calendar)</span>
+          <span class="ai-tag" id="predGeneratedAt"></span>
+        </div>
+        <div id="predictionsBox"><div class="empty">Inapakia...</div></div>
       </div>
-      <div id="positionsBox"></div>
     </div>
 
-    <div class="card">
-      <div class="section-label">➕ Fungua Trade Mpya (Mkono)</div>
-      <div class="grid3">
-        <div>
-          <label>Jozi</label>
-          <select id="fPair">
-            <option value="EURUSD">EUR/USD</option>
-            <option value="GBPUSD">GBP/USD</option>
-            <option value="USDJPY">USD/JPY</option>
-            <option value="AUDUSD">AUD/USD</option>
-            <option value="USDCHF">USD/CHF</option>
-            <option value="USDCAD">USD/CAD</option>
-            <option value="NZDUSD">NZD/USD</option>
-          </select>
-        </div>
-        <div>
-          <label>Mwelekeo</label>
-          <select id="fDirection">
-            <option value="BUY">BUY 🟢</option>
-            <option value="SELL">SELL 🔴</option>
-          </select>
-        </div>
-        <div>
-          <label>Multiplier</label>
-          <select id="fMultiplier">
-            <option value="100">100</option>
-            <option value="200">200</option>
-            <option value="300">300</option>
-            <option value="500">500</option>
-            <option value="800">800</option>
-          </select>
-        </div>
+    <div class="page-section" id="section-calendar">
+      <div class="card">
+        <div class="section-label">📅 Economic Calendar (Wiki Hii)</div>
+        <div class="cal-filters" id="calFilters"></div>
+        <div id="calendarBox" style="max-height:420px; overflow-y:auto;"><div class="empty">Inapakia...</div></div>
       </div>
-      <div class="grid3">
-        <div>
-          <label>Stake ($)</label>
-          <input id="fStake" type="number" value="5" min="1" step="0.5" />
-        </div>
-        <div>
-          <label>Stop Loss ($)</label>
-          <input id="fSL" type="number" value="3" min="0.1" step="0.1" />
-        </div>
-        <div>
-          <label>Take Profit ($)</label>
-          <input id="fTP" type="number" value="6" min="0.1" step="0.1" />
-        </div>
+    </div>
+
+    <div class="page-section" id="section-signals">
+      <div class="card">
+        <div class="section-label">📡 Signal za Soko (BUY/SELL + Strength)</div>
+        <div id="signalsBox"></div>
       </div>
-      <button class="primary" onclick="openTrade()" id="openBtn">Fungua Trade</button>
-      <div class="toast" id="openToast"></div>
+    </div>
+
+    <div class="page-section" id="section-trades">
+      <div class="card">
+        <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>📊 Trade Zilizo Wazi</span>
+          <button class="danger" onclick="closeAll()">🛑 Funga Zote</button>
+        </div>
+        <div id="positionsBox"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">➕ Fungua Trade Mpya (Mkono)</div>
+        <div class="grid3">
+          <div>
+            <label>Jozi</label>
+            <select id="fPair">
+              <option value="EURUSD">EUR/USD</option>
+              <option value="GBPUSD">GBP/USD</option>
+              <option value="USDJPY">USD/JPY</option>
+              <option value="AUDUSD">AUD/USD</option>
+              <option value="USDCHF">USD/CHF</option>
+              <option value="USDCAD">USD/CAD</option>
+              <option value="NZDUSD">NZD/USD</option>
+            </select>
+          </div>
+          <div>
+            <label>Mwelekeo</label>
+            <select id="fDirection">
+              <option value="BUY">BUY 🟢</option>
+              <option value="SELL">SELL 🔴</option>
+            </select>
+          </div>
+          <div>
+            <label>Multiplier</label>
+            <select id="fMultiplier">
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="300">300</option>
+              <option value="500">500</option>
+              <option value="800">800</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid3">
+          <div>
+            <label>Stake ($)</label>
+            <input id="fStake" type="number" value="5" min="1" step="0.5" />
+          </div>
+          <div>
+            <label>Stop Loss ($)</label>
+            <input id="fSL" type="number" value="3" min="0.1" step="0.1" />
+          </div>
+          <div>
+            <label>Take Profit ($)</label>
+            <input id="fTP" type="number" value="6" min="0.1" step="0.1" />
+          </div>
+        </div>
+        <button class="primary" onclick="openTrade()" id="openBtn">Fungua Trade</button>
+        <div class="toast" id="openToast"></div>
+      </div>
+    </div>
+
+    <div class="page-section" id="section-backtest">
+      <div class="card">
+        <div class="section-label">🧪 Backtest ya Mkakati (Historia — Twelve Data)</div>
+        <div class="grid3">
+          <div>
+            <label>Jozi</label>
+            <select id="btPair">
+              <option value="EURUSD">EUR/USD</option>
+              <option value="GBPUSD">GBP/USD</option>
+              <option value="USDJPY">USD/JPY</option>
+              <option value="AUDUSD">AUD/USD</option>
+              <option value="USDCHF">USD/CHF</option>
+              <option value="USDCAD">USD/CAD</option>
+              <option value="NZDUSD">NZD/USD</option>
+            </select>
+          </div>
+          <div>
+            <label>Bars (candles 1h)</label>
+            <input id="btBars" type="number" value="1500" min="200" max="5000" step="100" />
+          </div>
+          <div>
+            <label>Kikomo cha Signal (%)</label>
+            <input id="btThreshold" type="number" placeholder="default" min="1" max="100" step="1" />
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label>Stake ($) — hiari</label>
+            <input id="btStake" type="number" placeholder="default" min="1" step="0.5" />
+          </div>
+          <div>
+            <label>Multiplier — hiari</label>
+            <select id="btMultiplier">
+              <option value="">default</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="300">300</option>
+              <option value="500">500</option>
+              <option value="800">800</option>
+            </select>
+          </div>
+        </div>
+        <button class="primary" onclick="runBacktestUI()" id="btRunBtn">▶️ Endesha Backtest</button>
+        <div class="toast" id="btToast"></div>
+        <div id="btResultsBox" style="margin-top:16px;"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -282,6 +365,21 @@
     sessionStorage.removeItem('adminToken');
     location.reload();
   }
+
+  // ── Section tabs (muundo kama dashboard.html) ─────────────────────────
+  function openSection(name) {
+    const btn = document.querySelector('.section-tab[data-section="' + name + '"]');
+    const pane = document.getElementById('section-' + name);
+    if (!btn || !pane) return false;
+    document.querySelectorAll('.section-tab').forEach((x) => x.classList.remove('active'));
+    document.querySelectorAll('.page-section').forEach((x) => x.classList.remove('active'));
+    btn.classList.add('active');
+    pane.classList.add('active');
+    return true;
+  }
+  document.querySelectorAll('.section-tab').forEach((t) => {
+    t.addEventListener('click', () => openSection(t.dataset.section));
+  });
 
   function fmt(n, d = 2) {
     return Number(n || 0).toFixed(d);
@@ -601,6 +699,96 @@
       toast.textContent = '❌ ' + e.message;
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  // ── Backtest ────────────────────────────────────────────────────────
+  function renderBacktestResult(r) {
+    if (r.totalTrades === 0) {
+      document.getElementById('btResultsBox').innerHTML =
+        `<div class="empty">📭 Hakuna trade hata moja iliyofungwa kwenye kipindi hiki (${r.from} → ${r.to}, candles ${r.bars}). Jaribu bars zaidi au kikomo cha chini cha signal.</div>`;
+      return;
+    }
+    const plClass = r.totalPnl >= 0 ? 'pl-pos' : 'pl-neg';
+    const pfLabel = r.profitFactor === null ? 'N/A' : r.profitFactor;
+    const pfClass = r.profitFactor >= 1.5 ? 'pl-pos' : r.profitFactor >= 1 ? '' : 'pl-neg';
+
+    const stats = `
+      <div class="stats" style="margin-bottom:14px;">
+        <div class="bt-stat"><div class="n">${r.totalTrades}</div><div class="l">Trades</div></div>
+        <div class="bt-stat"><div class="n">${r.winRate}%</div><div class="l">Win Rate</div></div>
+        <div class="bt-stat"><div class="n ${plClass}">${r.totalPnl >= 0 ? '+' : ''}$${r.totalPnl}</div><div class="l">P/L Jumla</div></div>
+        <div class="bt-stat"><div class="n ${pfClass}">${pfLabel}</div><div class="l">Profit Factor</div></div>
+        <div class="bt-stat"><div class="n">$${r.maxDrawdown}</div><div class="l">Max Drawdown</div></div>
+        <div class="bt-stat"><div class="n">${r.maxConsecutiveLosses}</div><div class="l">Hasara Mfululizo</div></div>
+      </div>
+      <div class="muted" style="font-size:11px; margin-bottom:10px;">
+        📅 ${r.from} → ${r.to} (candles ${r.bars}) · Stake $${r.stake} · Multiplier x${r.multiplier} · Kikomo ≥${r.strengthThreshold}%
+        ${r.stillOpenAtEnd ? '<br>ℹ️ Trade 1 ilibaki "wazi" mwishoni mwa data (haijahesabiwa hapo juu).' : ''}
+      </div>
+    `;
+
+    const lastTrades = r.trades.slice(-30).reverse();
+    const rows = lastTrades.map((t) => {
+      const dirClass = t.direction === 'BUY' ? 'dir-buy' : 'dir-sell';
+      const outClass = t.outcome === 'WIN' ? 'pl-pos' : 'pl-neg';
+      const pnlClass = t.pnlUsd >= 0 ? 'pl-pos' : 'pl-neg';
+      return `<tr>
+        <td>${t.entryAt}</td>
+        <td class="${dirClass}">${t.direction}</td>
+        <td class="${outClass}">${t.outcome}</td>
+        <td class="${pnlClass}">${t.pnlUsd >= 0 ? '+' : ''}$${t.pnlUsd}</td>
+        <td>${t.barsHeld}</td>
+      </tr>`;
+    }).join('');
+
+    const table = `
+      <div class="section-label">Trades za Mwisho ${r.trades.length > 30 ? '(30 kati ya ' + r.trades.length + ')' : ''}</div>
+      <table>
+        <thead><tr><th>Muda wa Kuingia</th><th>Mwelekeo</th><th>Matokeo</th><th>P/L</th><th>Bars</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    const warning = `
+      <div class="bt-warning">
+        ⚠️ Mipaka ya backtest hii: haina economic-calendar (habari za soko), haihesabu spread/slippage,
+        na haizingatii circuit breakers za live (daily loss limit n.k). Utendaji halisi wa live mara nyingi
+        ni mbaya kidogo kuliko backtest — tumia matokeo haya kama "mwongozo", si uhakika wa 100%.
+      </div>
+    `;
+
+    document.getElementById('btResultsBox').innerHTML = stats + table + warning;
+  }
+
+  async function runBacktestUI() {
+    const btn = document.getElementById('btRunBtn');
+    const toast = document.getElementById('btToast');
+    toast.className = 'toast';
+    toast.textContent = '';
+    document.getElementById('btResultsBox').innerHTML = '';
+    btn.disabled = true;
+    btn.textContent = '⏳ Inaendesha... (sekunde kadhaa)';
+    try {
+      const body = {
+        pair: document.getElementById('btPair').value,
+        bars: Number(document.getElementById('btBars').value) || undefined,
+      };
+      const threshold = document.getElementById('btThreshold').value;
+      if (threshold) body.strengthThreshold = Number(threshold);
+      const stake = document.getElementById('btStake').value;
+      if (stake) body.stake = Number(stake);
+      const multiplier = document.getElementById('btMultiplier').value;
+      if (multiplier) body.multiplier = Number(multiplier);
+
+      const data = await api('/api/admin/fx/backtest', { method: 'POST', body: JSON.stringify(body) });
+      renderBacktestResult(data.result);
+    } catch (e) {
+      toast.className = 'toast error';
+      toast.textContent = '❌ ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '▶️ Endesha Backtest';
     }
   }
 
