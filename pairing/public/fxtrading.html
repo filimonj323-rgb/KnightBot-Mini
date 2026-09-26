@@ -231,6 +231,10 @@
               <option value="EURUSD">EUR/USD</option>
               <option value="GBPUSD">GBP/USD</option>
               <option value="USDJPY">USD/JPY</option>
+              <option value="EURGBP">EUR/GBP</option>
+              <option value="EURJPY">EUR/JPY</option>
+              <option value="GBPJPY">GBP/JPY</option>
+              <option value="AUDJPY">AUD/JPY</option>
               <option value="AUDUSD">AUD/USD</option>
               <option value="USDCHF">USD/CHF</option>
               <option value="USDCAD">USD/CAD</option>
@@ -284,6 +288,10 @@
               <option value="EURUSD">EUR/USD</option>
               <option value="GBPUSD">GBP/USD</option>
               <option value="USDJPY">USD/JPY</option>
+              <option value="EURGBP">EUR/GBP</option>
+              <option value="EURJPY">EUR/JPY</option>
+              <option value="GBPJPY">GBP/JPY</option>
+              <option value="AUDJPY">AUD/JPY</option>
               <option value="AUDUSD">AUD/USD</option>
               <option value="USDCHF">USD/CHF</option>
               <option value="USDCAD">USD/CAD</option>
@@ -331,7 +339,7 @@
 
   let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
   let pollTimer = null;
-  const FX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'NZDUSD'];
+  const FX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'NZDUSD'];
   const signalState = {}; // code -> { direction, strength, notes, checkedAt, loading, error }
   let slowPollTimer = null;
   let calendarEvents = [];
@@ -420,11 +428,18 @@
       if (!s.checkedAt) return `<div class="signal-row"><span>${s.code}</span><span class="muted">bado hujaangaliwa</span></div>`;
       const dirClass = s.direction === 'BUY' ? 'dir-buy' : s.direction === 'SELL' ? 'dir-sell' : 'muted';
       const ok = s.direction !== 'NEUTRAL' && s.strength >= a.strengthThreshold;
+      const blocked = s.correlationBlocked ? ' <span class="muted" title="Correlation guard imezuia trade mpya">🔗 blocked</span>' : '';
       return `<div class="signal-row">
         <span>${s.code}</span>
-        <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}</span>
+        <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}${blocked}</span>
       </div>`;
     }).join('');
+
+    const exposure = a.currencyExposure || {};
+    const exposureEntries = Object.entries(exposure).filter(([, v]) => v !== 0);
+    const exposureHtml = exposureEntries.length
+      ? exposureEntries.map(([ccy, v]) => `<span class="muted">${ccy}: ${v > 0 ? '+' : ''}${v}</span>`).join('  ')
+      : '<span class="muted">hakuna exposure kwa sasa</span>';
 
     document.getElementById('autoTraderBox').innerHTML = `
       <span class="badge on">ON</span>
@@ -433,6 +448,8 @@
         Stake: $${a.stake} · Multiplier: x${a.multiplier} · SL/TP: ATR×${a.slAtrMult}/ATR×${a.tpAtrMult}
       </span>
       <div style="margin-top:12px;">${signalsHtml}</div>
+      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">Currency Exposure (correlation guard, kikomo ±${a.maxCurrencyExposure})</div>
+      <div style="font-size:11px;">${exposureHtml}</div>
       <div class="muted" style="margin-top:8px; font-size:11px;">Ukaguzi wa mwisho: ${timeAgo(a.lastCycleAt)}</div>
     `;
   }
@@ -474,7 +491,7 @@
         <tbody>${rows}</tbody>
       </table>
       <div class="muted" style="margin-top:8px; font-size:11px;">
-        EURUSD/GBPUSD/USDJPY zinaangaliwa kiotomatiki na Auto-Trader kila saa (bure).
+        EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY zinaangaliwa kiotomatiki na Auto-Trader kila saa (bure).
         Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.
       </div>
     `;
