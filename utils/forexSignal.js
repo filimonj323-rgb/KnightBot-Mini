@@ -108,20 +108,95 @@ function reserveRateSlot() {
   return step;
 }
 
-async function td(endpoint, params) {
+// Idadi ya majaribio kwa ombi moja likishindwa kwa "upstream error"/jibu
+// batili (siyo JSON) — hali hizi mara nyingi ni za MUDA MFUPI tu (gateway
+// ya Twelve Data ikichelewa/kukwama), hazihusiani na jozi/symbol husika —
+// retry ya haraka mara nyingi hufanikiwa.
+const TD_UPSTREAM_RETRIES = parseInt(process.env.TWELVE_DATA_UPSTREAM_RETRIES || '2', 10);
+const TD_UPSTREAM_RETRY_DELAY_MS = 1500;
+
+// Tunatumia responseType:'text' MAKUSUDI (badala ya kuacha axios ifanye
+// auto-JSON-parse) ili hata jibu likiwa batili (siyo JSON), bado tuwe na
+// res.status + res.data (maandishi ghafi) mkononi — axios ikiacha ijaribu
+// kuparse yenyewe, SyntaxError ilikuwa inatokea KABLA hatujafika kuona
+// status/body, hivyo tulikuwa tunapoteza taarifa hiyo kabisa (siyo logs
+// tu — hata dashboard haikuwa na kitu cha maana cha kuonyesha).
+async function tdOnce(endpoint, params) {
   await reserveRateSlot();
-  const { data } = await axios.get(`${BASE_URL}/${endpoint}`, {
+  const res = await axios.get(`${BASE_URL}/${endpoint}`, {
     params: { ...params, apikey: API_KEY },
     timeout: TIMEOUT_MS,
+    responseType: 'text',
+    transformResponse: [(d) => d], // acha kama maandishi ghafi, usijaribu JSON.parse hapa
+    validateStatus: () => true, // tutashughulikia status wenyewe hapa chini
   });
-  // Twelve Data hurudisha HTTP 200 hata kwa makosa mengi — error halisi
-  // iko ndani ya body: { status: "error", code, message }.
-  if (data?.status === 'error') {
-    const err = new Error(data.message || 'Twelve Data error');
-    err.tdCode = data.code;
+
+  const snippet = String(res.data || '').slice(0, 200).trim();
+
+  if (res.status < 200 || res.status >= 300) {
+    const err = new Error(`Twelve Data HTTP ${res.status}${snippet ? `: ${snippet}` : ''}`);
+    err.tdHttpStatus = res.status;
+    err.tdRawSnippet = snippet;
     throw err;
   }
-  return data;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(res.data);
+  } catch (parseErr) {
+    // Hapa ndipo "upstream error" (au maandishi mengine yasiyo JSON kutoka
+    // gateway ya Twelve Data) hutokea — sasa tunaijua HTTP status YA KWELI
+    // (mara nyingi 200 wenyewe, gateway ikijifanya "sawa" ilhali body ni
+    // maandishi ya error) + maudhui halisi ya jibu, hivyo tunaweza kutengeneza
+    // ujumbe wenye maana badala ya kuacha SyntaxError ghafi.
+    const err = new Error(
+      `Twelve Data imerudisha jibu batili (HTTP ${res.status}): "${snippet || '(tupu)'}"`
+    );
+    err.tdUpstreamParseError = true;
+    err.tdHttpStatus = res.status;
+    err.tdRawSnippet = snippet;
+    throw err;
+  }
+
+  // Twelve Data hurudisha HTTP 200 hata kwa makosa mengi — error halisi
+  // iko ndani ya body: { status: "error", code, message }.
+  if (parsed?.status === 'error') {
+    const err = new Error(parsed.message || 'Twelve Data error');
+    err.tdCode = parsed.code;
+    throw err;
+  }
+  return parsed;
+}
+
+async function td(endpoint, params) {
+  let lastErr;
+  for (let attempt = 0; attempt <= TD_UPSTREAM_RETRIES; attempt++) {
+    try {
+      return await tdOnce(endpoint, params);
+    } catch (err) {
+      lastErr = err;
+      if (err.tdUpstreamParseError) {
+        // Log ya uchunguzi (Railway) — bado muhimu kwa historia ndefu zaidi
+        // ya matukio (mifumo/muda) kuliko kile kinachoonekana dashboard-ni.
+        console.error(
+          `[forexSignal] Jibu batili kutoka Twelve Data — jaribio ${attempt + 1}/${TD_UPSTREAM_RETRIES + 1} ` +
+          `(${endpoint}, ${JSON.stringify(params)}): ${err.message}`
+        );
+        if (attempt < TD_UPSTREAM_RETRIES) {
+          await new Promise((r) => setTimeout(r, TD_UPSTREAM_RETRY_DELAY_MS));
+          continue;
+        }
+        // Majaribio yote yameshindwa — tupa error yenye status+snippet HALISI
+        // (siyo ujumbe wa jumla) ili ionekane kwa maana kwenye dashboard/WhatsApp
+        // pia, si logs pekee.
+        throw err;
+      }
+      // Error nyingine (tdCode, HTTP status, timeout n.k.) — usirudie, tupa
+      // moja kwa moja (tayari ina status+snippet kama ipo).
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 // Vuta raw candles (OHLC) kwa interval fulani — credit 1 TU. `order: 'ASC'`
