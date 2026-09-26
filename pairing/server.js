@@ -68,6 +68,7 @@ const db = require('./db');
 const derivTrader = require('../utils/derivTrader');
 const autoTrader = require('../utils/autoTrader');
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('../utils/forexSignal');
+const { runBacktest } = require('../utils/backtest');
 const economicCalendar = require('../utils/economicCalendar');
 const fxPredictions = require('../utils/fxPredictions');
 const mainConfig = require('../config');
@@ -666,6 +667,31 @@ async function handlePairingRequest(req, res) {
         const status = autoTrader.getStatus();
         const data = await fxPredictions.getPredictions(status.signals);
         return sendJson(res, 200, { ok: true, ...data });
+      }
+
+      // Backtest ya mkakati dhidi ya historia (utils/backtest.js) — inatumia
+      // computeSignal/computeAtrBasedRisk ILE ILE ya live, tazama tab
+      // "Backtest" kwenye fxtrading.html. Inaweza kuchukua sekunde kadhaa
+      // (fetch candles + loop bar-by-bar), si "instant" kama routes nyingine.
+      if (req.method === 'POST' && req.url === '/api/admin/fx/backtest') {
+        const body = await readJsonBody(req);
+        const code = String(body.pair || '').toUpperCase().replace(/[^A-Z]/g, '');
+        const symbol = FX_SYMBOL_MAP[code] || (code.length === 6 ? `${code.slice(0, 3)}/${code.slice(3)}` : null);
+        if (!symbol) return sendJson(res, 400, { ok: false, error: `Jozi "${body.pair || ''}" haitambuliki.` });
+
+        try {
+          const result = await runBacktest({
+            code,
+            symbol,
+            bars: body.bars ? Number(body.bars) : undefined,
+            stake: body.stake ? Number(body.stake) : undefined,
+            multiplier: body.multiplier ? Number(body.multiplier) : undefined,
+            strengthThreshold: body.strengthThreshold ? Number(body.strengthThreshold) : undefined,
+          });
+          return sendJson(res, 200, { ok: true, result });
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: err.message });
+        }
       }
     }
 
