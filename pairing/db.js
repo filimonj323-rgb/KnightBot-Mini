@@ -105,6 +105,16 @@ async function initSchema() {
       sellPrice   REAL,
       profit      REAL
     )`,
+    // Key/value store ya settings za auto-trader zinazoweza kubadilishwa
+    // "live" kupitia amri (mfano .fxautostake) badala ya env var + restart.
+    // Row moja tu kwa kila key (settingKey ni PRIMARY KEY) — bot hii ni
+    // single-owner (si per-customer kama `settings` table iliyopo juu),
+    // kwa hiyo hakuna haja ya phoneNumber hapa.
+    `CREATE TABLE IF NOT EXISTS fx_auto_settings (
+      settingKey  TEXT PRIMARY KEY,
+      settingValue TEXT NOT NULL,
+      updatedAt   INTEGER NOT NULL
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
     `CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_open ON fx_auto_trades(closedAt)`,
   ], 'write');
