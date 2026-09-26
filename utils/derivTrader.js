@@ -352,6 +352,7 @@ async function getOpenPositionsLive() {
           bid_price: details?.bid_price ?? p.bid_price,
           profit: details?.profit ?? p.profit,
           current_spot: details?.current_spot,
+          limit_order: details?.limit_order ?? p.limit_order,
         };
       } catch (err) {
         return p; // ukiona hitilafu kwa contract moja, bado onyesha nyingine
@@ -363,6 +364,46 @@ async function getOpenPositionsLive() {
 async function closeContract(contractId) {
   const res = await send({ sell: contractId, price: 0 }); // price:0 = kubali bei ya soko
   return res.sell; // { contract_id, sold_for, transaction_id, ... } — HAINA "profit"!
+}
+
+// Inabadilisha Stop Loss/Take Profit ya contract iliyo WAZI TAYARI, bila
+// kuifunga — kwa Multipliers, Deriv inaruhusu hili kupitia "contract_update"
+// (tofauti na "buy" ambapo limit_order inawekwa mara moja tu). stopLoss/
+// takeProfit ni $ amounts (order_amount), sawa kabisa na jinsi
+// zinavyowekwa kwenye placeMultiplier() hapo juu. Pitisha null/tupu kwa
+// moja ili kuiacha kama ilivyo (hakuna haja ya kutuma zote mbili kila mara).
+async function updateContractLimits(contractId, { stopLoss, takeProfit } = {}) {
+  const limitOrder = {};
+  if (stopLoss !== undefined && stopLoss !== null && stopLoss !== '') {
+    const sl = Number(stopLoss);
+    if (!(sl > 0)) throw new Error('Stop Loss lazima iwe namba > 0');
+    limitOrder.stop_loss = sl;
+  }
+  if (takeProfit !== undefined && takeProfit !== null && takeProfit !== '') {
+    const tp = Number(takeProfit);
+    if (!(tp > 0)) throw new Error('Take Profit lazima iwe namba > 0');
+    limitOrder.take_profit = tp;
+  }
+  if (!Object.keys(limitOrder).length) {
+    throw new Error('Weka angalau Stop Loss au Take Profit mpya');
+  }
+
+  try {
+    const res = await send({ contract_update: 1, contract_id: contractId, limit_order: limitOrder });
+    return res.contract_update;
+  } catch (err) {
+    // Sawa na placeMultiplier(): Deriv inaweza kukataa thamani mpya kwa
+    // kiwango cha chini/juu kinachohitajika wakati huo (hutofautiana kwa
+    // jozi/bei ya sasa) — soma ujumbe wake tuutoe ufafanuzi wazi zaidi
+    // badala ya kurusha error ghafi ya Deriv.
+    const constraint = parseLimitOrderAmountConstraint(err.message);
+    if (constraint) {
+      throw new Error(
+        `Thamani haikubaliki — Deriv inahitaji ${constraint.type === 'min' ? 'angalau' : 'kiwango cha chini ya'} $${constraint.value}. (${err.message})`
+      );
+    }
+    throw err;
+  }
 }
 
 // closeContract() peke yake HAIRUDISHI profit — jibu la Deriv la "sell" lina
@@ -447,6 +488,7 @@ module.exports = {
   MIN_STAKE_USD,
   getOpenPositions,
   getOpenPositionsLive,
+  updateContractLimits,
   getContractDetails,
   getClosedContractFromHistory,
   closeContract,
