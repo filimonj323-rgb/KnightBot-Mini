@@ -1,7 +1,9 @@
 /**
- * autoTrader.js — Auto-trading kiotomatiki kwa jozi tatu maarufu zaidi za
- * forex (EUR/USD, GBP/USD, USD/JPY), kila saa moja, kwa kutumia signal
- * ile ile ya utils/forexSignal.js (EMA9/EMA21, RSI14, MACD).
+ * autoTrader.js — Auto-trading kiotomatiki kwa jozi saba za forex (majors
+ * 3: EUR/USD, GBP/USD, USD/JPY + crosses 4: EUR/GBP, EUR/JPY, GBP/JPY,
+ * AUD/JPY — crosses zimeongezwa MAKUSUDI kupunguza correlation risk kwa
+ * kuwa hazina USD, kila saa moja, kwa kutumia signal ile ile ya
+ * utils/forexSignal.js (EMA9/EMA21, RSI14, MACD).
  *
  * Kanuni: kila saa (AUTO_TRADE_CHECK_INTERVAL_MS), bot inaangalia signal
  * ya kila jozi (kutoka utils/forexSignal.js — EMA9/EMA21, RSI14, MACD kwa
@@ -52,7 +54,12 @@
  *     mfululizo kufika kikomo (default: saa 4)
  *   AUTO_TRADE_MAX_CONCURRENT        — trades wazi kiwango cha juu wakati
  *     mmoja (jumla ya jozi zote) — inazuia exposure kubwa mno ikiwa jozi
- *     nyingi zinatoa signal wakati mmoja (default: idadi ya PAIRS, yaani 3)
+ *     nyingi zinatoa signal wakati mmoja (default: idadi ya PAIRS, yaani 7)
+ *   AUTO_TRADE_MAX_CURRENCY_EXPOSURE — kikomo cha net exposure (units, si
+ *     $) kwa currency MOJA (mfano USD) kutoka jozi zote zilizo wazi kwa
+ *     pamoja (default: 1). Angalia "Correlation guard" chini — hii ndiyo
+ *     inayozuia EUR/USD na GBP/USD zote kufunguliwa SHORT-USD wakati
+ *     mmoja (dau moja lililojigawanya kwenye jozi mbili).
  *
  * ── Regime filter (walk-forward validation dhidi ya utils/backtest.js) ─
  *   AUTO_TRADE_REGIME_FILTER_ENABLED  — "true"/"false" (default: "true").
@@ -173,6 +180,14 @@ const PAIRS = [
   { code: 'EURUSD', symbol: 'EUR/USD' },
   { code: 'GBPUSD', symbol: 'GBP/USD' },
   { code: 'USDJPY', symbol: 'USD/JPY' },
+  // Crosses (hazina USD) — kwa MAKUSUDI kupunguza correlation risk:
+  // majors zote 3 hapo juu zina USD, kwa hiyo signal zake mara nyingi
+  // zinasukumwa na chanzo kimoja (nguvu/udhaifu wa Dola). Hizi chini
+  // zinasukumwa na benki kuu TOFAUTI (ECB/BOE/BOJ/RBA), si Fed.
+  { code: 'EURGBP', symbol: 'EUR/GBP' },
+  { code: 'EURJPY', symbol: 'EUR/JPY' },
+  { code: 'GBPJPY', symbol: 'GBP/JPY' },
+  { code: 'AUDJPY', symbol: 'AUD/JPY' },
 ];
 
 // ── Circuit breakers — hulinda dhidi ya hasara za mfululizo/kubwa mno ──
@@ -180,6 +195,13 @@ const MAX_DAILY_LOSS_USD = Number(process.env.AUTO_TRADE_MAX_DAILY_LOSS_USD || 1
 const MAX_CONSECUTIVE_LOSSES = Number(process.env.AUTO_TRADE_MAX_CONSECUTIVE_LOSSES || 3);
 const COOLDOWN_MS = Number(process.env.AUTO_TRADE_COOLDOWN_MS || 4 * 60 * 60 * 1000); // saa 4
 const MAX_CONCURRENT_TRADES = Number(process.env.AUTO_TRADE_MAX_CONCURRENT || PAIRS.length);
+
+// Kikomo cha net exposure (units, si $) kwa currency MOJA kabla ya
+// kuzuia trade mpya — angalia computeCurrencyExposure()/
+// wouldExceedCorrelationLimit() chini. Default 1 = usiruhusu currency
+// yoyote iwe na zaidi ya "upande mmoja" wa net exposure kwa wakati mmoja
+// kutoka kwenye jozi zote zilizo wazi (auto + za mkono).
+const MAX_CURRENCY_EXPOSURE = Number(process.env.AUTO_TRADE_MAX_CURRENCY_EXPOSURE || 1);
 
 // ── Regime filter (walk-forward validation) ─────────────────────────────
 // Kabla ya kufungua trade MPYA, bot inaangalia kama mkakati bado una "edge"
@@ -441,6 +463,44 @@ async function notify(text) {
   }
 }
 
+// Currency kila jozi (mfano "EURUSD" -> base "EUR", quote "USD").
+function pairLegs(code) {
+  const c = String(code || '').toUpperCase();
+  return { base: c.slice(0, 3), quote: c.slice(3, 6) };
+}
+
+// Kutoka orodha ya trades ({code, direction}), hesabu net exposure ya kila
+// currency: BUY = +1 kwa base / -1 kwa quote, SELL kinyume chake. Hii ndiyo
+// msingi wa correlation guard — jozi MBILI TOFAUTI zenye currency moja
+// (mfano EUR/USD na GBP/USD, zote na USD upande wa quote) zinaonekana kama
+// "dau MOJA" ikiwa zote zinasukuma currency hiyo upande uleule (mfano zote
+// SHORT USD) — badala ya kuhesabiwa kama diversification ya kweli.
+function computeCurrencyExposure(trades) {
+  const exposure = {};
+  for (const t of trades) {
+    const { base, quote } = pairLegs(t.code);
+    if (!base || !quote) continue;
+    const sign = t.direction === 'BUY' ? 1 : -1;
+    exposure[base] = (exposure[base] || 0) + sign;
+    exposure[quote] = (exposure[quote] || 0) - sign;
+  }
+  return exposure;
+}
+
+// Je, kufungua trade MPYA (code/direction) kungesukuma exposure ya
+// currency yoyote (base AU quote) juu ya kikomo? Trade inayo-OFFSET
+// exposure iliyopo (mfano USD/JPY BUY baada ya EUR/USD BUY — zote
+// zinahusisha USD lakini pande tofauti) HAIZUIWI, kwa sababu net exposure
+// yake inashuka badala ya kupanda — ndiyo maana hii ni bora kuliko
+// kuhesabu tu "idadi ya trades kwa currency".
+function wouldExceedCorrelationLimit(exposure, code, direction) {
+  const { base, quote } = pairLegs(code);
+  const sign = direction === 'BUY' ? 1 : -1;
+  const newBase = (exposure[base] || 0) + sign;
+  const newQuote = (exposure[quote] || 0) - sign;
+  return Math.abs(newBase) > MAX_CURRENCY_EXPOSURE || Math.abs(newQuote) > MAX_CURRENCY_EXPOSURE;
+}
+
 async function checkPairAndTrade(pairInfo) {
   const { code, symbol } = pairInfo;
 
@@ -464,10 +524,11 @@ async function checkPairAndTrade(pairInfo) {
   // tunai-"adopt" (kuiingiza openAutoTrades + database) ili ifuatiliwe
   // ipasavyo (arifa itakapofungwa, circuit breaker) badala ya kupuuzwa
   // kimya kimya — na auto-trader HAIFUNGUI nyingine kwa jozi hii mzunguko huu.
+  let livePositions = [];
   let livePosition;
   try {
     const derivSymbol = toDerivSymbol(code);
-    const livePositions = await getOpenPositions();
+    livePositions = await getOpenPositions();
     livePosition = livePositions.find((p) => p.symbol === derivSymbol);
   } catch (err) {
     console.error(
@@ -524,6 +585,26 @@ async function checkPairAndTrade(pairInfo) {
   // haziguswi (SL/TP zake zinaendelea Deriv) — hii inazuia trade MPYA tu.
   if (sig.newsRisk) {
     console.log(`[autoTrader] ${code}: skip — habari kubwa (High impact) iko karibu.`);
+    return;
+  }
+
+  // ── Correlation guard ──────────────────────────────────────────────
+  // Tumia positions HALISI za Deriv (tayari zimechukuliwa hapo juu kwa
+  // ukaguzi wa "adopt" — hakuna ombi la ziada) badala ya openAutoTrades
+  // pekee, ili trades zilizofunguliwa KWA MKONO pia zihesabiwe kwenye
+  // exposure — currency haijali chanzo cha trade.
+  const openForExposure = livePositions.map((p) => ({
+    code: String(p.symbol || '').replace(/^frx/i, '').toUpperCase(),
+    direction: /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL',
+  }));
+  const exposureNow = computeCurrencyExposure(openForExposure);
+  if (wouldExceedCorrelationLimit(exposureNow, code, sig.direction)) {
+    console.log(
+      `[autoTrader] ${code}: skip — correlation guard (exposure ya sasa: ${JSON.stringify(exposureNow)}, ` +
+        `${sig.direction} ${code} ingezidisha kikomo cha ±${MAX_CURRENCY_EXPOSURE} kwa currency moja — ` +
+        `hii ni "dau moja" lililojigawanya kwenye jozi mbili, si diversification ya kweli).`
+    );
+    lastSignals.set(code, { ...lastSignals.get(code), correlationBlocked: true });
     return;
   }
 
@@ -825,6 +906,8 @@ function getStatus() {
     maxDailyLossUsd: MAX_DAILY_LOSS_USD,
     maxConsecutiveLosses: MAX_CONSECUTIVE_LOSSES,
     maxConcurrentTrades: MAX_CONCURRENT_TRADES,
+    maxCurrencyExposure: MAX_CURRENCY_EXPOSURE,
+    currencyExposure: computeCurrencyExposure([...openAutoTrades.values()]),
     isPaused: isPaused(),
     pausedUntil,
     pauseReason,
