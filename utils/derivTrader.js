@@ -372,11 +372,21 @@ async function closeContract(contractId) {
 // takeProfit ni $ amounts (order_amount), sawa kabisa na jinsi
 // zinavyowekwa kwenye placeMultiplier() hapo juu. Pitisha null/tupu kwa
 // moja ili kuiacha kama ilivyo (hakuna haja ya kutuma zote mbili kila mara).
+// stopLoss kwa Multipliers ni "order_amount" — namba CHANYA ni hasara ya
+// juu zaidi kutoka bei ya ununuzi (dai la kawaida); namba HASI, kwa
+// upande mwingine, "inafunga" faida ya chini kabisa iliyohakikishwa (mfano
+// -2 = hata bei ikigeuka kabisa, contract itafunga kwa angalau $2 faida).
+// Deriv yenyewe inakubali hasi kwa ajili hii hasa — ndiyo msingi wa
+// trailing/profit-lock (angalia utils/autoTrader.js -> checkTrailingStops()).
+// Sifuri halisi (0) haikubaliki (Deriv inahitaji tofauti ya kweli kutoka
+// bei ya ununuzi), kwa hiyo tunazuia hiyo tu, si namba hasi kwa ujumla.
 async function updateContractLimits(contractId, { stopLoss, takeProfit } = {}) {
   const limitOrder = {};
   if (stopLoss !== undefined && stopLoss !== null && stopLoss !== '') {
     const sl = Number(stopLoss);
-    if (!(sl > 0)) throw new Error('Stop Loss lazima iwe namba > 0');
+    if (!Number.isFinite(sl) || sl === 0) {
+      throw new Error('Stop Loss lazima iwe namba halisi isiyo sifuri (chanya = hasara ya juu; hasi = faida ya chini iliyofungwa)');
+    }
     limitOrder.stop_loss = sl;
   }
   if (takeProfit !== undefined && takeProfit !== null && takeProfit !== '') {

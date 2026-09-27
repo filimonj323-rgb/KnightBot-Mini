@@ -89,6 +89,8 @@ const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('./forex
 const {
   placeMultiplier,
   getOpenPositions,
+  getOpenPositionsLive,
+  updateContractLimits,
   getContractDetails,
   getClosedContractFromHistory,
   ALLOWED_MULTIPLIERS,
@@ -142,6 +144,30 @@ const FALLBACK_TP_USD = Number(process.env.AUTO_TRADE_TP_USD || 6);
 // halisi wa soko, hivyo hasara za mara kwa mara. SL haiwezi kuwa chini
 // ya hii sasa (isipokuwa stake yenyewe iko chini yake).
 const MIN_SL_USD = Number(process.env.AUTO_TRADE_MIN_SL_USD || 1);
+
+// ── Trailing stop / breakeven-lock ──────────────────────────────────────
+// Kama ulivyoomba: HAKUNA env vars hapa — vigezo vyote ni fasta ndani ya
+// code, na WASHA kwa default. Kitu pekee kinachoweza kubadilishwa "live"
+// (bila kuhariri code/redeploy) ni TRAILING_ENABLED — kupitia
+// .fxtrailing on/off (commands/utility/fxtrailing.js) au dashboard
+// (fxtrading.html), zote zikiita setTrailingEnabled() chini, ambayo
+// inahifadhi uamuzi kwenye database (fx_auto_settings) ili ubaki hata
+// baada ya redeploy — muundo uleule na STAKE_USD/setStakeUsd() juu.
+//
+// Hatua mbili, kila moja ikipimwa kwa "R" = profit ya sasa ($) ikigawanywa
+// na hatari ya AWALI ya trade (slUsd iliyowekwa wakati wa kufungua):
+//   R >= 1 (BREAKEVEN_TRIGGER_R)   -> songa SL karibu na breakeven
+//                                     (hatari iliyobaki: MIN_SL_USD tu)
+//   R >= 2 (PROFITLOCK_TRIGGER_R)  -> funga angalau nusu (PROFITLOCK_R)
+//                                     ya hatari ya awali KAMA FAIDA
+//                                     iliyohakikishwa (SL inakuwa HASI)
+// SL HAIWEZI kurudi nyuma (haiwezi kuongeza hatari) — kila hatua ni
+// "ratchet" moja tu kuelekea usalama/faida zaidi, kamwe kinyume chake.
+const TRAIL_BREAKEVEN_TRIGGER_R = 1;
+const TRAIL_PROFITLOCK_TRIGGER_R = 2;
+const TRAIL_PROFITLOCK_R = 0.5;
+const TRAILING_SETTING_KEY = 'trailingEnabled';
+let TRAILING_ENABLED = true; // default: WASHA
 
 /**
  * Badilisha ATR (katika bei, mfano 0.00120 kwa EURUSD) kuwa SL/TP kwa dola
@@ -289,17 +315,18 @@ const lastSignals = new Map();
 // trades ZILIZO WAZI iendelee kuwepo hata bot ikizima kabisa. DB
 // isipopatikana (Turso haijawekwa), kazi hizi zinashindwa kimya kimya
 // (bot inaendelea kufanya kazi na Map ya RAM pekee, kama awali).
-async function dbSaveOpenTrade({ contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt }) {
+async function dbSaveOpenTrade({ contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength }) {
   try {
     await fxTradesDb.initSchema();
     await fxTradesDb.query(
-      `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(contractId) DO UPDATE SET
          code=excluded.code, symbol=excluded.symbol, direction=excluded.direction,
          stake=excluded.stake, buyPrice=excluded.buyPrice, slUsd=excluded.slUsd,
-         tpUsd=excluded.tpUsd, openedAt=excluded.openedAt`,
-      [contractId, code, symbol, direction, stake, buyPrice ?? null, slUsd ?? null, tpUsd ?? null, openedAt]
+         tpUsd=excluded.tpUsd, openedAt=excluded.openedAt,
+         signalStrength=COALESCE(excluded.signalStrength, fx_auto_trades.signalStrength)`,
+      [contractId, code, symbol, direction, stake, buyPrice ?? null, slUsd ?? null, tpUsd ?? null, openedAt, signalStrength ?? null]
     );
   } catch (err) {
     console.error('[autoTrader] DB: imeshindwa kuhifadhi trade mpya (inaendelea na RAM pekee):', err.message);
@@ -318,6 +345,204 @@ async function dbMarkTradeClosed(contractId, { closedAt, sellPrice, profit }) {
   }
 }
 
+// Mipaka ya "bucket" za signal strength kwa ripoti ya win-rate — muundo
+// uleule wa kufikiri na regime filter/backtest: strength ya juu zaidi
+// INATAKIWA (kama mkakati una maana) kuwa na win-rate ya juu zaidi. Kama
+// data haionyeshi tofauti hiyo, ni ishara kuwa threshold ya sasa
+// (STRENGTH_THRESHOLD) haitofautishi ubora vizuri.
+const STRENGTH_BUCKETS = [
+  { label: '86-100%', min: 86 },
+  { label: '76-85%', min: 76 },
+  { label: '67-75%', min: 67 },
+  { label: '<67%', min: 0 }, // trades za zamani kabla ya kizingiti cha sasa, au zilizoandikwa bila signalStrength
+];
+
+function bucketFor(strength) {
+  if (strength === null || strength === undefined) return null; // adopted trades (zilizofunguliwa kwa mkono) — hazina signal, hazihesabiwi
+  for (const b of STRENGTH_BUCKETS) {
+    if (strength >= b.min) return b.label;
+  }
+  return STRENGTH_BUCKETS[STRENGTH_BUCKETS.length - 1].label;
+}
+
+/**
+ * Win-rate kwa kila "bucket" ya signal strength — kutoka trades
+ * ZILIZOFUNGWA TU (closedAt IS NOT NULL). Inatumiwa na command .autostats
+ * na dashboard ya fxtrading.html.
+ *
+ * Muundo wa matokeo:
+ *   [{ bucket, total, wins, losses, winRatePct, totalProfit, avgProfit }, ...]
+ * kwa mpangilio wa bucket ya juu kwenda chini, ikifuatiwa na safu ya
+ * "OVERALL" (jumla ya buckets zote).
+ */
+async function getWinRateStats() {
+  try {
+    await fxTradesDb.initSchema();
+    const result = await fxTradesDb.query(
+      `SELECT signalStrength, profit FROM fx_auto_trades WHERE closedAt IS NOT NULL`
+    );
+    const rows = result.rows || [];
+
+    const grouped = new Map(); // bucket -> { total, wins, totalProfit }
+    for (const r of rows) {
+      const strength = r.signalStrength === null || r.signalStrength === undefined ? null : Number(r.signalStrength);
+      const bucket = bucketFor(strength);
+      if (!bucket) continue; // trade iliyofunguliwa kwa mkono (bila signal) — haihesabiwi kwenye ubora wa signal
+      const profit = Number(r.profit) || 0;
+      const g = grouped.get(bucket) || { total: 0, wins: 0, totalProfit: 0 };
+      g.total += 1;
+      if (profit > 0) g.wins += 1;
+      g.totalProfit += profit;
+      grouped.set(bucket, g);
+    }
+
+    const stats = STRENGTH_BUCKETS.filter((b) => grouped.has(b.label)).map((b) => {
+      const g = grouped.get(b.label);
+      return {
+        bucket: b.label,
+        total: g.total,
+        wins: g.wins,
+        losses: g.total - g.wins,
+        winRatePct: g.total ? Math.round((g.wins / g.total) * 1000) / 10 : 0,
+        totalProfit: Math.round(g.totalProfit * 100) / 100,
+        avgProfit: g.total ? Math.round((g.totalProfit / g.total) * 100) / 100 : 0,
+      };
+    });
+
+    const overallTotal = stats.reduce((s, x) => s + x.total, 0);
+    const overallWins = stats.reduce((s, x) => s + x.wins, 0);
+    const overallProfit = stats.reduce((s, x) => s + x.totalProfit, 0);
+    stats.push({
+      bucket: 'OVERALL',
+      total: overallTotal,
+      wins: overallWins,
+      losses: overallTotal - overallWins,
+      winRatePct: overallTotal ? Math.round((overallWins / overallTotal) * 1000) / 10 : 0,
+      totalProfit: Math.round(overallProfit * 100) / 100,
+      avgProfit: overallTotal ? Math.round((overallProfit / overallTotal) * 100) / 100 : 0,
+    });
+
+    return stats;
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kupata win-rate stats:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Inaitwa na commands/utility/fxtrailing.js / dashboard — inabadilisha
+ * TRAILING_ENABLED "live" (bila restart) na kuihifadhi DB ili ibaki
+ * hivyo hata baada ya redeploy. Muundo uleule na setStakeUsd() juu.
+ */
+async function setTrailingEnabled(enabled) {
+  TRAILING_ENABLED = !!enabled;
+  try {
+    await fxTradesDb.initSchema();
+    await fxTradesDb.query(
+      `INSERT INTO fx_auto_settings (settingKey, settingValue, updatedAt) VALUES (?, ?, ?)
+       ON CONFLICT(settingKey) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = excluded.updatedAt`,
+      [TRAILING_SETTING_KEY, TRAILING_ENABLED ? '1' : '0', Date.now()]
+    );
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kuhifadhi mpangilio wa trailing (itafanya kazi hadi restart ijayo):', err.message);
+  }
+  return { ok: true, trailingEnabled: TRAILING_ENABLED };
+}
+
+/**
+ * Inaitwa MARA MOJA kwenye start() — sawa na loadStakeOverrideFromDb(),
+ * kama mtu ameshabadilisha .fxtrailing kabla ya redeploy/restart ya
+ * mwisho, hii inarejesha uamuzi huo badala ya kurudi kwenye default (ON).
+ */
+async function loadTrailingOverrideFromDb() {
+  try {
+    await fxTradesDb.initSchema();
+    const result = await fxTradesDb.query(
+      'SELECT settingValue FROM fx_auto_settings WHERE settingKey = ?',
+      [TRAILING_SETTING_KEY]
+    );
+    const row = (result.rows || [])[0];
+    if (row) {
+      TRAILING_ENABLED = row.settingValue === '1';
+      console.log(`[autoTrader] 🪤 Trailing stop imerejeshwa kutoka database: ${TRAILING_ENABLED ? 'ON' : 'OFF'}`);
+    }
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kusoma mpangilio wa trailing kutoka DB (inaendelea na default ON):', err.message);
+  }
+}
+
+/**
+ * Inaitwa kila POLL_CLOSED_MS (dakika chache), pamoja na pollClosedTrades()
+ * — kwa kila trade iliyo WAZI TAYARI yenye slUsd inayojulikana (yaani
+ * ilifunguliwa na signal yetu, si "adopted"), angalia profit ya SASA
+ * (live) dhidi ya hatari ya awali (slUsd) na, kama R imefika kizingiti,
+ * songa Stop Loss kwenye Deriv — KAMWE kuipeleka nyuma (ratchet moja tu
+ * kuelekea usalama/faida zaidi).
+ */
+async function checkTrailingStops() {
+  if (!TRAILING_ENABLED || openAutoTrades.size === 0) return;
+
+  let livePositions;
+  try {
+    livePositions = await getOpenPositionsLive();
+  } catch (err) {
+    console.error('[autoTrader] Trailing: imeshindwa kupata positions za live:', err.message);
+    return;
+  }
+  const liveByContract = new Map(livePositions.map((p) => [String(p.contract_id), p]));
+
+  for (const [contractId, info] of [...openAutoTrades.entries()]) {
+    if (!Number.isFinite(info.slUsd) || info.slUsd <= 0) continue; // haijulikani/adopted — ruka
+
+    const live = liveByContract.get(String(contractId));
+    const profit = Number(live?.profit);
+    if (!Number.isFinite(profit)) continue;
+
+    const r = profit / info.slUsd; // "R-multiple" — profit kama sehemu ya hatari ya awali
+    let desiredSl = null;
+
+    if (r >= TRAIL_PROFITLOCK_TRIGGER_R) {
+      desiredSl = -(info.slUsd * TRAIL_PROFITLOCK_R); // hasi = faida iliyofungwa
+    } else if (r >= TRAIL_BREAKEVEN_TRIGGER_R) {
+      desiredSl = MIN_SL_USD; // karibu na breakeven
+    }
+
+    if (desiredSl === null) continue;
+    if (desiredSl >= info.slUsd) continue; // si "ratchet" ya kuelekea usalama zaidi — ruka (haiwezekani kurudi nyuma)
+
+    try {
+      await updateContractLimits(contractId, { stopLoss: desiredSl });
+      const previousSl = info.slUsd;
+      info.slUsd = desiredSl;
+      openAutoTrades.set(contractId, info);
+      await dbSaveOpenTrade({
+        contractId: String(contractId),
+        code: info.code,
+        symbol: info.symbol,
+        direction: info.direction,
+        stake: info.stake,
+        buyPrice: info.buyPrice,
+        slUsd: desiredSl,
+        tpUsd: info.tpUsd,
+        openedAt: info.openedAt,
+      });
+      console.log(
+        `[autoTrader] 🪤 Trailing: ${info.code} SL imesogezwa kutoka $${fmt(previousSl)} kwenda ` +
+          `$${fmt(desiredSl)} (R=${r.toFixed(2)}, profit ya sasa $${fmt(profit)}).`
+      );
+      await notify(
+        `🪤 *TRAILING STOP — ${info.code}*\n\n` +
+          `Faida ya sasa: $${fmt(profit)} (R ${r.toFixed(2)})\n` +
+          `SL imesogezwa: $${fmt(previousSl)} → $${fmt(desiredSl)}` +
+          (desiredSl < 0 ? `\n✅ Faida ya angalau $${fmt(Math.abs(desiredSl))} imefungwa sasa.` : `\n✅ Trade iko karibu na breakeven — hatari imepungua.`) +
+          `\n🆔 Contract ID: ${contractId}`
+      );
+    } catch (err) {
+      console.error(`[autoTrader] Trailing: imeshindwa kusogeza SL ya ${info.code} (${contractId}):`, err.message);
+    }
+  }
+}
+
 /**
  * Inaitwa MARA MOJA kwenye start() — inasoma DB kwa trades ambazo bado
  * hazijafungwa (closedAt IS NULL) kutoka mzunguko wa kabla ya redeploy/
@@ -332,7 +557,7 @@ async function restoreOpenTradesFromDb() {
   try {
     await fxTradesDb.initSchema();
     const result = await fxTradesDb.query(
-      'SELECT contractId, code, symbol, direction, stake, buyPrice, openedAt FROM fx_auto_trades WHERE closedAt IS NULL'
+      'SELECT contractId, code, symbol, direction, stake, buyPrice, openedAt, slUsd, tpUsd FROM fx_auto_trades WHERE closedAt IS NULL'
     );
     rows = result.rows || [];
   } catch (err) {
@@ -348,6 +573,8 @@ async function restoreOpenTradesFromDb() {
       stake: Number(r.stake),
       buyPrice: Number(r.buyPrice),
       openedAt: Number(r.openedAt),
+      slUsd: r.slUsd === null || r.slUsd === undefined ? null : Number(r.slUsd),
+      tpUsd: r.tpUsd === null || r.tpUsd === undefined ? null : Number(r.tpUsd),
     });
   }
 
@@ -547,6 +774,8 @@ async function checkPairAndTrade(pairInfo) {
       stake: Number(livePosition.buy_price) || 0,
       buyPrice: Number(livePosition.buy_price),
       openedAt,
+      slUsd: null, // haijulikani — trade hii haikufunguliwa na signal yetu, trailing itaipuuza
+      tpUsd: null,
     };
     openAutoTrades.set(String(livePosition.contract_id), adopted);
     await dbSaveOpenTrade({ contractId: String(livePosition.contract_id), ...adopted, slUsd: null, tpUsd: null });
@@ -668,6 +897,8 @@ async function checkPairAndTrade(pairInfo) {
       stake: STAKE_USD,
       buyPrice: result.buy_price,
       openedAt,
+      slUsd: slFinal,
+      tpUsd: tpFinal,
     });
     await dbSaveOpenTrade({
       contractId: String(result.contract_id),
@@ -679,6 +910,7 @@ async function checkPairAndTrade(pairInfo) {
       slUsd: slFinal,
       tpUsd: tpFinal,
       openedAt,
+      signalStrength: sig.strength,
     });
 
     await notify(
@@ -841,7 +1073,8 @@ function start({ sock, notifyJid }) {
       `(fallback ya dola fasta: $${FALLBACK_SL_USD}/$${FALLBACK_TP_USD}). ` +
       `Circuit breakers: max daily loss $${MAX_DAILY_LOSS_USD}, max ${MAX_CONSECUTIVE_LOSSES} hasara mfululizo ` +
       `(cooldown saa ${Math.round(COOLDOWN_MS / 3600000)}), max ${MAX_CONCURRENT_TRADES} trades wazi kwa wakati mmoja. ` +
-      `Regime filter: ${REGIME_FILTER_ENABLED ? `ON (min PF ${REGIME_MIN_PROFIT_FACTOR}, bars ${REGIME_BACKTEST_BARS})` : 'OFF'}.`
+      `Regime filter: ${REGIME_FILTER_ENABLED ? `ON (min PF ${REGIME_MIN_PROFIT_FACTOR}, bars ${REGIME_BACKTEST_BARS})` : 'OFF'}. ` +
+      `Trailing stop: ${TRAILING_ENABLED ? `ON (breakeven @R${TRAIL_BREAKEVEN_TRIGGER_R}, profit-lock @R${TRAIL_PROFITLOCK_TRIGGER_R})` : 'OFF'}.`
   );
 
   // Kwanza rejesha trades zilizokuwa wazi kabla ya restart/redeploy hii
@@ -853,6 +1086,7 @@ function start({ sock, notifyJid }) {
   // trade "mpya" ya jozi ambayo kwa kweli tayari ina trade wazi.
   (async () => {
     await loadStakeOverrideFromDb();
+    await loadTrailingOverrideFromDb();
     await restoreOpenTradesFromDb();
     await pollClosedTrades();
   })()
@@ -866,6 +1100,7 @@ function start({ sock, notifyJid }) {
 
       pollInterval = setInterval(() => {
         pollClosedTrades().catch((err) => console.error('[autoTrader] pollClosedTrades error:', err.message));
+        checkTrailingStops().catch((err) => console.error('[autoTrader] checkTrailingStops error:', err.message));
       }, POLL_CLOSED_MS);
     });
 }
@@ -911,6 +1146,11 @@ function getStatus() {
     isPaused: isPaused(),
     pausedUntil,
     pauseReason,
+    // Trailing stop / breakeven-lock
+    trailingEnabled: TRAILING_ENABLED,
+    trailBreakevenTriggerR: TRAIL_BREAKEVEN_TRIGGER_R,
+    trailProfitlockTriggerR: TRAIL_PROFITLOCK_TRIGGER_R,
+    trailProfitlockR: TRAIL_PROFITLOCK_R,
     // Regime filter (walk-forward validation)
     regimeFilter: {
       enabled: REGIME_FILTER_ENABLED,
@@ -927,6 +1167,8 @@ module.exports = {
   stop,
   getStatus,
   setStakeUsd,
+  setTrailingEnabled,
+  getWinRateStats,
   PAIRS,
   STRENGTH_THRESHOLD,
   openAutoTrades,
