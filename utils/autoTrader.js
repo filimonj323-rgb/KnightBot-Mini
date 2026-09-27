@@ -301,6 +301,7 @@ let ownerJid = null;
 let waSock = null;
 let startedAt = null;
 let lastCycleAt = null;
+let lastWatchdogAlertAt = null; // epuka kutuma DM ya watchdog kila baada ya POLL_CLOSED_MS wakati tatizo bado lipo
 
 // contract_id -> { code, symbol, direction, stake, buyPrice, openedAt }
 const openAutoTrades = new Map();
@@ -939,6 +940,33 @@ async function runCycle() {
     await checkPairAndTrade(PAIRS[i]);
   }
   lastCycleAt = Date.now();
+  lastWatchdogAlertAt = null; // cycle imefanikiwa — rudisha "kimya" kwa tatizo lijalo
+}
+
+// Watchdog/heartbeat: pollInterval (POLL_CLOSED_MS, dakika chache) inaendelea
+// kuita hii hata kama runCycle imekwama kabisa (mfano crash isiyoshikwa ndani
+// ya checkPairAndTrade, au Deriv connection kukatika bila auto-reconnect).
+// Kama tangu ukaguzi wa mwisho wa signal (au tangu bot ilipoanza, kama bado
+// haijawahi kukamilisha cycle moja) imepita zaidi ya mara mbili ya muda wa
+// kawaida kati ya cycle, tunatuma DM moja kwa owner. Halafu tunanyamaza hadi
+// angalau CHECK_INTERVAL_MS nyingine ipite (badala ya kutuma DM kila
+// POLL_CLOSED_MS wakati tatizo bado halijatatuliwa), na tunarudisha "kimya"
+// mara runCycle inapofanikiwa tena.
+function checkWatchdog() {
+  const reference = lastCycleAt || startedAt;
+  if (!reference) return;
+
+  const staleFor = Date.now() - reference;
+  if (staleFor <= CHECK_INTERVAL_MS * 2) return;
+
+  if (lastWatchdogAlertAt && Date.now() - lastWatchdogAlertAt < CHECK_INTERVAL_MS) return;
+  lastWatchdogAlertAt = Date.now();
+
+  notify(
+    `⚠️ *WATCHDOG* — Bot haijafanya ukaguzi wa signal (runCycle) kwa dakika ${Math.round(staleFor / 60000)} ` +
+      `(kawaida ni kila ${Math.round(CHECK_INTERVAL_MS / 60000)}). Huenda process imekwama, Railway restart ` +
+      `haijaanzisha vizuri, au Deriv connection imekatika — angalia Railway logs.`
+  ).catch((err) => console.error('[autoTrader] Imeshindwa kutuma watchdog alert:', err.message));
 }
 
 async function pollClosedTrades() {
@@ -1101,6 +1129,7 @@ function start({ sock, notifyJid }) {
       pollInterval = setInterval(() => {
         pollClosedTrades().catch((err) => console.error('[autoTrader] pollClosedTrades error:', err.message));
         checkTrailingStops().catch((err) => console.error('[autoTrader] checkTrailingStops error:', err.message));
+        checkWatchdog();
       }, POLL_CLOSED_MS);
     });
 }
