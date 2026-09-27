@@ -180,6 +180,7 @@
       <div class="section-tab" data-section="calendar"><span class="icon">📅</span>Calendar</div>
       <div class="section-tab" data-section="signals"><span class="icon">📡</span>Signals</div>
       <div class="section-tab" data-section="trades"><span class="icon">📊</span>Trades</div>
+      <div class="section-tab" data-section="stats"><span class="icon">📈</span>Win Rate</div>
       <div class="section-tab" data-section="backtest"><span class="icon">🧪</span>Backtest</div>
     </div>
 
@@ -275,6 +276,18 @@
         </div>
         <button class="primary" onclick="openTrade()" id="openBtn">Fungua Trade</button>
         <div class="toast" id="openToast"></div>
+      </div>
+    </div>
+
+    <div class="page-section" id="section-stats">
+      <div class="card">
+        <div class="section-label">📈 Win Rate kwa Signal Strength</div>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">
+          Trades zilizofungwa, zikigawanywa kwa nguvu ya signal iliyosababisha kufunguliwa —
+          bucket ya juu (86-100%) inatakiwa iwe na win-rate ya juu zaidi ya bucket za chini
+          kama mkakati una maana. Trades zilizofunguliwa kwa mkono (bila signal) hazihesabiwi.
+        </div>
+        <div id="statsBox"><div class="empty">Inapakia...</div></div>
       </div>
     </div>
 
@@ -450,8 +463,22 @@
       <div style="margin-top:12px;">${signalsHtml}</div>
       <div class="section-label" style="margin-top:12px; margin-bottom:6px;">Currency Exposure (correlation guard, kikomo ±${a.maxCurrencyExposure})</div>
       <div style="font-size:11px;">${exposureHtml}</div>
+      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🪤 Trailing Stop (breakeven @R${a.trailBreakevenTriggerR}, profit-lock @R${a.trailProfitlockTriggerR})</div>
+      <span class="badge ${a.trailingEnabled ? 'on' : 'off'}">${a.trailingEnabled ? 'ON' : 'OFF'}</span>
+      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleTrailing(${!a.trailingEnabled})">
+        ${a.trailingEnabled ? 'Zima' : 'Washa'}
+      </button>
       <div class="muted" style="margin-top:8px; font-size:11px;">Ukaguzi wa mwisho: ${timeAgo(a.lastCycleAt)}</div>
     `;
+  }
+
+  async function toggleTrailing(enabled) {
+    try {
+      await api('/api/admin/fx/trailing', { method: 'POST', body: JSON.stringify({ enabled }) });
+      refresh();
+    } catch (e) {
+      alert('❌ ' + e.message);
+    }
   }
 
   function directionBadge(direction) {
@@ -510,6 +537,40 @@
       signalState[code] = { error: e.message, loading: false };
     }
     renderSignals();
+  }
+
+  // ── 📈 Win Rate (kwa signal strength) ───────────────────────────────
+  function renderStats(stats) {
+    const box = document.getElementById('statsBox');
+    if (!stats || !stats.length) {
+      box.innerHTML = `<div class="empty">Hakuna trade zilizofungwa bado zenye rekodi ya signal strength.</div>`;
+      return;
+    }
+    const rows = stats.map((s) => {
+      const isOverall = s.bucket === 'OVERALL';
+      const profitClass = s.totalProfit > 0 ? 'dir-buy' : s.totalProfit < 0 ? 'dir-sell' : 'muted';
+      return `<tr${isOverall ? ' style="font-weight:600; border-top:1px solid var(--border);"' : ''}>
+        <td>${s.bucket}</td>
+        <td>${s.total}</td>
+        <td>${s.wins}/${s.losses}</td>
+        <td>${s.winRatePct}%</td>
+        <td class="${profitClass}">$${s.totalProfit}</td>
+        <td>$${s.avgProfit}</td>
+      </tr>`;
+    }).join('');
+    box.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Bucket</th><th>Jumla</th><th>W/L</th><th>Win%</th><th>Profit</th><th>Avg</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  }
+
+  async function refreshStats() {
+    try {
+      const data = await api('/api/admin/fx/stats');
+      renderStats(data.stats || []);
+    } catch (e) {
+      document.getElementById('statsBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+    }
   }
 
   // ── 🧠 AI Predictions ────────────────────────────────────────────────
@@ -892,13 +953,15 @@
     refresh();
     refreshCalendar();
     refreshPredictions();
+    refreshStats();
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(refresh, 5000); // "live" — bei/positions kila sekunde 5
     if (slowPollTimer) clearInterval(slowPollTimer);
-    // Calendar + AI predictions hazibadiliki mara kwa mara (calendar: cache
-    // dakika 15 upande wa server; predictions: cache dakika ~20 + Groq call) —
-    // kila dakika 1 kwenye dashboard inatosha, hakuna sababu ya sekunde 5.
-    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); }, 60000);
+    // Calendar + AI predictions + win-rate stats hazibadiliki mara kwa mara
+    // (calendar: cache dakika 15 upande wa server; predictions: cache dakika
+    // ~20 + Groq call; stats: inabadilika tu trade ikifungwa) — kila dakika 1
+    // kwenye dashboard inatosha, hakuna sababu ya sekunde 5.
+    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); refreshStats(); }, 60000);
   }
 
   if (ADMIN_TOKEN) showApp();
