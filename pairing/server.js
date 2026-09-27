@@ -571,6 +571,24 @@ async function handlePairingRequest(req, res) {
         });
       }
 
+      // Win-rate ya auto-trader kwa "bucket" ya signal strength — angalia
+
+      // Win-rate ya auto-trader kwa "bucket" ya signal strength — angalia
+      // utils/autoTrader.js -> getWinRateStats() na commands/utility/autostats.js
+      // (command ya WhatsApp yenye taarifa ile ile).
+      if (req.method === 'GET' && req.url === '/api/admin/fx/stats') {
+        const stats = await autoTrader.getWinRateStats();
+        return sendJson(res, 200, { ok: true, stats });
+      }
+
+      // Washa/zima trailing stop (breakeven-lock + profit-lock) — sawa na
+      // command ya WhatsApp .fxtrailing (commands/owner/fxtrailing.js).
+      if (req.method === 'POST' && req.url === '/api/admin/fx/trailing') {
+        const body = await readJsonBody(req);
+        const result = await autoTrader.setTrailingEnabled(!!body.enabled);
+        return sendJson(res, 200, { ok: true, ...result });
+      }
+
       // Fungua trade mpya kwa mkono kutoka dashboard (sawa na .fxbuy/.fxsell).
       if (req.method === 'POST' && req.url === '/api/admin/fx/open') {
         const body = await readJsonBody(req);

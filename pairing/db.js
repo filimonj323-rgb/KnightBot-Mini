@@ -103,7 +103,8 @@ async function initSchema() {
       openedAt    INTEGER NOT NULL,
       closedAt    INTEGER,
       sellPrice   REAL,
-      profit      REAL
+      profit      REAL,
+      signalStrength REAL
     )`,
     // Key/value store ya settings za auto-trader zinazoweza kubadilishwa
     // "live" kupitia amri (mfano .fxautostake) badala ya env var + restart.
@@ -159,6 +160,16 @@ async function initSchema() {
     } catch (e) {
       // Column already exists — expected on every run after the first.
     }
+  }
+
+  // Migration: signalStrength — kwa ajili ya win-rate tracking per
+  // strength-bucket (.autostats + dashboard). DB zilizoundwa kabla ya
+  // hii hazina column hii, kwa hiyo ALTER + swallow-if-exists kama
+  // migrations nyingine hapo juu.
+  try {
+    await client.execute('ALTER TABLE fx_auto_trades ADD COLUMN signalStrength REAL');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
   }
 
   schemaReady = true;
