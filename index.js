@@ -114,6 +114,34 @@ const qrcode = require('qrcode-terminal');
 const qrImage = require('qrcode');
 const config = require('./config');
 const autoTrader = require('./utils/autoTrader');
+const { spawn } = require('child_process');
+
+// ── Pocket Option Bridge (Python) — inaanzishwa kama "child process" ndani
+// ya container moja ile ile ya Railway (hakuna service ya pili inahitajika).
+// Node na Python zinaongea kwa http://127.0.0.1:5055.
+// Angalia pocket_bridge/app.py na utils/pocketOptionTrader.js.
+let pocketBridgeProcess = null;
+function startPocketBridge() {
+  if (String(process.env.POCKET_OPTION_ENABLED || 'false').toLowerCase() !== 'true') {
+    console.log('[pocket_bridge] POCKET_OPTION_ENABLED si "true" — Pocket Option bridge imezimwa.');
+    return;
+  }
+  console.log('[pocket_bridge] 🚀 Inaanzisha Python bridge (pocket_bridge/app.py)...');
+  pocketBridgeProcess = spawn('python3', ['pocket_bridge/app.py'], {
+    stdio: 'inherit',
+    cwd: __dirname,
+    env: process.env,
+  });
+  pocketBridgeProcess.on('exit', (code, signal) => {
+    console.error(`[pocket_bridge] ❌ Imezimika (code=${code}, signal=${signal}) — inaanza upya baada ya sekunde 5...`);
+    pocketBridgeProcess = null;
+    setTimeout(startPocketBridge, 5000);
+  });
+  pocketBridgeProcess.on('error', (err) => {
+    console.error('[pocket_bridge] Imeshindwa kuanzisha (je python3 ipo kwenye container?):', err.message);
+  });
+}
+startPocketBridge();
 let handler; // populated by loadBaileysBridge()
 // Rejea ya sock kuu ya bot — inatumika na SIGTERM/SIGINT handler chini ili
 // kufunga connection vizuri wakati Railway inapoanza deploy mpya (bila hii,
@@ -1126,6 +1154,14 @@ const gracefulShutdown = async (signal) => {
   try {
     mainSock?.ws?.close?.();
     mainSock?.end?.(new Error('shutdown'));
+  } catch (e) {
+    // Silent
+  }
+  try {
+    if (pocketBridgeProcess) {
+      pocketBridgeProcess.removeAllListeners('exit'); // usianzishe upya wakati wa shutdown ya makusudi
+      pocketBridgeProcess.kill('SIGTERM');
+    }
   } catch (e) {
     // Silent
   }
