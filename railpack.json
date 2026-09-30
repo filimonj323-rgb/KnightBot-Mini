@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.railpack.com",
+
+  "packages": {
+    "python": "3.11"
+  },
+
+  "steps": {
+    "install": {
+      "commands": [
+        "...",
+        "python3 -m pip install -r pocket_bridge/requirements.txt"
+      ]
+    }
+  }
+}
