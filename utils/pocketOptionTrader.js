@@ -61,6 +61,15 @@ async function getBalance() {
   return data.balance;
 }
 
+// Orodha ya assets zote zinazotambulika (cache saa 1).
+let assetsCache = { at: 0, list: null };
+async function getAssets() {
+  if (assetsCache.list && Date.now() - assetsCache.at < 60 * 60 * 1000) return assetsCache.list;
+  const data = await bridgeFetch('/assets');
+  assetsCache = { at: Date.now(), list: data.assets };
+  return data.assets;
+}
+
 /**
  * @param {string} pair - mfano "EURUSD" au "EURUSD_otc"
  * @param {number} timeframeSeconds - mfano 60 (1min), 300 (5min)
@@ -118,6 +127,7 @@ module.exports = {
   getBridgeStatus,
   getBalance,
   getCandles,
+  getAssets,
   placeOrder,
   getOrderResult,
   getSignal,
