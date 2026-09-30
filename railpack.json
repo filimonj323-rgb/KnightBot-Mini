@@ -9,6 +9,7 @@
     "install": {
       "commands": [
         "...",
+        { "src": "pocket_bridge/requirements.txt", "dest": "pocket_bridge/requirements.txt" },
         "python3 -m pip install -r pocket_bridge/requirements.txt"
       ]
     }
