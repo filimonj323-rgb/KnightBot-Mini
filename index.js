@@ -120,10 +120,17 @@ const { spawn } = require('child_process');
 // ya container moja ile ile ya Railway (hakuna service ya pili inahitajika).
 // Node na Python zinaongea kwa http://127.0.0.1:5055.
 // Angalia pocket_bridge/app.py na utils/pocketOptionTrader.js.
+//
+// SWITCH: badilisha true/false hapa moja kwa moja kuwasha/kuzima (badala
+// ya Railway variable) — baadaye tutaongeza amri ya WhatsApp (.poenable/
+// .podisable) itakayoweza kubadilisha hii wakati bot inaendelea kukimbia,
+// bila kuhitaji kuhariri code na deploy upya kila mara.
+const POCKET_OPTION_ENABLED = true;
+
 let pocketBridgeProcess = null;
 function startPocketBridge() {
-  if (String(process.env.POCKET_OPTION_ENABLED || 'false').toLowerCase() !== 'true') {
-    console.log('[pocket_bridge] POCKET_OPTION_ENABLED si "true" — Pocket Option bridge imezimwa.');
+  if (!POCKET_OPTION_ENABLED) {
+    console.log('[pocket_bridge] POCKET_OPTION_ENABLED=false (kwenye code) — Pocket Option bridge imezimwa.');
     return;
   }
   console.log('[pocket_bridge] 🚀 Inaanzisha Python bridge (pocket_bridge/app.py)...');
