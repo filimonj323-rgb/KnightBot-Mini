@@ -229,6 +229,16 @@ def balance():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/assets", methods=["GET"])
+def assets():
+    """Orodha ya assets zinazotambulika na maktaba (forex, OTC, commodities, crypto, indices, hisa)."""
+    try:
+        from pocketoptionapi_async.constants import ASSETS
+        return jsonify({"ok": True, "assets": sorted(ASSETS.keys())})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/candles", methods=["GET"])
 def candles():
     """
