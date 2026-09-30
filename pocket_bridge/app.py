@@ -77,6 +77,17 @@ if not SSID:
 import logging
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
+# pocketoptionapi_async inatumia loguru na inachapisha DEBUG kwa kila tick ya bei
+# (maelfu ya mistari kwa dakika). Weka INFO kupunguza kelele kwenye logs.
+# Ukihitaji debug: weka env POCKET_LOG_LEVEL=DEBUG.
+try:
+    import sys
+    from loguru import logger as _loguru
+    _loguru.remove()
+    _loguru.add(sys.stderr, level=os.environ.get("POCKET_LOG_LEVEL", "INFO").upper())
+except Exception:
+    pass
+
 app = Flask(__name__)
 
 # ── Event loop ya asyncio inayoendesha kwenye thread yake mwenyewe — Flask
