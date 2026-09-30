@@ -133,8 +133,10 @@ async def _connect_client():
         except Exception:
             pass
         raise RuntimeError(
-            "Pocket Option imekataa muunganisho — POCKET_OPTION_SSID si sahihi, "
-            "imeisha muda, au haulingani na POCKET_OPTION_DEMO (demo/real)."
+            "Imeshindwa kuunganisha na Pocket Option. Angalia logi za Railway kwa "
+            "kosa halisi: (1) tatizo la library/websockets (mfano 'extra_headers'), "
+            "(2) network, au (3) POCKET_OPTION_SSID imeisha muda / haulingani na "
+            "POCKET_OPTION_DEMO (demo/real)."
         )
     _client = client
     print(f"✅ [pocket_bridge] Imeunganishwa na Pocket Option (demo={IS_DEMO})")
