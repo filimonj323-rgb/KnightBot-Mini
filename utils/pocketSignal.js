@@ -13,19 +13,23 @@
  * hii ina faida kwa jozi husika — sio "strength" pekee.
  */
 
-const { getCandles } = require('./pocketOptionTrader');
+const { getCandles, getAssets } = require('./pocketOptionTrader');
 const { computeAllIndicatorSeries } = require('./indicators');
 
 const MAX_SCORE = 7; // trend 2 + macd 2 + rsi 1 + bb 1 + stoch 1
 const MIN_NET_VOTES = 2; // chini ya hii = NEUTRAL
-const WARMUP = 60; // bars za kwanza zinazorukwa (indicators hazijatulia)
+// Bars za kwanza zinazorukwa (indicators hazijatulia). Pocket Option inarudisha ~96
+// candles tu kwa ombi (maktaba haina parameter ya kuongeza), kwa hiyo WARMUP ni ndogo
+// iwezekanavyo: MACD(26+9) na StochRSI zinatulia ~bar 35-40.
+const WARMUP = 40;
+const MIN_BACKTEST_TRADES = 30; // chini ya hii = sampuli ndogo mno
 const ADX_WEAK = 20; // ADX chini ya hii = soko tulivu -> strength inapunguzwa
 
 // Jozi za soko halisi zinazotambulika na Pocket Option (maktaba ya bridge). Nyingine
 // zote (mfano EURJPY) zipo kama "_otc" tu — normalizePair() inazibadilisha kiotomatiki.
 const REAL_MARKET_PAIRS = new Set(['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDUSD']);
 
-const DEFAULT_PAIRS = (process.env.POCKET_SIGNAL_PAIRS || 'EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF,NZDUSD')
+const DEFAULT_PAIRS = (process.env.POCKET_SIGNAL_PAIRS || 'EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -47,15 +51,56 @@ function tfLabel(sec) {
   return `${sec}s`;
 }
 
-// _otc huongezwa kiotomatiki: (1) wikendi, (2) jozi isiyo kwenye soko halisi la Pocket Option.
-function normalizePair(pair, now = new Date()) {
-  let p = String(pair || '').trim().toUpperCase().replace('/', '');
-  if (!p) return p;
-  const isOtc = /_OTC$/i.test(p);
-  p = p.replace(/_OTC$/i, '');
+// Index ya assets (lowercase -> jina halisi, mfano "ukbrent" -> "UKBrent"). Orodha inatoka
+// bridge (/assets); ikishindwa tunarudi kwenye mantiki ya static hapa chini.
+let assetIndexCache = { at: 0, index: null };
+async function getAssetIndex() {
+  if (assetIndexCache.index && Date.now() - assetIndexCache.at < 60 * 60 * 1000) return assetIndexCache.index;
+  try {
+    const list = await getAssets();
+    const index = new Map(list.map((a) => [a.toLowerCase(), a]));
+    assetIndexCache = { at: Date.now(), index };
+    return index;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Tatua jina la jozi kuwa asset halisi ya Pocket Option.
+ * - Ikiwa `index` ipo: tumia jina halisi (EURUSD, BTCUSD, #AAPL, UKBrent...); ikiwa halipo
+ *   kwenye soko halisi lakini lipo OTC (mfano EURJPY) -> EURJPY_otc.
+ * - Wikendi, forex majors hubadilishwa kuwa _otc (soko halisi limefungwa).
+ */
+function normalizePair(pair, now = new Date(), index = null) {
+  const raw = String(pair || '').trim().replace('/', '');
+  if (!raw) return raw;
+  const isOtc = /_otc$/i.test(raw);
+  const base = raw.replace(/_otc$/i, '');
+  const up = base.toUpperCase();
   const day = now.getUTCDay(); // 0 = Jumapili, 6 = Jumamosi
   const weekend = day === 0 || day === 6;
-  return isOtc || weekend || !REAL_MARKET_PAIRS.has(p) ? `${p}_otc` : p;
+
+  if (index) {
+    const real = index.get(base.toLowerCase());
+    const otc = index.get(`${base.toLowerCase()}_otc`);
+    if (isOtc) return otc || `${up}_otc`;
+    if (weekend && REAL_MARKET_PAIRS.has(up) && otc) return otc;
+    return real || otc || `${up}_otc`;
+  }
+  return isOtc || weekend || !REAL_MARKET_PAIRS.has(up) ? `${up}_otc` : up;
+}
+
+// Jozi za kuchanganua kulingana na "mode":
+//   forex (default: DEFAULT_PAIRS) | otc (zote za _otc) | real (zote zisizo OTC) | all (zote)
+const SCAN_MODES = ['forex', 'otc', 'real', 'all'];
+async function getUniverse(mode = 'forex') {
+  if (mode === 'forex') return DEFAULT_PAIRS;
+  const list = await getAssets().catch(() => null);
+  if (!list) throw new Error('Siwezi kupata orodha ya jozi kutoka bridge. Jaribu tena.');
+  if (mode === 'otc') return list.filter((a) => /_otc$/i.test(a));
+  if (mode === 'real') return list.filter((a) => !/_otc$/i.test(a));
+  return list;
 }
 
 function toMs(t) {
@@ -165,7 +210,7 @@ function gradeOf(strength) {
  */
 async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   const minStrength = opts.minStrength ?? 50;
-  const p = normalizePair(pair);
+  const p = normalizePair(pair, new Date(), await getAssetIndex());
   let raw;
   try {
     raw = await getCandles(p, timeframeSec, 220);
@@ -175,7 +220,10 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
     }
     throw err;
   }
-  const candles = dropFormingCandle(raw || [], timeframeSec);
+  if (!raw || raw.length === 0) {
+    throw new Error(`Pocket Option haikujibu kwa ${p} (timeout) — jozi inaweza kuwa imefungwa sasa. Jaribu _otc.`);
+  }
+  const candles = dropFormingCandle(raw, timeframeSec);
   if (candles.length < WARMUP + 10) {
     throw new Error(`Candles hazitoshi kwa ${p} (${candles.length}/${WARMUP + 10}).`);
   }
@@ -199,20 +247,39 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   };
 }
 
-// Changanua jozi nyingi moja baada ya nyingine (bridge ina client moja).
+// Jozi zilizoshindwa (timeout / haipo) zinarukwa kwa muda, ili jozi zilizofungwa
+// zisipoteze sekunde 10 kila scan.
+const deadPairs = new Map(); // pair -> until(ms)
+const DEAD_MS = 10 * 60 * 1000;
+const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.POCKET_SCAN_CONCURRENCY || '', 10) || 3);
+
+// Changanua jozi nyingi. `concurrency` maombi kwa wakati mmoja (default 3; weka
+// POCKET_SCAN_CONCURRENCY=1 ukiona makosa/timeouts nyingi).
 async function scanPairs(pairs = DEFAULT_PAIRS, timeframeSec = 60, opts = {}) {
+  const concurrency = opts.concurrency ?? SCAN_CONCURRENCY;
   const results = [];
   const errors = [];
-  for (const pair of pairs) {
-    try {
-      results.push(await analyzePair(pair, timeframeSec, opts));
-    } catch (err) {
-      errors.push({ pair: normalizePair(pair), error: err.message });
+  let skipped = 0;
+  const queue = pairs.filter((pair) => {
+    if ((deadPairs.get(pair) || 0) > Date.now()) { skipped++; return false; }
+    return true;
+  });
+  let next = 0;
+  const worker = async () => {
+    while (next < queue.length) {
+      const pair = queue[next++];
+      try {
+        results.push(await analyzePair(pair, timeframeSec, opts));
+      } catch (err) {
+        errors.push({ pair, error: err.message });
+        if (/timeout|haikujibu|haipo kwenye/i.test(err.message)) deadPairs.set(pair, Date.now() + DEAD_MS);
+      }
+      await new Promise((r) => setTimeout(r, 150));
     }
-    await new Promise((r) => setTimeout(r, 400));
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
   results.sort((a, b) => b.strength - a.strength);
-  return { results, errors };
+  return { results, errors, skipped, total: pairs.length };
 }
 
 const EMOJI = { BUY: '🟢', SELL: '🔴', NEUTRAL: '⚪' };
@@ -220,7 +287,8 @@ const LABEL = { BUY: 'UP (BUY) ⬆️', SELL: 'DOWN (SELL) ⬇️', NEUTRAL: 'HA
 
 function formatBacktest(bt) {
   const fmt = (x) => (x.trades ? `${x.winRate}% (${x.trades} signals)` : 'hakuna data');
-  return `📊 Backtest ya candles hizi: yote ${fmt(bt.all)} • strong ${fmt(bt.strong)}`;
+  const small = bt.all.trades < MIN_BACKTEST_TRADES ? '\n⚠️ Sampuli ndogo (candles ~96 tu) — usiitegemee kama uthibitisho.' : '';
+  return `📊 Backtest ya candles hizi: yote ${fmt(bt.all)} • strong ${fmt(bt.strong)}${small}`;
 }
 
 function formatSignal(r, { compact = false } = {}) {
@@ -245,20 +313,25 @@ function formatSignal(r, { compact = false } = {}) {
   return lines.join('\n');
 }
 
-function formatScan({ results, errors }, timeframeSec, minStrength = 50) {
+function formatScan({ results, errors, skipped = 0, total }, timeframeSec, minStrength = 50, maxShow = 10) {
   const hits = results.filter((r) => r.direction !== 'NEUTRAL' && r.strength >= minStrength);
   const lines = [`🔎 *Scan ya Pocket Option (${tfLabel(timeframeSec)})*`, ''];
   if (!hits.length) lines.push('Hakuna signal yenye nguvu ya kutosha sasa hivi. Jaribu tena baada ya candle inayofuata.');
-  else hits.forEach((r) => lines.push(formatSignal(r, { compact: true })));
-  const neutral = results.length - hits.length;
-  if (neutral > 0) lines.push('', `⚪ Jozi ${neutral} hazina signal wazi.`);
-  if (errors.length) lines.push('', `⚠️ Zimeshindwa: ${errors.map((e) => e.pair).join(', ')}`);
+  else {
+    hits.slice(0, maxShow).forEach((r) => lines.push(formatSignal(r, { compact: true })));
+    if (hits.length > maxShow) lines.push(`…na signals ${hits.length - maxShow} nyingine.`);
+  }
+  const unavailable = errors.length + skipped;
+  lines.push('', `📋 Jozi ${total ?? results.length + unavailable}: zilizochanganuliwa ${results.length}, zenye signal ${hits.length}, hazipatikani/zimefungwa ${unavailable}.`);
+  if (errors.length && errors.length <= 5) lines.push(`⚠️ Zimeshindwa: ${errors.map((e) => e.pair).join(', ')}`);
   lines.push('', '_Tumia .posignal <JOZI> kuona sababu + backtest kamili._');
   return lines.join('\n');
 }
 
 module.exports = {
   DEFAULT_PAIRS,
+  SCAN_MODES,
+  getUniverse,
   parseTimeframe,
   tfLabel,
   normalizePair,
