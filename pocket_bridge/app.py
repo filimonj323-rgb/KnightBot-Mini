@@ -14,6 +14,8 @@ Default port: 5055 (badilisha na POCKET_BRIDGE_PORT ukitaka)
 """
 
 import os
+import re
+import traceback
 import asyncio
 import threading
 import time
@@ -23,8 +25,47 @@ from pocketoptionapi_async import AsyncPocketOptionClient, OrderDirection
 
 load_dotenv()
 
-SSID = os.environ.get("POCKET_OPTION_SSID", "")
-IS_DEMO = os.environ.get("POCKET_OPTION_DEMO", "true").lower() == "true"
+def _normalize_ssid(raw):
+    """Ondoa nafasi/newline na nukuu za ziada ambazo mara nyingi huingia
+    wakati wa kubandika variable kwenye Railway."""
+    v = (raw or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    return v.replace("\\\"", "\"")
+
+
+def _truthy(v):
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+SSID = _normalize_ssid(os.environ.get("POCKET_OPTION_SSID", ""))
+
+# isDemo ndani ya SSID ndiyo ya kuaminika — env POCKET_OPTION_DEMO inatumika
+# tu kama SSID haina isDemo. (Zamani "1" kwenye env ilisomwa kama false.)
+_m = re.search(r'"isDemo"\s*:\s*(\d|true|false)', SSID, re.I)
+_ssid_demo = None if not _m else _truthy(_m.group(1))
+_env_demo = os.environ.get("POCKET_OPTION_DEMO")
+if _ssid_demo is not None:
+    IS_DEMO = _ssid_demo
+    if _env_demo is not None and _truthy(_env_demo) != _ssid_demo:
+        print(f"⚠️  POCKET_OPTION_DEMO={_env_demo!r} hailingani na isDemo ndani ya SSID — natumia ya SSID (demo={IS_DEMO}).")
+else:
+    IS_DEMO = _truthy(_env_demo) if _env_demo is not None else True
+
+
+def _ssid_summary():
+    """Muhtasari salama (bila kufichua session) kwa logs."""
+    if not SSID:
+        return "SSID: HAIPO"
+    sess = re.search(r'"session"\s*:\s*"([^"]*)"', SSID)
+    uid = re.search(r'"uid"\s*:\s*(\d+)', SSID)
+    return (f"SSID: urefu={len(SSID)}, inaanza={SSID[:11]!r}, inaishia={SSID[-2:]!r}, "
+            f"session_len={len(sess.group(1)) if sess else 'HAIPO'}, uid={uid.group(1) if uid else 'HAIPO'}, "
+            f"isDemo={_ssid_demo}")
+
+
+print(f"ℹ️  [pocket_bridge] {_ssid_summary()} | demo inayotumika={IS_DEMO}")
+
 # Port ni constant (si env) — inalingana na BRIDGE_URL iliyowekwa moja kwa
 # moja (hardcoded) kwenye utils/pocketOptionTrader.js upande wa Node.
 PORT = 5055
@@ -74,8 +115,16 @@ def _is_connected(client):
 
 async def _connect_client():
     global _client
-    client = AsyncPocketOptionClient(SSID, is_demo=IS_DEMO)
-    ok = await client.connect()
+    try:
+        client = AsyncPocketOptionClient(SSID, is_demo=IS_DEMO, enable_logging=True)
+    except TypeError:
+        client = AsyncPocketOptionClient(SSID, is_demo=IS_DEMO)
+    try:
+        ok = await client.connect()
+    except Exception:
+        print("❌ [pocket_bridge] connect() imetoa exception:\n" + traceback.format_exc())
+        raise
+    print(f"ℹ️  [pocket_bridge] connect() ilirudisha: {ok!r}, is_connected={_is_connected(client)}")
     # connect() inaweza kurudisha False (au kurudi bila error) wakati SSID si
     # sahihi/imeisha muda — usihifadhi client ambayo haijaunganishwa kweli.
     if ok is False or not _is_connected(client):
