@@ -128,24 +128,85 @@ const { spawn } = require('child_process');
 const POCKET_OPTION_ENABLED = true;
 
 let pocketBridgeProcess = null;
+let pocketBridgeFailures = 0;
+let pocketBridgeDisabledReason = null;
+
+// Hakikisha Python dependencies zipo; kama hazipo jaribu kuzisakinisha (mara moja).
+// Hii inazuia "crash loop" ya ModuleNotFoundError: No module named 'flask'
+// endapo build step ya pip haikukimbia (mfano Railpack badala ya Nixpacks).
+function ensurePocketBridgeDeps() {
+  const { spawnSync } = require('child_process');
+  const check = () => spawnSync('python3', ['-c', 'import flask, dotenv, pocketoptionapi_async'], { cwd: __dirname, encoding: 'utf8' });
+
+  let res = check();
+  if (res.error) return { ok: false, reason: `python3 haipatikani: ${res.error.message}` };
+  if (res.status === 0) return { ok: true };
+
+  console.log('[pocket_bridge] ⚠️ Python dependencies hazipo — najaribu kusakinisha (pip install)...');
+  const req = 'pocket_bridge/requirements.txt';
+  const attempts = [
+    ['-m', 'pip', 'install', '--no-cache-dir', '-r', req],
+    ['-m', 'pip', 'install', '--no-cache-dir', '--break-system-packages', '-r', req],
+    ['-m', 'pip', 'install', '--no-cache-dir', '--user', '--break-system-packages', '-r', req],
+  ];
+  for (const args of attempts) {
+    const r = spawnSync('python3', args, { cwd: __dirname, encoding: 'utf8', timeout: 5 * 60 * 1000 });
+    if (r.status === 0) {
+      res = check();
+      if (res.status === 0) {
+        console.log('[pocket_bridge] ✅ Dependencies zimesakinishwa.');
+        return { ok: true };
+      }
+    }
+  }
+  const detail = ((res.stderr || '').trim().split('\n').pop()) || 'sababu haijulikani';
+  return { ok: false, reason: `pip install imeshindwa (${detail})` };
+}
+
 function startPocketBridge() {
   if (!POCKET_OPTION_ENABLED) {
     console.log('[pocket_bridge] POCKET_OPTION_ENABLED=false (kwenye code) — Pocket Option bridge imezimwa.');
     return;
   }
+
+  const deps = ensurePocketBridgeDeps();
+  if (!deps.ok) {
+    // Usirudie kila sekunde 5 — jaribu tena baada ya dakika 10 tu.
+    if (pocketBridgeDisabledReason !== deps.reason) {
+      console.error(`[pocket_bridge] ❌ Haiwezi kuanza: ${deps.reason}. Nitajaribu tena baada ya dakika 10.`);
+      pocketBridgeDisabledReason = deps.reason;
+    }
+    setTimeout(startPocketBridge, 10 * 60 * 1000);
+    return;
+  }
+  pocketBridgeDisabledReason = null;
+
   console.log('[pocket_bridge] 🚀 Inaanzisha Python bridge (pocket_bridge/app.py)...');
+  const startedAt = Date.now();
   pocketBridgeProcess = spawn('python3', ['pocket_bridge/app.py'], {
     stdio: 'inherit',
     cwd: __dirname,
     env: process.env,
   });
-  pocketBridgeProcess.on('exit', (code, signal) => {
-    console.error(`[pocket_bridge] ❌ Imezimika (code=${code}, signal=${signal}) — inaanza upya baada ya sekunde 5...`);
+  let restartScheduled = false;
+  const scheduleRestart = () => {
+    if (restartScheduled) return;
+    restartScheduled = true;
     pocketBridgeProcess = null;
-    setTimeout(startPocketBridge, 5000);
+    // Ikikimbia zaidi ya dakika 1, hesabu ya kushindwa inaanza upya.
+    if (Date.now() - startedAt > 60 * 1000) pocketBridgeFailures = 0;
+    pocketBridgeFailures++;
+    const delay = Math.min(5000 * 2 ** (pocketBridgeFailures - 1), 5 * 60 * 1000); // 5s → 5min
+    console.error(`[pocket_bridge] inaanza upya baada ya sekunde ${Math.round(delay / 1000)}...`);
+    setTimeout(startPocketBridge, delay);
+  };
+  pocketBridgeProcess.on('exit', (code, signal) => {
+    console.error(`[pocket_bridge] ❌ Imezimika (code=${code}, signal=${signal})`);
+    scheduleRestart();
   });
   pocketBridgeProcess.on('error', (err) => {
     console.error('[pocket_bridge] Imeshindwa kuanzisha (je python3 ipo kwenye container?):', err.message);
+    scheduleRestart();
   });
 }
 startPocketBridge();
