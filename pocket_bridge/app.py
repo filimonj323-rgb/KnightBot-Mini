@@ -16,6 +16,7 @@ Default port: 5055 (badilisha na POCKET_BRIDGE_PORT ukitaka)
 import os
 import asyncio
 import threading
+import time
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from pocketoptionapi_async import AsyncPocketOptionClient, OrderDirection
@@ -40,6 +41,7 @@ app = Flask(__name__)
 _loop = asyncio.new_event_loop()
 _client = None
 _client_lock = threading.Lock()
+_last_error = None  # sababu ya mwisho ya kushindwa ku-connect (inaonekana kwenye /health)
 
 
 def _run_loop():
@@ -65,11 +67,36 @@ async def _connect_client():
 
 
 def get_client():
-    global _client
+    global _client, _last_error
     with _client_lock:
         if _client is None:
-            run_async(_connect_client())
+            if not SSID:
+                _last_error = "POCKET_OPTION_SSID haijawekwa (Railway variable)."
+                raise RuntimeError(_last_error)
+            try:
+                run_async(_connect_client(), timeout=60)
+                _last_error = None
+            except Exception as e:
+                _last_error = f"{type(e).__name__}: {e}"
+                raise
         return _client
+
+
+def _eager_connect_loop():
+    """Unganisha na Pocket Option mara tu bridge inapoanza (na jaribu tena
+    ikishindwa), ili /health iseme connected=true bila kusubiri amri ya kwanza."""
+    delay = 5
+    while _client is None:
+        if not SSID:
+            time.sleep(60)
+            continue
+        try:
+            get_client()
+            return
+        except Exception as e:
+            print(f"⚠️ [pocket_bridge] Connect imeshindwa: {e} — jaribu tena baada ya {delay}s")
+            time.sleep(delay)
+            delay = min(delay * 2, 120)
 
 
 def check_secret(req):
@@ -87,7 +114,13 @@ def _auth():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"ok": True, "connected": _client is not None, "demo": IS_DEMO})
+    return jsonify({
+        "ok": True,
+        "connected": _client is not None,
+        "demo": IS_DEMO,
+        "ssid_set": bool(SSID),
+        "last_error": _last_error,
+    })
 
 
 @app.route("/balance", methods=["GET"])
@@ -192,4 +225,5 @@ def active_orders():
 
 if __name__ == "__main__":
     print(f"🌐 [pocket_bridge] Inaanza kwenye port {PORT} (demo={IS_DEMO})")
+    threading.Thread(target=_eager_connect_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT)
