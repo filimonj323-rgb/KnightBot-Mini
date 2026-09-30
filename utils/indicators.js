@@ -187,4 +187,171 @@ function computeSignalFromCandles(candles) {
   return { direction, strength, notes, price, atr: atrVal, rsi: rsiVal, emaFast, emaSlow, macdHist };
 }
 
-module.exports = { ema, rsi, macd, atr, lastValid, computeSignalFromCandles };
+// ─────────────────────────────────────────────
+// Indicators za ziada (Bollinger, ADX, StochRSI) + "all-in-one" helpers
+// zinazotumiwa na utils/forexSignal.js na utils/backtest.js.
+// Candles zinaweza kuwa na namba kama strings (Twelve Data) — tunazibadilisha.
+// ─────────────────────────────────────────────
+
+// Bars za chini zinazopendekezwa ili MACD(26+9), ADX(14*2), StochRSI(14+14+3+3) zitulie.
+const MIN_CANDLES_RECOMMENDED = 60;
+
+function sma(values, period) {
+  const out = new Array(values.length).fill(null);
+  for (let i = period - 1; i < values.length; i++) {
+    let sum = 0;
+    let ok = true;
+    for (let j = i - period + 1; j <= i; j++) {
+      if (values[j] == null) { ok = false; break; }
+      sum += values[j];
+    }
+    if (ok) out[i] = sum / period;
+  }
+  return out;
+}
+
+/** Bollinger Bands (20, 2) — population std dev. */
+function bollinger(closes, period = 20, mult = 2) {
+  const upper = new Array(closes.length).fill(null);
+  const middle = new Array(closes.length).fill(null);
+  const lower = new Array(closes.length).fill(null);
+  for (let i = period - 1; i < closes.length; i++) {
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += closes[j];
+    const mean = sum / period;
+    let variance = 0;
+    for (let j = i - period + 1; j <= i; j++) variance += (closes[j] - mean) ** 2;
+    const sd = Math.sqrt(variance / period);
+    middle[i] = mean;
+    upper[i] = mean + mult * sd;
+    lower[i] = mean - mult * sd;
+  }
+  return { upper, middle, lower };
+}
+
+/** ADX (Wilder, period 14). Thamani ya kwanza ipo kwenye index 2*period-1. */
+function adx(candles, period = 14) {
+  const n = candles.length;
+  const out = new Array(n).fill(null);
+  if (n <= period * 2) return out;
+
+  const tr = new Array(n).fill(0);
+  const plusDM = new Array(n).fill(0);
+  const minusDM = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const upMove = candles[i].high - candles[i - 1].high;
+    const downMove = candles[i - 1].low - candles[i].low;
+    plusDM[i] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDM[i] = downMove > upMove && downMove > 0 ? downMove : 0;
+    tr[i] = Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close)
+    );
+  }
+
+  let trS = 0, pS = 0, mS = 0;
+  for (let i = 1; i <= period; i++) { trS += tr[i]; pS += plusDM[i]; mS += minusDM[i]; }
+
+  const dx = new Array(n).fill(null);
+  const calcDx = () => {
+    if (trS === 0) return 0;
+    const pDI = (100 * pS) / trS;
+    const mDI = (100 * mS) / trS;
+    const sum = pDI + mDI;
+    return sum === 0 ? 0 : (100 * Math.abs(pDI - mDI)) / sum;
+  };
+  dx[period] = calcDx();
+  for (let i = period + 1; i < n; i++) {
+    trS = trS - trS / period + tr[i];
+    pS = pS - pS / period + plusDM[i];
+    mS = mS - mS / period + minusDM[i];
+    dx[i] = calcDx();
+  }
+
+  let adxPrev = 0;
+  for (let i = period; i < period * 2; i++) adxPrev += dx[i];
+  adxPrev /= period;
+  out[period * 2 - 1] = adxPrev;
+  for (let i = period * 2; i < n; i++) {
+    adxPrev = (adxPrev * (period - 1) + dx[i]) / period;
+    out[i] = adxPrev;
+  }
+  return out;
+}
+
+/** Stochastic RSI (14,14,3,3) — %K na %D (0-100). */
+function stochRsi(closes, rsiPeriod = 14, stochPeriod = 14, kSmooth = 3, dSmooth = 3) {
+  const rsiArr = rsi(closes, rsiPeriod);
+  const raw = new Array(closes.length).fill(null);
+  for (let i = 0; i < closes.length; i++) {
+    if (i < stochPeriod - 1) continue;
+    let lo = Infinity, hi = -Infinity, ok = true;
+    for (let j = i - stochPeriod + 1; j <= i; j++) {
+      const v = rsiArr[j];
+      if (v == null) { ok = false; break; }
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    if (!ok) continue;
+    raw[i] = hi === lo ? 0 : ((rsiArr[i] - lo) / (hi - lo)) * 100;
+  }
+  const k = sma(raw, kSmooth);
+  const d = sma(k, dSmooth);
+  return { k, d };
+}
+
+function normalizeCandles(candles) {
+  return (candles || []).map((c) => ({
+    open: Number(c.open),
+    high: Number(c.high),
+    low: Number(c.low),
+    close: Number(c.close),
+  }));
+}
+
+/**
+ * Series kamili (array kwa kila bar) ya indicators zote — inatumiwa na backtest.
+ * Majina ya keys yanalingana na yanayosomwa na forexSignal/backtest.
+ */
+function computeAllIndicatorSeries(candles) {
+  const cs = normalizeCandles(candles);
+  const closes = cs.map((c) => c.close);
+  const m = macd(closes);
+  const bb = bollinger(closes, 20, 2);
+  const st = stochRsi(closes);
+  return {
+    price: closes,
+    rsi: rsi(closes, 14),
+    macd: m.macd,
+    macdSignal: m.signal,
+    macdHist: m.hist,
+    ema9: ema(closes, 9),
+    ema21: ema(closes, 21),
+    atr: atr(cs, 14),
+    adx: adx(cs, 14),
+    bbUpper: bb.upper,
+    bbMiddle: bb.middle,
+    bbLower: bb.lower,
+    stochK: st.k,
+    stochD: st.d,
+  };
+}
+
+/** Thamani za MWISHO za kila indicator (object bapa) — inatumiwa na fetchForexSnapshot. */
+function computeAllIndicators(candles) {
+  const series = computeAllIndicatorSeries(candles);
+  const out = {};
+  for (const key of Object.keys(series)) {
+    out[key] = key === 'price'
+      ? series.price[series.price.length - 1] ?? null
+      : lastValid(series[key]);
+  }
+  return out;
+}
+
+module.exports = {
+  ema, rsi, macd, atr, lastValid, computeSignalFromCandles,
+  sma, bollinger, adx, stochRsi,
+  computeAllIndicators, computeAllIndicatorSeries, MIN_CANDLES_RECOMMENDED,
+};
