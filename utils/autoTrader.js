@@ -773,7 +773,30 @@ function wouldExceedCorrelationLimit(exposure, code, direction) {
   return Math.abs(newBase) > MAX_CURRENCY_EXPOSURE || Math.abs(newQuote) > MAX_CURRENCY_EXPOSURE;
 }
 
+// In-flight lock kwa pair — inazuia checkPairAndTrade() MBILI kuendesha kwa
+// WAKATI MMOJA kwa jozi ile ile (mfano runCycle mbili zikiingiliana kwa
+// bahati mbaya). Bila hii, zote mbili zingeweza kuona "bado haijafunguliwa"
+// (alreadyOpen=false) KABLA hata moja haijamaliza kuandika kwenye Map/DB —
+// na jozi ile ile ikafunguliwa MARA MBILI kwa kweli. Hii ni kando kabisa na
+// correlation guard (computeCurrencyExposure/wouldExceedCorrelationLimit)
+// iliyopo tayari, ambayo inashughulikia JOZI TOFAUTI zenye currency moja.
+const inFlightPairs = new Set();
+
 async function checkPairAndTrade(pairInfo) {
+  const { code } = pairInfo;
+  if (inFlightPairs.has(code)) {
+    console.log(`[autoTrader] ${code}: ukaguzi mwingine bado unaendelea (in-flight) — naruka huu kuzuia trade mbili.`);
+    return;
+  }
+  inFlightPairs.add(code);
+  try {
+    await checkPairAndTradeInner(pairInfo);
+  } finally {
+    inFlightPairs.delete(code);
+  }
+}
+
+async function checkPairAndTradeInner(pairInfo) {
   const { code, symbol } = pairInfo;
 
   // Circuit breaker: hasara ya siku au mfululizo imefika kikomo — usifungue
