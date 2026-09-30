@@ -33,6 +33,9 @@ BRIDGE_SECRET = os.environ.get("POCKET_BRIDGE_SECRET", "badilisha_hii_iwe_secret
 if not SSID:
     print("⚠️  POCKET_OPTION_SSID haijawekwa kwenye .env — bridge haitaweza connect.")
 
+import logging
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
 app = Flask(__name__)
 
 # ── Event loop ya asyncio inayoendesha kwenye thread yake mwenyewe — Flask
@@ -58,10 +61,32 @@ def run_async(coro, timeout=30):
     return future.result(timeout=timeout)
 
 
+def _is_connected(client):
+    """True kama client ipo na library inasema imeunganishwa."""
+    if client is None:
+        return False
+    val = getattr(client, "is_connected", True)
+    try:
+        return bool(val() if callable(val) else val)
+    except Exception:
+        return False
+
+
 async def _connect_client():
     global _client
     client = AsyncPocketOptionClient(SSID, is_demo=IS_DEMO)
-    await client.connect()
+    ok = await client.connect()
+    # connect() inaweza kurudisha False (au kurudi bila error) wakati SSID si
+    # sahihi/imeisha muda — usihifadhi client ambayo haijaunganishwa kweli.
+    if ok is False or not _is_connected(client):
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        raise RuntimeError(
+            "Pocket Option imekataa muunganisho — POCKET_OPTION_SSID si sahihi, "
+            "imeisha muda, au haulingani na POCKET_OPTION_DEMO (demo/real)."
+        )
     _client = client
     print(f"✅ [pocket_bridge] Imeunganishwa na Pocket Option (demo={IS_DEMO})")
 
@@ -69,6 +94,14 @@ async def _connect_client():
 def get_client():
     global _client, _last_error
     with _client_lock:
+        # Client ipo lakini connection imedondoka → itupe na unganisha upya.
+        if _client is not None and not _is_connected(_client):
+            print("⚠️ [pocket_bridge] Connection imedondoka — naunganisha upya...")
+            old, _client = _client, None
+            try:
+                run_async(old.disconnect(), timeout=10)
+            except Exception:
+                pass
         if _client is None:
             if not SSID:
                 _last_error = "POCKET_OPTION_SSID haijawekwa (Railway variable)."
@@ -83,16 +116,17 @@ def get_client():
 
 
 def _eager_connect_loop():
-    """Unganisha na Pocket Option mara tu bridge inapoanza (na jaribu tena
-    ikishindwa), ili /health iseme connected=true bila kusubiri amri ya kwanza."""
+    """Unganisha na Pocket Option mara tu bridge inapoanza, na baadaye
+    simamia connection (reconnect ikidondoka), ili /health iwe sahihi."""
     delay = 5
-    while _client is None:
+    while True:
         if not SSID:
             time.sleep(60)
             continue
         try:
             get_client()
-            return
+            delay = 5
+            time.sleep(30)  # kagua tena baada ya sekunde 30
         except Exception as e:
             print(f"⚠️ [pocket_bridge] Connect imeshindwa: {e} — jaribu tena baada ya {delay}s")
             time.sleep(delay)
@@ -116,7 +150,7 @@ def _auth():
 def health():
     return jsonify({
         "ok": True,
-        "connected": _client is not None,
+        "connected": _is_connected(_client),
         "demo": IS_DEMO,
         "ssid_set": bool(SSID),
         "last_error": _last_error,
