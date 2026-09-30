@@ -21,7 +21,11 @@ const MIN_NET_VOTES = 2; // chini ya hii = NEUTRAL
 const WARMUP = 60; // bars za kwanza zinazorukwa (indicators hazijatulia)
 const ADX_WEAK = 20; // ADX chini ya hii = soko tulivu -> strength inapunguzwa
 
-const DEFAULT_PAIRS = (process.env.POCKET_SIGNAL_PAIRS || 'EURUSD,GBPUSD,USDJPY,AUDUSD,EURJPY,USDCAD')
+// Jozi za soko halisi zinazotambulika na Pocket Option (maktaba ya bridge). Nyingine
+// zote (mfano EURJPY) zipo kama "_otc" tu — normalizePair() inazibadilisha kiotomatiki.
+const REAL_MARKET_PAIRS = new Set(['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDUSD']);
+
+const DEFAULT_PAIRS = (process.env.POCKET_SIGNAL_PAIRS || 'EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF,NZDUSD')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -43,7 +47,7 @@ function tfLabel(sec) {
   return `${sec}s`;
 }
 
-// Jozi za kawaida hazifanyi kazi wikendi — tumia _otc kiotomatiki.
+// _otc huongezwa kiotomatiki: (1) wikendi, (2) jozi isiyo kwenye soko halisi la Pocket Option.
 function normalizePair(pair, now = new Date()) {
   let p = String(pair || '').trim().toUpperCase().replace('/', '');
   if (!p) return p;
@@ -51,7 +55,7 @@ function normalizePair(pair, now = new Date()) {
   p = p.replace(/_OTC$/i, '');
   const day = now.getUTCDay(); // 0 = Jumapili, 6 = Jumamosi
   const weekend = day === 0 || day === 6;
-  return isOtc || weekend ? `${p}_otc` : p;
+  return isOtc || weekend || !REAL_MARKET_PAIRS.has(p) ? `${p}_otc` : p;
 }
 
 function toMs(t) {
@@ -162,7 +166,15 @@ function gradeOf(strength) {
 async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   const minStrength = opts.minStrength ?? 50;
   const p = normalizePair(pair);
-  const raw = await getCandles(p, timeframeSec, 220);
+  let raw;
+  try {
+    raw = await getCandles(p, timeframeSec, 220);
+  } catch (err) {
+    if (/invalid asset/i.test(err.message)) {
+      throw new Error(`Jozi "${p}" haipo kwenye Pocket Option. Jaribu mfano: EURUSD, GBPUSD, USDJPY au ongeza _otc.`);
+    }
+    throw err;
+  }
   const candles = dropFormingCandle(raw || [], timeframeSec);
   if (candles.length < WARMUP + 10) {
     throw new Error(`Candles hazitoshi kwa ${p} (${candles.length}/${WARMUP + 10}).`);
