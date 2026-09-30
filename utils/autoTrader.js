@@ -981,7 +981,18 @@ async function checkPairAndTrade(pairInfo) {
 async function runCycle() {
   for (let i = 0; i < PAIRS.length; i++) {
     if (i > 0) await sleep(PAIR_STAGGER_MS); // epuka 429 (kikomo cha Twelve Data)
-    await checkPairAndTrade(PAIRS[i]);
+    try {
+      await checkPairAndTrade(PAIRS[i]);
+    } catch (err) {
+      // MUHIMU: jozi MOJA ikitupa error isiyoshikwa (mfano Deriv "zombie"
+      // connection — inaonekana bado open lakini haijibu, hivyo kila ombi
+      // linangoja sekunde 15 kisha ku-timeout), HATUACHI mzunguko mzima
+      // usimame hapo — vinginevyo jozi zilizobaki hazikaguliwi kabisa
+      // ("bot imelala"), na lastCycleAt haisasishwi kamwe ikiwa tatizo
+      // lilelile linajirudia kila mzunguko (watchdog haisaidii kama huu
+      // ndio unaotupa error kila wakati badala ya ku-hang kimya kimya).
+      console.error(`[autoTrader] runCycle: ${PAIRS[i].code} imeshindwa, inaendelea na jozi zingine:`, err.message);
+    }
   }
   lastCycleAt = Date.now();
   lastWatchdogAlertAt = null; // cycle imefanikiwa — rudisha "kimya" kwa tatizo lijalo

@@ -55,6 +55,53 @@ let connectPromise = null;
 let reqCounter = 1;
 const pending = new Map(); // req_id -> { resolve, reject }
 
+// ── Heartbeat/ping — kugundua "zombie connection" ───────────────────────
+// Tatizo lililoonekana: baada ya muda mrefu bila restart, WebSocket
+// inaweza kubaki "wsReady=true" hata kama muunganiko wa kweli (TCP) tayari
+// umekufa kimya kimya (Railway/network inakata bila kutuma 'close' frame
+// sahihi — jambo la kawaida kwa WS zinazokaa wazi kwa muda mrefu). Bila
+// heartbeat, ensureConnected() inaona "wsReady=true" na HAIJARIBU
+// kuunganisha upya — kila ombi (proposal, buy, positions...) linasubiri
+// sekunde 15 (REQUEST_TIMEOUT_MS) kisha ku-timeout, MARA KWA MARA, bila
+// mwisho — auto-trader "inalala" hadi bot irestart kwa kulazimishwa
+// (connection mpya kabisa). Heartbeat hii inatuma ping kila dakika 1, na
+// kama pong haijarudi ndani ya sekunde 20, tunaua (terminate) socket
+// iliyokufa ili ensureConnected() iunganishe upya OTOMATIKI bila kuhitaji
+// restart ya bot nzima.
+const HEARTBEAT_INTERVAL_MS = 60 * 1000;
+const PONG_TIMEOUT_MS = 20 * 1000;
+let heartbeatTimer = null;
+let lastPongAt = 0;
+
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  lastPongAt = Date.now();
+  heartbeatTimer = setInterval(() => {
+    if (!ws || !wsReady) return;
+    if (Date.now() - lastPongAt > PONG_TIMEOUT_MS) {
+      console.error('[derivTrader] 💀 Hakuna pong kwa zaidi ya sekunde 20 — muunganiko "zombie", naukatisha ili uunganishwe upya moja kwa moja.');
+      try {
+        ws.terminate(); // inalazimisha 'close' event mara moja (si .close() ya "graceful" inayoweza kunyamaza)
+      } catch (err) {
+        console.error('[derivTrader] Imeshindwa ku-terminate socket iliyokufa:', err.message);
+      }
+      return;
+    }
+    try {
+      ws.ping();
+    } catch (err) {
+      console.error('[derivTrader] Imeshindwa kutuma ping:', err.message);
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
 function checkEnv() {
   const missing = [];
   if (!APP_ID) missing.push('DERIV_APP_ID');
@@ -128,7 +175,12 @@ function connectWs(wsUrl) {
     ws.on('open', () => {
       wsReady = true;
       settled = true;
+      startHeartbeat();
       resolve();
+    });
+
+    ws.on('pong', () => {
+      lastPongAt = Date.now();
     });
 
     ws.on('message', (raw) => {
@@ -153,6 +205,7 @@ function connectWs(wsUrl) {
     ws.on('close', () => {
       wsReady = false;
       connectPromise = null;
+      stopHeartbeat();
       rejectAllPending(new Error('Muunganiko wa Deriv umekatika'));
     });
 
