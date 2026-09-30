@@ -1,0 +1,17 @@
+# nixpacks.toml — inaiambia Railway (Nixpacks builder) kusakinisha Node.js
+# NA Python kwenye service MOJA (badala ya service mbili tofauti), ili
+# pocket_bridge/app.py iweze kuanzishwa na index.js kama child process.
+#
+# Angalia: index.js (startPocketBridge) na pocket_bridge/app.py
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "python311", "python311Packages.pip"]
+
+[phases.install]
+cmds = [
+  "npm install",
+  "pip install -r pocket_bridge/requirements.txt --break-system-packages"
+]
+
+[start]
+cmd = "node index.js"
