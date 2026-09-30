@@ -119,6 +119,18 @@ function dropFormingCandle(candles, tfSec, nowMs = Date.now()) {
   return candles;
 }
 
+// Candle ya mwisho iliyofungwa ikiwa ni ya zamani mno, soko limefungwa (maktaba
+// inarudisha candles za mwisho zilizopo hata soko likiwa limefungwa — mfano hisa
+// za US baada ya saa 20:00 UTC) na signal ingetokana na data ya zamani.
+function staleMinutes(candles, tfSec, nowMs = Date.now()) {
+  if (!candles.length) return null;
+  const t = toMs(candles[candles.length - 1].time);
+  if (t == null) return null; // hatuwezi kupima — usikatae
+  const ageMs = nowMs - (t + tfSec * 1000);
+  const limitMs = Math.max(2 * tfSec * 1000, 120 * 1000);
+  return ageMs > limitMs ? Math.round(ageMs / 60000) : null;
+}
+
 /**
  * Kura (votes) kwenye bar `i` ya series. Inatumika na signal ya moja kwa moja
  * na backtest — mantiki moja, kwa hiyo backtest inapima kile kile kinachotumwa.
@@ -224,6 +236,11 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
     throw new Error(`Pocket Option haikujibu kwa ${p} (timeout) — jozi inaweza kuwa imefungwa sasa. Jaribu _otc.`);
   }
   const candles = dropFormingCandle(raw, timeframeSec);
+  const stale = staleMinutes(candles, timeframeSec);
+  if (stale != null) {
+    const age = stale >= 120 ? `saa ${Math.round(stale / 60)}` : `dakika ${stale}`;
+    throw new Error(`Soko la ${p} limefungwa (candle ya mwisho ina umri wa ${age}).`);
+  }
   if (candles.length < WARMUP + 10) {
     throw new Error(`Candles hazitoshi kwa ${p} (${candles.length}/${WARMUP + 10}).`);
   }
@@ -272,7 +289,7 @@ async function scanPairs(pairs = DEFAULT_PAIRS, timeframeSec = 60, opts = {}) {
         results.push(await analyzePair(pair, timeframeSec, opts));
       } catch (err) {
         errors.push({ pair, error: err.message });
-        if (/timeout|haikujibu|haipo kwenye/i.test(err.message)) deadPairs.set(pair, Date.now() + DEAD_MS);
+        if (/timeout|haikujibu|haipo kwenye|limefungwa/i.test(err.message)) deadPairs.set(pair, Date.now() + DEAD_MS);
       }
       await new Promise((r) => setTimeout(r, 150));
     }
@@ -335,6 +352,7 @@ module.exports = {
   parseTimeframe,
   tfLabel,
   normalizePair,
+  staleMinutes,
   voteAt,
   backtest,
   analyzePair,
