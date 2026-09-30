@@ -700,24 +700,26 @@ const isSystemJid = (jid) => {
 //   (this instance's own number, sock.user.id) instead of exposing it back
 //   into the group — keeps the reveal invisible to the original sender.
 // - Inside a DM: revealed directly in that same chat.
+const ANTIVV_DEBUG = process.env.ANTIVV_DEBUG === 'true';
+const antivvDebug = (...a) => { if (ANTIVV_DEBUG) console.log(...a); };
 const handleAutoViewOnce = async (sock, msg) => {
   try {
     // UCHUNGUZI WA MUDA: chapisha kabla ya return yoyote ya mapema, ili tuone
     // kama function hii inaitwa kabisa na ni check gani inayoizuia. ONDOA
     // block hii baada ya kupata sababu halisi.
-    console.log('[antivv-debug] handleAutoViewOnce called. fromMe:', msg.key?.fromMe,
+    antivvDebug('[antivv-debug] handleAutoViewOnce called. fromMe:', msg.key?.fromMe,
       '| hasMessage:', !!msg.message,
       '| chatId:', msg.key?.remoteJid,
       '| topKeys:', msg.message ? Object.keys(msg.message) : null);
 
     if (!msg.message || msg.key.fromMe) {
-      console.log('[antivv-debug] → imesimama: !msg.message au fromMe');
+      antivvDebug('[antivv-debug] → imesimama: !msg.message au fromMe');
       return;
     }
 
     const chatId = msg.key.remoteJid;
     if (isSystemJid(chatId)) {
-      console.log('[antivv-debug] → imesimama: isSystemJid');
+      antivvDebug('[antivv-debug] → imesimama: isSystemJid');
       return;
     }
 
@@ -725,7 +727,7 @@ const handleAutoViewOnce = async (sock, msg) => {
       ? { ...config, ...sock.instanceSettings }
       : config;
     if (effectiveConfig.autoViewOnce === false) {
-      console.log('[antivv-debug] → imesimama: effectiveConfig.autoViewOnce === false');
+      antivvDebug('[antivv-debug] → imesimama: effectiveConfig.autoViewOnce === false');
       return;
     }
 
@@ -770,7 +772,7 @@ const handleAutoViewOnce = async (sock, msg) => {
       // UCHUNGUZI WA MUDA: chapisha muundo kamili wa ujumbe pale detection
       // inaposhindwa, ili tuone kwa uhakika muundo halisi. ONDOA baada ya
       // kupata sababu halisi.
-      console.log('[antivv-debug] Haikutambuliwa kama view-once. rawContent (JSON):',
+      antivvDebug('[antivv-debug] Haikutambuliwa kama view-once. rawContent (JSON):',
         JSON.stringify(rawContent, null, 2).slice(0, 3000));
       return; // not a view-once message
     }
