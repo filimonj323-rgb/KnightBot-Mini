@@ -169,6 +169,22 @@ const TRAIL_PROFITLOCK_R = 0.5;
 const TRAILING_SETTING_KEY = 'trailingEnabled';
 let TRAILING_ENABLED = true; // default: WASHA
 
+// ── Profit-lock tier ya ziada: asilimia ya STAKE (kando na R-multiple hapo
+// juu) ───────────────────────────────────────────────────────────────────
+// R-multiple inatumia slUsd (hatari ya awali) kama kipimo — kwa stake kubwa
+// na SL nyembamba, R=1 inaweza kuchukua muda. Tier hii inaongeza ulinzi wa
+// MAPEMA zaidi, ukilenga moja kwa moja stake yenyewe: mara faida ikishafika
+// 10% ya stake wakati wowote ("kilele"/peak), tunaendelea kuifuatilia; kama
+// baadaye faida ikishuka kwa kiasi kikubwa (PROFIT_LOCK_GIVEBACK_PCT) kutoka
+// kilele hicho — ishara kwamba bei imeanza kugeuka — tunasogeza SL karibu na
+// kiwango hicho cha 10% (siyo lazima 10% kamili — tunaacha nafasi ndogo
+// isije kutupwa nje na mtikisiko mdogo mara baada ya kusogeza). Kama tier ya
+// R-multiple hapo juu tayari imeamua ratchet kali zaidi, hii haifanyi kazi
+// (haiwezi kurudisha nyuma — rule ya ratchet-moja-tu-mbele bado inatumika).
+const PROFIT_LOCK_STAKE_PCT_TRIGGER = 0.10; // faida >= 10% ya stake huanzisha ufuatiliaji
+const PROFIT_LOCK_GIVEBACK_PCT = 0.30; // faida ikishuka 30% kutoka kilele = "imeanza kushuka"
+const PROFIT_LOCK_KEEP_FRACTION = 0.8; // funga ~80% ya kiwango cha 10% (siyo 100%, kuacha nafasi)
+
 /**
  * Badilisha ATR (katika bei, mfano 0.00120 kwa EURUSD) kuwa SL/TP kwa dola
  * — kulingana na fomula rasmi ya Deriv Multipliers:
@@ -307,6 +323,12 @@ let lastWatchdogAlertAt = null; // epuka kutuma DM ya watchdog kila baada ya POL
 const openAutoTrades = new Map();
 // code -> { direction, strength, price, atr, notes, checkedAt }
 const lastSignals = new Map();
+// contract_id -> asilimia kubwa zaidi ya faida (profit / stake) iliyowahi
+// kufikiwa na trade hii — inatumika na profit-lock tier ya 10% ndani ya
+// checkTrailingStops() kugundua "bei imeanza kushuka" baada ya kufikia
+// kizingiti. RAM pekee (haihifadhiwi DB) — ikipotea kwa restart, athari ni
+// ndogo tu: trade inaanza kufuatiliwa upya kutoka profit ya sasa.
+const peakProfitPct = new Map();
 
 // ── Uhifadhi wa openAutoTrades kwenye database (Turso) ──────────────────
 // Map ya RAM (openAutoTrades) pekee ilikuwa ikifutwa kila redeploy/restart
@@ -501,11 +523,30 @@ async function checkTrailingStops() {
 
     const r = profit / info.slUsd; // "R-multiple" — profit kama sehemu ya hatari ya awali
     let desiredSl = null;
+    let viaStakeLock = false;
 
     if (r >= TRAIL_PROFITLOCK_TRIGGER_R) {
       desiredSl = -(info.slUsd * TRAIL_PROFITLOCK_R); // hasi = faida iliyofungwa
     } else if (r >= TRAIL_BREAKEVEN_TRIGGER_R) {
       desiredSl = MIN_SL_USD; // karibu na breakeven
+    }
+
+    // Tier ya ziada: profit-lock kwa asilimia ya stake (angalia maelezo
+    // kwenye constants hapo juu). Inafanya kazi tu kama R-multiple hapo
+    // juu haijaamua kitu tayari (ili isipingane na ratchet kali zaidi).
+    if (desiredSl === null && info.stake > 0) {
+      const stakeProfitPct = profit / info.stake;
+      const prevPeak = peakProfitPct.get(contractId) || 0;
+      const peak = Math.max(prevPeak, stakeProfitPct);
+      peakProfitPct.set(contractId, peak);
+
+      if (peak >= PROFIT_LOCK_STAKE_PCT_TRIGGER) {
+        const gaveBackEnough = stakeProfitPct <= peak * (1 - PROFIT_LOCK_GIVEBACK_PCT);
+        if (gaveBackEnough) {
+          desiredSl = -(info.stake * PROFIT_LOCK_STAKE_PCT_TRIGGER * PROFIT_LOCK_KEEP_FRACTION);
+          viaStakeLock = true;
+        }
+      }
     }
 
     if (desiredSl === null) continue;
@@ -528,13 +569,16 @@ async function checkTrailingStops() {
         openedAt: info.openedAt,
       });
       console.log(
-        `[autoTrader] 🪤 Trailing: ${info.code} SL imesogezwa kutoka $${fmt(previousSl)} kwenda ` +
-          `$${fmt(desiredSl)} (R=${r.toFixed(2)}, profit ya sasa $${fmt(profit)}).`
+        `[autoTrader] 🪤 Trailing${viaStakeLock ? ' (stake-lock 10%)' : ''}: ${info.code} SL imesogezwa kutoka $${fmt(previousSl)} kwenda ` +
+          `$${fmt(desiredSl)} (${viaStakeLock ? `peak ${fmt(peakProfitPct.get(contractId) * 100, 1)}% ya stake` : `R=${r.toFixed(2)}`}, profit ya sasa $${fmt(profit)}).`
       );
       await notify(
-        `🪤 *TRAILING STOP — ${info.code}*\n\n` +
-          `Faida ya sasa: $${fmt(profit)} (R ${r.toFixed(2)})\n` +
-          `SL imesogezwa: $${fmt(previousSl)} → $${fmt(desiredSl)}` +
+        `🪤 *TRAILING STOP${viaStakeLock ? ' — LOCK YA 10%' : ''} — ${info.code}*\n\n` +
+          `Faida ya sasa: $${fmt(profit)}` +
+          (viaStakeLock
+            ? ` (ilishafika ${fmt(peakProfitPct.get(contractId) * 100, 1)}% ya stake kisha ikaanza kushuka)`
+            : ` (R ${r.toFixed(2)})`) +
+          `\nSL imesogezwa: $${fmt(previousSl)} → $${fmt(desiredSl)}` +
           (desiredSl < 0 ? `\n✅ Faida ya angalau $${fmt(Math.abs(desiredSl))} imefungwa sasa.` : `\n✅ Trade iko karibu na breakeven — hatari imepungua.`) +
           `\n🆔 Contract ID: ${contractId}`
       );
@@ -985,6 +1029,7 @@ async function pollClosedTrades() {
     if (openIds.has(contractId)) continue; // bado wazi
 
     openAutoTrades.delete(contractId);
+    peakProfitPct.delete(contractId); // trade imefungwa — futa historia ya peak ya profit-lock
 
     // Hatua 1: proposal_open_contract — kazi vizuri contract ikitoka tu
     // kwenye portfolio, lakini mara nyingi haitoi tena sell_price/profit
