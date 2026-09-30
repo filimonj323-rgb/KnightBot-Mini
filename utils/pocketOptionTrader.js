@@ -35,12 +35,24 @@ async function bridgeFetch(path, opts = {}) {
   return data;
 }
 
+// Bridge "iko juu" = process ya Python inajibu HTTP. Haihitaji connection ya
+// Pocket Option iwe tayari (inaunganishwa lazily/eagerly ndani ya bridge) —
+// vinginevyo amri zote zingekataliwa kabla ya connection ya kwanza kuanzishwa.
 async function isBridgeUp() {
   try {
     const data = await bridgeFetch('/health');
-    return !!data.connected;
+    return data.ok === true;
   } catch (err) {
     return false;
+  }
+}
+
+// Hali kamili ya bridge (connected, ssid_set, last_error) kwa diagnostics.
+async function getBridgeStatus() {
+  try {
+    return await bridgeFetch('/health');
+  } catch (err) {
+    return { ok: false, error: err.message };
   }
 }
 
@@ -103,6 +115,7 @@ async function getSignal(pair, timeframeSeconds = 60) {
 
 module.exports = {
   isBridgeUp,
+  getBridgeStatus,
   getBalance,
   getCandles,
   placeOrder,
