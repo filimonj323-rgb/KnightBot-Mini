@@ -80,6 +80,24 @@ async function getClosedResult(orderId) {
   }
 }
 
+// Historia ya trades (zilizofungwa + zilizo wazi), mpya kwanza — kwa dashboard.
+async function getTradeHistory(limit = 200) {
+  try {
+    await ready();
+    const n = Math.min(1000, Math.max(1, parseInt(limit, 10) || 200));
+    const r = await db.query(
+      `SELECT orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt,
+              closedAt, win, profit, status
+         FROM po_trades ORDER BY openedAt DESC LIMIT ?`,
+      [n]
+    );
+    return r.rows || [];
+  } catch (err) {
+    console.error('[pocketStore] Imeshindwa kusoma historia:', err.message);
+    return [];
+  }
+}
+
 // ── Settings ────────────────────────────────────────────────────────────
 
 async function saveSetting(key, value) {
@@ -123,6 +141,7 @@ module.exports = {
   recordOpenTrade,
   recordClosedTrade,
   getOpenTrades,
+  getTradeHistory,
   getClosedResult,
   saveSetting,
   deleteSetting,
