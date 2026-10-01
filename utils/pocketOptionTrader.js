@@ -148,6 +148,8 @@ async function placeOrder({ pair, direction, amount, expirySeconds }) {
 
 // Matokeo ni "ya mwisho" pale bridge inapoweza kubaini win/loss (boolean).
 const isFinalResult = (r) => r && typeof r.win === 'boolean';
+// Bridge inaweka `unconfirmed` pale Pocket Option haikuthibitisha order kabisa (hakuna win/loss itakayokuja).
+const isUnconfirmed = (r) => r && r.unconfirmed === true;
 
 async function getOrderResult(orderId) {
   // Trade iliyokwisha kufungwa na kuhifadhiwa (hata kabla ya restart) —
@@ -162,6 +164,8 @@ async function getOrderResult(orderId) {
       profit: data.result.profit ?? data.result.pnl,
       result: data.result,
     });
+  } else if (isUnconfirmed(data.result)) {
+    await pocketStore.recordClosedTrade(orderId, { status: 'unconfirmed', result: data.result });
   }
   return data.result;
 }
@@ -177,7 +181,7 @@ function scheduleSettle(orderId, expiresAt) {
   const run = async () => {
     try {
       const result = await getOrderResult(orderId); // inahifadhi yenyewe kama ni ya mwisho
-      if (isFinalResult(result)) return settling.delete(orderId);
+      if (isFinalResult(result) || isUnconfirmed(result)) return settling.delete(orderId);
     } catch (err) {
       // bridge chini / order haijulikani kwa bridge mpya — jaribu tena hapa chini
       console.log(`[pocket] matokeo ya order ${orderId} bado: ${err.message}`);

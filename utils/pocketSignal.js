@@ -33,12 +33,13 @@ const REAL_MARKET_PAIRS = new Set(['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDC
 // (dhahabu, crypto, indices, hisa, OTC nyingine) ni FALLBACK tu — zinachanganuliwa
 // pale ambapo majors/minors hazina signal (angalia scanPrioritized hapa chini).
 const MAJORS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDUSD'];
+// Jozi zisizopo kwenye orodha ya Pocket Option (zimeondolewa): EURAUD, EURCAD, GBPCHF, GBPCAD, GBPNZD, NZDCAD, NZDCHF.
 const MINORS = [
-  'EURGBP', 'EURJPY', 'EURCHF', 'EURAUD', 'EURCAD', 'EURNZD',
-  'GBPJPY', 'GBPCHF', 'GBPAUD', 'GBPCAD', 'GBPNZD',
+  'EURGBP', 'EURJPY', 'EURCHF', 'EURNZD',
+  'GBPJPY', 'GBPAUD',
   'AUDJPY', 'AUDCAD', 'AUDCHF', 'AUDNZD',
   'CADJPY', 'CADCHF', 'CHFJPY',
-  'NZDJPY', 'NZDCAD', 'NZDCHF',
+  'NZDJPY',
 ];
 const DEFAULT_PAIRS = (process.env.POCKET_SIGNAL_PAIRS || [...MAJORS, ...MINORS].join(','))
   .split(',')
