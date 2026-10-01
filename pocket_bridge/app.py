@@ -258,7 +258,8 @@ def _order_result_payload(result):
     """JSON ya matokeo + sehemu ya `win` (true/false) ambayo poresult.js
     inatarajia, ikichukuliwa kutoka status au profit."""
     data = _to_jsonable(result)
-    if isinstance(data, dict) and "win" not in data:
+    print(f"ℹ️  [pocket_bridge] matokeo ghafi ya order: {data!r}")  # kwa uchunguzi (win/status/profit)
+    if isinstance(data, dict) and not isinstance(data.get("win"), bool):
         status = str(data.get("status", "")).lower()
         profit = data.get("profit")
         if "win" in status:
