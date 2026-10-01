@@ -72,6 +72,10 @@ const { runBacktest } = require('../utils/backtest');
 const economicCalendar = require('../utils/economicCalendar');
 const fxPredictions = require('../utils/fxPredictions');
 const mainConfig = require('../config');
+const pocketTrader = require('../utils/pocketOptionTrader');
+const pocketStore = require('../utils/pocketStore');
+const pocketSignal = require('../utils/pocketSignal');
+const posignalCmd = require('../commands/utility/posignal');
 
 // Jozi kuu 7 zinazoweza kuangaliwa kwenye dashboard (.fxtrading.html) —
 // EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY ndizo zinazofuatiliwa na
@@ -701,6 +705,119 @@ async function handlePairingRequest(req, res) {
           atr: snapshot.atr,
           checkedAt: Date.now(),
         });
+      }
+
+      // ── Pocket Option (Binary/Turbo) — dashboard ──────────────────────
+      // UI: pairing/public/pocketoption.html. Inatumia utils/pocketOptionTrader.js
+      // (bridge), pocketSignal.js (signals), pocketStore.js (historia) na
+      // commands/utility/posignal.js (auto-signal) — kila kitu bila command za WhatsApp.
+      if (req.url.startsWith('/api/admin/po/')) {
+        const poPath = req.url.split('?')[0];
+        const poQuery = new URL(req.url, 'http://x').searchParams;
+        try {
+          // Muhtasari: hali ya bridge + balance + trades + auto-signal.
+          if (req.method === 'GET' && poPath === '/api/admin/po/overview') {
+            const bridge = await pocketTrader.getBridgeStatus();
+            let balance = null;
+            if (bridge.ok && bridge.connected) {
+              try { balance = await pocketTrader.getBalance(); } catch (_) { /* bridge bado inaunganisha */ }
+            }
+            const trades = await pocketStore.getTradeHistory(300);
+            return sendJson(res, 200, {
+              ok: true,
+              bridge,
+              balance,
+              trades,
+              auto: posignalCmd.getAutoStatus(),
+              pairs: pocketSignal.DEFAULT_PAIRS,
+              scanModes: pocketSignal.SCAN_MODES,
+              ownerJid: getOwnerJid(),
+            });
+          }
+
+          // Signals za hivi karibuni zilizotumwa na auto-signal.
+          if (req.method === 'GET' && poPath === '/api/admin/po/feed') {
+            return sendJson(res, 200, { ok: true, signals: posignalCmd.getRecentSignals(), auto: posignalCmd.getAutoStatus() });
+          }
+
+          // Signal ya jozi MOJA (sawa na .posignal EURUSD 1m).
+          if (req.method === 'GET' && poPath === '/api/admin/po/signal') {
+            const pair = (poQuery.get('pair') || '').trim();
+            const tf = pocketSignal.parseTimeframe(poQuery.get('tf'), 60);
+            if (!pair) return sendJson(res, 400, { ok: false, error: 'Jozi (pair) inahitajika.' });
+            if (!tf) return sendJson(res, 400, { ok: false, error: 'Timeframe si sahihi. Mfano: 1m, 5m.' });
+            if (!(await pocketTrader.isBridgeUp())) return sendJson(res, 503, { ok: false, error: 'Pocket Option bridge haijaunganishwa.' });
+            const result = await pocketSignal.analyzePair(pair, tf);
+            return sendJson(res, 200, { ok: true, result, checkedAt: Date.now() });
+          }
+
+          // Scan ya jozi nyingi (sawa na .posignal scan [mode] [tf]) — inaweza kuchukua dakika 1-2.
+          if (req.method === 'POST' && poPath === '/api/admin/po/scan') {
+            const body = await readJsonBody(req);
+            const tf = pocketSignal.parseTimeframe(body.tf, 60);
+            const mode = pocketSignal.SCAN_MODES.includes(String(body.mode)) ? String(body.mode) : 'smart';
+            const minStrength = Math.min(100, Math.max(30, parseInt(body.minStrength, 10) || 50));
+            if (!tf) return sendJson(res, 400, { ok: false, error: 'Timeframe si sahihi. Mfano: 1m, 5m.' });
+            if (!(await pocketTrader.isBridgeUp())) return sendJson(res, 503, { ok: false, error: 'Pocket Option bridge haijaunganishwa.' });
+            const scan = mode === 'smart'
+              ? await pocketSignal.scanPrioritized(tf, { minStrength })
+              : await pocketSignal.scanPairs(await pocketSignal.getUniverse(mode), tf, { minStrength });
+            return sendJson(res, 200, { ok: true, ...scan, tf, mode, minStrength, scannedAt: Date.now() });
+          }
+
+          // Fungua order (sawa na .pobuy / .posell).
+          if (req.method === 'POST' && poPath === '/api/admin/po/open') {
+            const body = await readJsonBody(req);
+            const pair = String(body.pair || '').trim();
+            const direction = body.direction === 'SELL' ? 'SELL' : 'BUY';
+            const stake = Number(body.stake);
+            const expiry = parseInt(body.expirySeconds, 10);
+            if (!pair) return sendJson(res, 400, { ok: false, error: 'Jozi (pair) inahitajika.' });
+            if (!(stake > 0)) return sendJson(res, 400, { ok: false, error: 'Stake lazima iwe zaidi ya 0.' });
+            if (!(expiry >= 5)) return sendJson(res, 400, { ok: false, error: 'Expiry lazima iwe angalau sekunde 5.' });
+            if (!(await pocketTrader.isBridgeUp())) return sendJson(res, 503, { ok: false, error: 'Pocket Option bridge haijaunganishwa.' });
+
+            const result = await pocketTrader.placeOrder({ pair, direction, amount: stake, expirySeconds: expiry });
+            notifyOwnerWA(
+              `🖥️ *PO ORDER IMEFUNGULIWA (Dashboard)*\n\n` +
+                `Jozi: *${pair}*\n` +
+                `Mwelekeo: ${direction === 'BUY' ? '🟢 UP (BUY)' : '🔴 DOWN (SELL)'}\n` +
+                `Stake: $${stake}  |  Expiry: ${expiry}s\n` +
+                `🆔 Order ID: ${result.orderId}\n\n` +
+                `⚠️ Order hii ilifunguliwa KWA MKONO kupitia admin dashboard.`
+            );
+            return sendJson(res, 200, { ok: true, orderId: result.orderId });
+          }
+
+          // Matokeo ya order moja (sawa na .poresult) — inasubiri hadi expiry.
+          if (req.method === 'GET' && poPath === '/api/admin/po/result') {
+            const orderId = poQuery.get('orderId');
+            if (!orderId) return sendJson(res, 400, { ok: false, error: 'orderId inahitajika.' });
+            const result = await pocketTrader.getOrderResult(orderId);
+            return sendJson(res, 200, { ok: true, result });
+          }
+
+          // Washa/zima auto-signal kwa WhatsApp ya owner (sawa na .posignal auto on|off).
+          if (req.method === 'POST' && poPath === '/api/admin/po/auto') {
+            const body = await readJsonBody(req);
+            const jid = getOwnerJid();
+            if (body.action === 'off') {
+              const stopped = await posignalCmd.stopAutoFromDashboard(jid);
+              return sendJson(res, 200, { ok: true, stopped, auto: posignalCmd.getAutoStatus() });
+            }
+            if (body.action !== 'on') return sendJson(res, 400, { ok: false, error: 'action lazima iwe on au off.' });
+            const tf = pocketSignal.parseTimeframe(body.tf, 60);
+            if (!tf || tf < 5) return sendJson(res, 400, { ok: false, error: 'Timeframe si sahihi. Mfano: 1m, 5m.' });
+            const minStrength = Math.min(100, Math.max(30, parseInt(body.minStrength, 10) || 70));
+            const mode = pocketSignal.SCAN_MODES.includes(String(body.mode)) ? String(body.mode) : 'smart';
+            if (!global.currentSock) return sendJson(res, 503, { ok: false, error: 'Bot kuu haijaunganishwa na WhatsApp — auto-signal haiwezi kutuma.' });
+            await posignalCmd.startAutoFromDashboard(global.currentSock, jid, { tf, minStrength, mode });
+            return sendJson(res, 200, { ok: true, auto: posignalCmd.getAutoStatus() });
+          }
+        } catch (err) {
+          console.error('[po dashboard] error:', err.message);
+          return sendJson(res, 400, { ok: false, error: err.message });
+        }
       }
 
       // Economic calendar (wiki hii) kwa currencies kuu 8 — inatumika
