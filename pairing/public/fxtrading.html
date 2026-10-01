@@ -51,8 +51,10 @@
   .error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 14px; }
 
   #app { display: none; min-height: 100vh; }
-  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px;
-    border-bottom: 1px solid var(--border); background: rgba(11,27,18,0.7); position: sticky; top: 0; z-index: 20; }
+  .sticky-head { position: sticky; top: 0; z-index: 20; background: rgba(5,16,10,0.96); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px;
+    border-bottom: 1px solid var(--border); background: rgba(11,27,18,0.7); }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -146,6 +148,24 @@
   .pred-drivers li { margin-bottom: 2px; }
   .news-risk-tag { display: inline-block; margin-left: 8px; font-size: 10px; color: var(--amber); border: 1px solid var(--amber); border-radius: 10px; padding: 1px 7px; }
   .ai-tag { font-size: 10px; color: var(--muted); }
+
+  /* Trading History */
+  .hist-filters { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+  .hist-filters button { padding: 5px 10px; font-size: 11px; }
+  .hist-filters button.active { background: var(--accent); color: #041008; border-color: var(--accent); }
+  .hist-filters select { width: auto; margin: 0; padding: 5px 8px; font-size: 11px; }
+  .hist-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 14px; }
+
+  /* Live balance / profit / loss bar (sticky, inaonekana kwenye sections zote) */
+  .live-bar { display: flex; gap: 8px; padding: 8px 20px; overflow-x: auto; align-items: stretch; }
+  .live-bar::-webkit-scrollbar { display: none; }
+  .lb-cell { flex: 1 0 96px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; white-space: nowrap; }
+  .lb-cell .n { font-size: 15px; font-weight: 700; }
+  .lb-cell .l { font-size: 9px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; margin-top: 1px; }
+  .lb-live { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); padding: 0 4px; }
+  .lb-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 2s infinite; }
+  .lb-live.stale .dot { background: var(--red); box-shadow: 0 0 6px var(--red); animation: none; }
+  @media (max-width: 560px) { .live-bar { padding: 8px 12px; } .topbar { padding: 10px 12px; } }
 </style>
 </head>
 <body>
@@ -161,6 +181,7 @@
 </div>
 
 <div id="app">
+  <div class="sticky-head">
   <div class="topbar">
     <div class="brand">
       <span class="dot"></span>
@@ -171,10 +192,10 @@
       <button class="ghost" onclick="logout()">Toka</button>
     </div>
   </div>
+    <div class="live-bar" id="liveBar"></div>
+  </div>
 
   <div class="content">
-    <div class="stats" id="statsRow"></div>
-
     <div class="section-tabs" id="sectionTabs">
       <div class="section-tab active" data-section="overview"><span class="icon">🤖</span>Muhtasari</div>
       <div class="section-tab" data-section="calendar"><span class="icon">📅</span>Calendar</div>
@@ -182,6 +203,7 @@
       <div class="section-tab" data-section="trades"><span class="icon">📊</span>Trades</div>
       <div class="section-tab" data-section="stats"><span class="icon">📈</span>Win Rate</div>
       <div class="section-tab" data-section="backtest"><span class="icon">🧪</span>Backtest</div>
+      <div class="section-tab" data-section="history"><span class="icon">🕘</span>History</div>
     </div>
 
     <div class="page-section active" id="section-overview">
@@ -342,6 +364,18 @@
         <div id="btResultsBox" style="margin-top:16px;"></div>
       </div>
     </div>
+
+    <div class="page-section" id="section-history">
+      <div class="card">
+        <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>🕘 Trading History (Trade Zilizofungwa)</span>
+          <button class="ghost" onclick="refreshHistory()">🔄 Sasisha</button>
+        </div>
+        <div class="hist-filters" id="histFilters"></div>
+        <div id="histSummary" class="hist-summary"></div>
+        <div id="historyBox"><div class="empty">Inapakia...</div></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -419,12 +453,35 @@
     return `saa ${Math.floor(mins / 60)} zilizopita`;
   }
 
-  function renderStats(balance, positions) {
-    const totalPL = positions.reduce((sum, p) => sum + Number(p.profit || 0), 0);
-    document.getElementById('statsRow').innerHTML = `
-      <div class="stat accent"><div class="n">$${fmt(balance?.balance)}</div><div class="l">Balance (${balance?.currency || ''})</div></div>
-      <div class="stat ${totalPL >= 0 ? 'accent' : 'red'}"><div class="n">${totalPL >= 0 ? '+' : ''}$${fmt(totalPL)}</div><div class="l">P/L ya Sasa</div></div>
-      <div class="stat"><div class="n">${positions.length}</div><div class="l">Trade Wazi</div></div>
+  // ── 💰 Live bar: balance + faida/hasara (inaonekana kila section) ─────
+  let lastBalance = null;
+  let lastPositions = [];
+  let lastOkAt = 0;
+
+  function todayKey(ms) {
+    return new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Africa/Dar_es_Salaam' });
+  }
+
+  function signed(n) { return (n >= 0 ? '+' : '-') + '$' + fmt(Math.abs(n)); }
+
+  function renderLiveBar() {
+    const positions = lastPositions || [];
+    const livePL = positions.reduce((sum, p) => sum + Number(p.profit || 0), 0);
+    const closed = historyTrades || [];
+    const tk = todayKey(Date.now());
+    const todayTrades = closed.filter((t) => t.closedAt && todayKey(t.closedAt) === tk);
+    const todayPL = todayTrades.reduce((s, t) => s + t.profit, 0);
+    const totalProfit = closed.filter((t) => t.profit > 0).reduce((s, t) => s + t.profit, 0);
+    const totalLoss = closed.filter((t) => t.profit < 0).reduce((s, t) => s + t.profit, 0);
+    const stale = !lastOkAt || Date.now() - lastOkAt > 20000;
+
+    document.getElementById('liveBar').innerHTML = `
+      <div class="lb-live ${stale ? 'stale' : ''}" title="${stale ? 'Data haijasasishwa — connection tatizo?' : 'Live'}"><span class="dot"></span>${stale ? 'OFFLINE' : 'LIVE'}</div>
+      <div class="lb-cell"><div class="n" style="color:var(--accent)">${lastBalance ? '$' + fmt(lastBalance.balance) : '—'}</div><div class="l">Balance ${lastBalance?.currency || ''}</div></div>
+      <div class="lb-cell"><div class="n ${livePL >= 0 ? 'pl-pos' : 'pl-neg'}">${signed(livePL)}</div><div class="l">P/L Live (${positions.length} wazi)</div></div>
+      <div class="lb-cell"><div class="n ${todayPL >= 0 ? 'pl-pos' : 'pl-neg'}">${signed(todayPL)}</div><div class="l">Leo (zilizofungwa)</div></div>
+      <div class="lb-cell"><div class="n pl-pos">+$${fmt(totalProfit)}</div><div class="l">Jumla Faida</div></div>
+      <div class="lb-cell"><div class="n pl-neg">-$${fmt(Math.abs(totalLoss))}</div><div class="l">Jumla Hasara</div></div>
     `;
   }
 
@@ -540,7 +597,7 @@
   }
 
   // ── 📈 Win Rate (kwa signal strength) ───────────────────────────────
-  function renderStats(stats) {
+  function renderWinRate(stats) {
     const box = document.getElementById('statsBox');
     if (!stats || !stats.length) {
       box.innerHTML = `<div class="empty">Hakuna trade zilizofungwa bado zenye rekodi ya signal strength.</div>`;
@@ -567,7 +624,7 @@
   async function refreshStats() {
     try {
       const data = await api('/api/admin/fx/stats');
-      renderStats(data.stats || []);
+      renderWinRate(data.stats || []);
     } catch (e) {
       document.getElementById('statsBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
     }
@@ -786,7 +843,10 @@
   async function refresh() {
     try {
       const data = await api('/api/admin/fx/overview');
-      renderStats(data.balance, data.positions);
+      lastBalance = data.balance;
+      lastPositions = data.positions || [];
+      lastOkAt = Date.now();
+      renderLiveBar();
       renderAutoTrader(data.autoTrade);
       renderPositions(data.positions);
 
@@ -803,6 +863,7 @@
       renderSignals();
     } catch (e) {
       console.error('[fxtrading] refresh error:', e.message);
+      renderLiveBar(); // itaonyesha OFFLINE kama data ni ya zamani
     }
   }
 
@@ -945,15 +1006,114 @@
     }
   }
 
+  // ── 🕘 Trading History ──────────────────────────────────────────────
+  let historyTrades = [];
+  let histResult = 'all'; // all | win | loss
+  let histPair = 'all';
+
+  function fmtHistDate(ms) {
+    if (!ms) return '—';
+    const d = new Date(Number(ms));
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('sw-TZ', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Dar_es_Salaam' });
+  }
+
+  function fmtDuration(a, b) {
+    if (!a || !b) return '—';
+    const mins = Math.max(0, Math.round((b - a) / 60000));
+    if (mins < 60) return `dak ${mins}`;
+    const h = Math.floor(mins / 60);
+    if (h < 24) return `saa ${h}${mins % 60 ? ' dak ' + (mins % 60) : ''}`;
+    return `siku ${Math.floor(h / 24)} saa ${h % 24}`;
+  }
+
+  function renderHistoryFilters() {
+    const results = [
+      { key: 'all', label: 'Zote' },
+      { key: 'win', label: '✅ Faida' },
+      { key: 'loss', label: '❌ Hasara' },
+    ];
+    const pairs = Array.from(new Set(historyTrades.map((t) => t.code))).sort();
+    document.getElementById('histFilters').innerHTML =
+      results.map((o) => `<button class="${histResult === o.key ? 'active' : 'ghost'}" onclick="setHistResult('${o.key}')">${o.label}</button>`).join('') +
+      `<select onchange="setHistPair(this.value)">
+        <option value="all">Jozi zote</option>
+        ${pairs.map((c) => `<option value="${c}" ${histPair === c ? 'selected' : ''}>${c}</option>`).join('')}
+      </select>`;
+  }
+
+  function setHistResult(k) { histResult = k; renderHistory(); }
+  function setHistPair(k) { histPair = k; renderHistory(); }
+
+  function renderHistory() {
+    renderHistoryFilters();
+    let trades = historyTrades;
+    if (histResult === 'win') trades = trades.filter((t) => t.profit > 0);
+    if (histResult === 'loss') trades = trades.filter((t) => t.profit <= 0);
+    if (histPair !== 'all') trades = trades.filter((t) => t.code === histPair);
+
+    const total = trades.length;
+    const wins = trades.filter((t) => t.profit > 0).length;
+    const totalPL = trades.reduce((s, t) => s + t.profit, 0);
+    const best = total ? Math.max(...trades.map((t) => t.profit)) : 0;
+    const worst = total ? Math.min(...trades.map((t) => t.profit)) : 0;
+    document.getElementById('histSummary').innerHTML = `
+      <div class="bt-stat"><div class="n">${total}</div><div class="l">Trades</div></div>
+      <div class="bt-stat"><div class="n">${total ? Math.round((wins / total) * 1000) / 10 : 0}%</div><div class="l">Win Rate</div></div>
+      <div class="bt-stat"><div class="n ${totalPL >= 0 ? 'pl-pos' : 'pl-neg'}">${totalPL >= 0 ? '+' : ''}$${fmt(totalPL)}</div><div class="l">P/L Jumla</div></div>
+      <div class="bt-stat"><div class="n pl-pos">+$${fmt(Math.max(best, 0))}</div><div class="l">Bora</div></div>
+      <div class="bt-stat"><div class="n pl-neg">$${fmt(Math.min(worst, 0))}</div><div class="l">Mbaya</div></div>
+    `;
+
+    if (!total) {
+      document.getElementById('historyBox').innerHTML = `<div class="empty">📭 Hakuna trade zilizofungwa za kuonyesha.</div>`;
+      return;
+    }
+    const rows = trades.map((t) => {
+      const dirClass = t.direction === 'BUY' ? 'dir-buy' : 'dir-sell';
+      const plClass = t.profit >= 0 ? 'pl-pos' : 'pl-neg';
+      return `<tr>
+        <td><strong>${t.code}</strong></td>
+        <td class="${dirClass}">${t.direction}</td>
+        <td>$${fmt(t.stake)}</td>
+        <td>${fmtHistDate(t.openedAt)}</td>
+        <td>${fmtHistDate(t.closedAt)}</td>
+        <td class="muted">${fmtDuration(t.openedAt, t.closedAt)}</td>
+        <td>${t.signalStrength != null ? t.signalStrength + '%' : '<span class="muted">mkono</span>'}</td>
+        <td class="${plClass}">${t.profit >= 0 ? '+' : ''}$${fmt(t.profit)}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('historyBox').innerHTML = `
+      <div class="table-wrap" style="max-height:480px; overflow-y:auto;">
+        <table>
+          <thead><tr><th>Jozi</th><th>Mwelekeo</th><th>Stake</th><th>Ilifunguliwa</th><th>Ilifungwa</th><th>Muda</th><th>Signal</th><th>P/L</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  async function refreshHistory() {
+    try {
+      const data = await api('/api/admin/fx/history?limit=300');
+      historyTrades = data.trades || [];
+      renderHistory();
+      renderLiveBar();
+    } catch (e) {
+      document.getElementById('historyBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+    }
+  }
+
   function showApp() {
     document.getElementById('loginCard').style.display = 'none';
     document.getElementById('app').style.display = 'block';
+    renderLiveBar();
     renderSignals(); // jedwali tupu mara moja, kabla ya refresh ya kwanza
     renderCalendarFilters();
     refresh();
     refreshCalendar();
     refreshPredictions();
     refreshStats();
+    refreshHistory();
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(refresh, 5000); // "live" — bei/positions kila sekunde 5
     if (slowPollTimer) clearInterval(slowPollTimer);
@@ -961,7 +1121,7 @@
     // (calendar: cache dakika 15 upande wa server; predictions: cache dakika
     // ~20 + Groq call; stats: inabadilika tu trade ikifungwa) — kila dakika 1
     // kwenye dashboard inatosha, hakuna sababu ya sekunde 5.
-    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); refreshStats(); }, 60000);
+    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); refreshStats(); refreshHistory(); }, 60000);
   }
 
   if (ADMIN_TOKEN) showApp();
