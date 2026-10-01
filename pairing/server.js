@@ -777,7 +777,22 @@ async function handlePairingRequest(req, res) {
             if (!(expiry >= 5)) return sendJson(res, 400, { ok: false, error: 'Expiry lazima iwe angalau sekunde 5.' });
             if (!(await pocketTrader.isBridgeUp())) return sendJson(res, 503, { ok: false, error: 'Pocket Option bridge haijaunganishwa.' });
 
-            const result = await pocketTrader.placeOrder({ pair, direction, amount: stake, expirySeconds: expiry });
+            // Kinga ya marudio (double-click / lag): order moja kwa wakati, na order inayofanana
+            // (jozi+mwelekeo+stake+expiry) haikubaliwi tena ndani ya sekunde 8.
+            const poLock = global.__poOpenLock || (global.__poOpenLock = { busy: false, recent: new Map() });
+            const dupKey = `${pair}|${direction}|${stake}|${expiry}`;
+            if (poLock.busy) return sendJson(res, 429, { ok: false, error: 'Order nyingine inafunguliwa sasa — subiri ikamilike.' });
+            if (Date.now() - (poLock.recent.get(dupKey) || 0) < 8000) {
+              return sendJson(res, 429, { ok: false, error: 'Order inayofanana ilifunguliwa sekunde chache zilizopita — imezuiwa kuzuia marudio.' });
+            }
+            poLock.busy = true;
+            poLock.recent.set(dupKey, Date.now());
+            let result;
+            try {
+              result = await pocketTrader.placeOrder({ pair, direction, amount: stake, expirySeconds: expiry });
+            } finally {
+              poLock.busy = false;
+            }
             notifyOwnerWA(
               `🖥️ *PO ORDER IMEFUNGULIWA (Dashboard)*\n\n` +
                 `Jozi: *${pair}*\n` +
