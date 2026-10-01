@@ -116,6 +116,30 @@ async function initSchema() {
       settingValue TEXT NOT NULL,
       updatedAt   INTEGER NOT NULL
     )`,
+    // Pocket Option (Binary/Turbo): kila order iliyofunguliwa kupitia bot
+    // (.pobuy/.posell) inahifadhiwa hapa kutoka kufunguliwa hadi kufungwa,
+    // ili restart/redeploy isipoteze kumbukumbu ya trades.
+    `CREATE TABLE IF NOT EXISTS po_trades (
+      orderId       TEXT PRIMARY KEY,
+      pair          TEXT NOT NULL,
+      direction     TEXT NOT NULL,
+      stake         REAL NOT NULL,
+      expirySeconds INTEGER NOT NULL,
+      openedAt      INTEGER NOT NULL,
+      expiresAt     INTEGER NOT NULL,
+      closedAt      INTEGER,
+      win           INTEGER,
+      profit        REAL,
+      status        TEXT,
+      resultJson    TEXT
+    )`,
+    // Key/value ya settings za Pocket Option (mfano auto-signal kwa kila chat).
+    `CREATE TABLE IF NOT EXISTS po_settings (
+      settingKey   TEXT PRIMARY KEY,
+      settingValue TEXT NOT NULL,
+      updatedAt    INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_po_trades_open ON po_trades(closedAt)`,
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
     `CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_open ON fx_auto_trades(closedAt)`,
   ], 'write');
