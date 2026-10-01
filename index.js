@@ -738,6 +738,15 @@ async function startBot() {
       } catch (err) {
         console.error('❌ Imeshindwa kuanzisha auto-trader:', err.message);
       }
+
+      // Pocket Option — rejesha trades zilizokuwa wazi na auto-signal settings
+      // kutoka Turso (zote ni salama kuitwa tena baada ya reconnect).
+      try {
+        require('./utils/pocketOptionTrader').restoreOpenTrades().catch(() => {});
+        require('./commands/utility/posignal').restoreAutoJobs(sock).catch(() => {});
+      } catch (err) {
+        console.error('❌ Imeshindwa kurejesha data ya Pocket Option:', err.message);
+      }
     }
   });
 
