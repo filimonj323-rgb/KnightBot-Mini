@@ -71,13 +71,13 @@
         <h3><span>🔍 Signal ya Jozi Moja</span></h3>
         <div class="po-grid3">
           <div><label class="po-label">Jozi</label>
-            <input class="po-input" id="sPair" list="pairList" value="EURUSD" placeholder="EURUSD au EURUSD_otc" /></div>
+            <select class="po-select" id="sPair" data-default="EURUSD"></select>
+            <input class="po-input" id="sPairCustom" placeholder="mf. BTCUSD, #AAPL, EURUSD_otc" style="display:none;" /></div>
           <div><label class="po-label">Timeframe</label>
             <select class="po-select" id="sTf"><option value="30s">30s</option><option value="1m" selected>1m</option><option value="5m">5m</option><option value="15m">15m</option></select></div>
           <div><label class="po-label">&nbsp;</label>
             <button class="po-btn primary" id="sBtn" onclick="checkSignal()">Angalia</button></div>
         </div>
-        <datalist id="pairList"></datalist>
         <div class="po-toast" id="sToast"></div>
         <div id="sResult" style="margin-top:12px;"></div>
       </div>
@@ -113,7 +113,8 @@
         <h3><span>➕ Fungua Order (Mkono)</span></h3>
         <div class="po-grid3">
           <div><label class="po-label">Jozi</label>
-            <input class="po-input" id="tPair" list="pairList" value="EURUSD_otc" /></div>
+            <select class="po-select" id="tPair" data-default="EURUSD_otc"></select>
+            <input class="po-input" id="tPairCustom" placeholder="mf. BTCUSD, #AAPL, EURUSD_otc" style="display:none;" /></div>
           <div><label class="po-label">Stake ($)</label>
             <input class="po-input" id="tStake" type="number" min="1" step="0.5" value="1" /></div>
           <div><label class="po-label">Expiry</label>
@@ -206,9 +207,39 @@
   let staticFilled = false;
   function fillStatic() {
     if (staticFilled) return; staticFilled = true;
-    $('pairList').innerHTML = state.pairs.map((p) => `<option value="${esc(p)}"></option>`).join('');
+    fillPairSelects();
     const modeOpts = state.modes.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
     $('aMode').innerHTML = modeOpts; $('scMode').innerHTML = modeOpts;
+  }
+
+  // ── Dropdown ya jozi (Signal + Trade) ──────────────────────────────
+  const REAL_MAJORS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDUSD'];
+  function fillPairSelects() {
+    const opt = (v, l) => `<option value="${esc(v)}">${esc(l)}</option>`;
+    const base = state.pairs.map((p) => String(p).replace(/_otc$/i, '').toUpperCase());
+    const majors = [...new Set(base.filter((p) => REAL_MAJORS.includes(p)))];
+    const minors = [...new Set(base.filter((p) => !REAL_MAJORS.includes(p)))];
+    const html =
+      `<optgroup label="Majors (soko halisi)">${majors.map((p) => opt(p, p)).join('')}</optgroup>` +
+      `<optgroup label="Majors (OTC)">${majors.map((p) => opt(p + '_otc', p + ' OTC')).join('')}</optgroup>` +
+      `<optgroup label="Minors (OTC)">${minors.map((p) => opt(p + '_otc', p + ' OTC')).join('')}</optgroup>` +
+      `<option value="__custom__">✏️ Nyingine (andika jina)...</option>`;
+    ['sPair', 'tPair'].forEach((id) => {
+      const sel = $(id);
+      sel.innerHTML = html;
+      sel.value = sel.dataset.default;
+      if (sel.value !== sel.dataset.default) sel.selectedIndex = 0;
+      sel.addEventListener('change', () => { $(id + 'Custom').style.display = sel.value === '__custom__' ? '' : 'none'; });
+    });
+  }
+  function getPair(id) {
+    const sel = $(id);
+    return sel.value === '__custom__' ? $(id + 'Custom').value.trim() : sel.value;
+  }
+  function setPair(id, pair) {
+    const sel = $(id), custom = $(id + 'Custom');
+    if ([...sel.options].some((o) => o.value === pair)) { sel.value = pair; custom.style.display = 'none'; }
+    else { sel.value = '__custom__'; custom.value = pair; custom.style.display = ''; }
   }
 
   function renderBar() {
@@ -280,7 +311,7 @@
   async function checkSignal() {
     const btn = $('sBtn'); clearToast('sToast'); btn.disabled = true; btn.textContent = '⏳...';
     try {
-      const d = await api('/api/admin/po/signal?pair=' + encodeURIComponent($('sPair').value.trim()) + '&tf=' + encodeURIComponent($('sTf').value));
+      const d = await api('/api/admin/po/signal?pair=' + encodeURIComponent(getPair('sPair')) + '&tf=' + encodeURIComponent($('sTf').value));
       $('sResult').innerHTML = sigCard(d.result);
     } catch (e) { $('sResult').innerHTML = ''; toast('sToast', '❌ ' + e.message, false); }
     btn.disabled = false; btn.textContent = 'Angalia';
@@ -312,7 +343,7 @@
   }
 
   function useSignal(pair, direction, expiry) {
-    $('tPair').value = pair;
+    setPair('tPair', pair);
     const sel = $('tExpiry');
     if (![...sel.options].some((o) => Number(o.value) === Number(expiry))) sel.add(new Option(tfLabel(expiry), expiry));
     sel.value = String(expiry);
@@ -323,7 +354,7 @@
   // ── Trade ──────────────────────────────────────────────────────────
   async function openOrder(direction) {
     clearToast('tToast');
-    const pair = $('tPair').value.trim(), stake = Number($('tStake').value), expirySeconds = Number($('tExpiry').value);
+    const pair = getPair('tPair'), stake = Number($('tStake').value), expirySeconds = Number($('tExpiry').value);
     if (!pair) return toast('tToast', '❌ Weka jozi.', false);
     if (!(stake > 0)) return toast('tToast', '❌ Stake lazima iwe zaidi ya 0.', false);
     if (!isDemo() && !confirm(`⚠️ Akaunti ni REAL.\nFungua ${direction === 'BUY' ? 'UP' : 'DOWN'} ${pair} • $${stake} • ${tfLabel(expirySeconds)}?`)) return;
