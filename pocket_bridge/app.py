@@ -19,6 +19,10 @@ import traceback
 import asyncio
 import threading
 import time
+import enum
+import dataclasses
+import datetime as _dt
+import decimal
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from pocketoptionapi_async import AsyncPocketOptionClient, OrderDirection
@@ -208,6 +212,56 @@ def _auth():
         return jsonify({"ok": False, "error": "Secret si sahihi."}), 403
 
 
+def _to_jsonable(obj, _depth=0):
+    """Geuza object yoyote ya maktaba (OrderResult, enum, dataclass, pydantic,
+    datetime, Decimal...) kuwa data ambayo jsonify inaweza kutuma."""
+    if _depth > 6:
+        return str(obj)
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, enum.Enum):
+        return obj.value if isinstance(obj.value, (bool, int, float, str)) else obj.name
+    if isinstance(obj, decimal.Decimal):
+        return float(obj)
+    if isinstance(obj, (_dt.datetime, _dt.date)):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {str(k): _to_jsonable(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_to_jsonable(v, _depth + 1) for v in obj]
+    if hasattr(obj, "model_dump"):  # pydantic v2
+        try:
+            return _to_jsonable(obj.model_dump(), _depth + 1)
+        except Exception:
+            pass
+    if hasattr(obj, "dict") and callable(obj.dict):  # pydantic v1
+        try:
+            return _to_jsonable(obj.dict(), _depth + 1)
+        except Exception:
+            pass
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return _to_jsonable(dataclasses.asdict(obj), _depth + 1)
+    if hasattr(obj, "__dict__"):
+        return {k: _to_jsonable(v, _depth + 1) for k, v in vars(obj).items() if not k.startswith("_")}
+    return str(obj)
+
+
+def _order_result_payload(result):
+    """JSON ya matokeo + sehemu ya `win` (true/false) ambayo poresult.js
+    inatarajia, ikichukuliwa kutoka status au profit."""
+    data = _to_jsonable(result)
+    if isinstance(data, dict) and "win" not in data:
+        status = str(data.get("status", "")).lower()
+        profit = data.get("profit")
+        if "win" in status:
+            data["win"] = True
+        elif "lose" in status or "loss" in status:
+            data["win"] = False
+        elif isinstance(profit, (int, float)):
+            data["win"] = profit > 0
+    return data
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
@@ -314,7 +368,7 @@ def order_result(order_id):
         # check_order_result() inasubiri mpaka trade ikamilike na kurudisha
         # matokeo kamili (win/loss + profit); check_win() ni mbadala rahisi.
         result = run_async(client.check_order_result(order_id))
-        return jsonify({"ok": True, "result": result})
+        return jsonify({"ok": True, "result": _order_result_payload(result)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -324,7 +378,7 @@ def active_orders():
     try:
         client = get_client()
         orders = run_async(client.get_active_orders())
-        return jsonify({"ok": True, "orders": orders})
+        return jsonify({"ok": True, "orders": _to_jsonable(orders)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
