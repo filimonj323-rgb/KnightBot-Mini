@@ -121,8 +121,8 @@
             <select class="po-select" id="tExpiry"><option value="30">30s</option><option value="60" selected>1m</option><option value="180">3m</option><option value="300">5m</option><option value="900">15m</option></select></div>
         </div>
         <div class="po-grid2">
-          <button class="po-btn up" onclick="openOrder('BUY')">⬆️ UP (BUY)</button>
-          <button class="po-btn down" onclick="openOrder('SELL')">⬇️ DOWN (SELL)</button>
+          <button class="po-btn up" id="tUp" onclick="openOrder('BUY')">⬆️ UP (BUY)</button>
+          <button class="po-btn down" id="tDown" onclick="openOrder('SELL')">⬇️ DOWN (SELL)</button>
         </div>
         <div class="po-toast" id="tToast"></div>
         <div class="po-note">Binary/Turbo: hakuna SL/TP — order inaisha yenyewe expiry ikifika. Anza na akaunti ya DEMO.</div>
@@ -140,6 +140,8 @@
     </div>
   </div>
 </div>
+
+<div id="poSnack" style="display:none;position:fixed;left:12px;right:12px;bottom:18px;z-index:9999;padding:12px 14px;border-radius:12px;font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.5);"></div>
 
 <script>
   // Lazima ilingane na API_BASE ya admin.html / fxtrading.html
@@ -191,7 +193,10 @@
   const outcome = (t) => (!t.closedAt ? 'open' : t.win === 1 ? 'win' : t.win === 0 ? 'loss' : 'unknown');
   const isDemo = () => state.bridge && state.bridge.demo === true;
 
+  let refreshing = false, lastRefresh = 0;
   async function refresh() {
+    if (refreshing) return;
+    refreshing = true; lastRefresh = Date.now();
     try {
       const d = await api('/api/admin/po/overview');
       state.bridge = d.bridge; state.balance = d.balance; state.trades = d.trades || [];
@@ -202,6 +207,7 @@
     }
     renderBar(); renderBridge(); renderAuto(); renderOpen(); renderHistory();
     refreshFeed();
+    refreshing = false;
   }
 
   let staticFilled = false;
@@ -352,17 +358,57 @@
   }
 
   // ── Trade ──────────────────────────────────────────────────────────
+  // Ujumbe unaoonekana juu ya skrini (form ya trade iko chini ya orodha — toast ya kawaida haionekani).
+  let snackTimer = null;
+  function snack(msg, ok) {
+    const el = $('poSnack');
+    el.textContent = msg;
+    el.style.background = ok ? '#0f5132' : '#842029';
+    el.style.color = '#fff';
+    el.style.display = 'block';
+    clearTimeout(snackTimer);
+    snackTimer = setTimeout(() => { el.style.display = 'none'; }, 5000);
+  }
+  function setOrderBtns(busy, label) {
+    $('tUp').disabled = busy; $('tDown').disabled = busy;
+    $('tUp').textContent = busy ? label : '⬆️ UP (BUY)';
+    $('tDown').textContent = busy ? label : '⬇️ DOWN (SELL)';
+  }
+
+  let placing = false;
   async function openOrder(direction) {
+    if (placing) return;
     clearToast('tToast');
     const pair = getPair('tPair'), stake = Number($('tStake').value), expirySeconds = Number($('tExpiry').value);
     if (!pair) return toast('tToast', '❌ Weka jozi.', false);
     if (!(stake > 0)) return toast('tToast', '❌ Stake lazima iwe zaidi ya 0.', false);
+    const sameOpen = state.trades.filter((t) => !t.closedAt && t.pair === pair).length;
+    if (sameOpen && !confirm(`⚠️ Tayari una order ${sameOpen} wazi ya ${pair}.\nUnataka kufungua nyingine?`)) return;
     if (!isDemo() && !confirm(`⚠️ Akaunti ni REAL.\nFungua ${direction === 'BUY' ? 'UP' : 'DOWN'} ${pair} • $${stake} • ${tfLabel(expirySeconds)}?`)) return;
+    placing = true; setOrderBtns(true, '⏳ Inafungua...');
+    toast('tToast', '⏳ Inatuma order... usibonyeze tena.', true);
+    let ok = false;
     try {
       const d = await api('/api/admin/po/open', { method: 'POST', body: JSON.stringify({ pair, direction, stake, expirySeconds }) });
-      toast('tToast', `✅ Order imefunguliwa — ID ${d.orderId}`, true);
-      refresh();
-    } catch (e) { toast('tToast', '❌ ' + e.message, false); }
+      ok = true;
+      const msg = `✅ ${pair} ${direction === 'BUY' ? 'UP' : 'DOWN'} $${stake} imefunguliwa`;
+      snack(msg, true); toast('tToast', `${msg} — ID ${d.orderId}`, true);
+      setOrderBtns(true, '✅ Imefunguliwa');
+      await refresh();
+    } catch (e) { snack('❌ ' + e.message, false); toast('tToast', '❌ ' + e.message, false); }
+    // Kinga ya kubonyeza mara mbili: vitufe vinabaki vimezimwa kwa sekunde chache baada ya kumaliza.
+    setTimeout(() => { placing = false; setOrderBtns(false); }, ok ? 3000 : 1000);
+  }
+
+  async function checkResult(orderId, btn) {
+    btn.disabled = true; btn.textContent = '⏳...';
+    try {
+      const d = await api('/api/admin/po/result?orderId=' + encodeURIComponent(orderId));
+      const r = d.result;
+      if (r && typeof r.win === 'boolean') snack(r.win ? '✅ WIN' : '🔴 LOSS', r.win);
+      else snack('ℹ️ Pocket Option bado haijatoa matokeo ya order hii. Angalia kwenye app yao.', false);
+    } catch (e) { snack('❌ ' + e.message, false); }
+    refresh();
   }
 
   function renderOpen() {
@@ -370,16 +416,24 @@
     $('openBox').innerHTML = open.length
       ? `<div class="po-scroll"><table class="po-table"><thead><tr><th>Jozi</th><th>Dir</th><th>Stake</th><th>Inaisha</th><th>ID</th></tr></thead><tbody>${
           open.map((t) => `<tr><td><b>${esc(t.pair)}</b></td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td>
-            <td data-exp="${Number(t.expiresAt)}">—</td><td class="po-muted" style="font-size:11px;">${esc(t.orderId)}</td></tr>`).join('')
+            <td data-exp="${Number(t.expiresAt)}" data-oid="${esc(t.orderId)}">—</td><td class="po-muted" style="font-size:11px;">${esc(t.orderId)}</td></tr>`).join('')
         }</tbody></table></div>`
       : '<div class="po-empty">Hakuna order iliyo wazi.</div>';
     tick();
   }
   function tick() {
+    let waiting = false;
     document.querySelectorAll('[data-exp]').forEach((el) => {
       const left = Math.round((Number(el.dataset.exp) - Date.now()) / 1000);
-      el.textContent = left > 0 ? `⏳ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'Inasubiri matokeo...';
+      if (left > 0) { el.textContent = `⏳ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`; return; }
+      waiting = true;
+      if (!el.dataset.waiting) {
+        el.dataset.waiting = '1';
+        el.innerHTML = `Inasubiri matokeo... <button class="po-btn small" onclick="checkResult('${el.dataset.oid}', this)">🔄 Angalia</button>`;
+      }
     });
+    // Order imeisha muda: sasisha kila ~6s (badala ya 10s) ili matokeo yaonekane mara tu server inapoyapata.
+    if (waiting && !refreshing && Date.now() - lastRefresh > 6000) refresh();
   }
 
   // ── History ────────────────────────────────────────────────────────
