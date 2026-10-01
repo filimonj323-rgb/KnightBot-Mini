@@ -13,6 +13,7 @@
  */
 
 const { isBridgeUp } = require('../../utils/pocketOptionTrader');
+const pocketStore = require('../../utils/pocketStore');
 const {
   DEFAULT_PAIRS,
   SCAN_MODES,
@@ -30,6 +31,7 @@ const {
 const autoJobs = new Map();
 const MAX_SENT_CACHE = 200;
 const MAX_PER_CYCLE = 5; // signals za juu tu kwa kila mzunguko (kuzuia spam)
+const AUTO_KEY_PREFIX = 'autosignal:'; // po_settings key: autosignal:<jid>
 
 // Tenganisha mode na timeframe kutoka args (mpangilio wowote): ["otc","5m"] au ["5m","otc"]
 function parseModeTf(args) {
@@ -72,7 +74,7 @@ function scheduleAuto(sock, jid, job) {
           if (job.sent.has(key)) continue;
           job.sent.add(key);
           if (job.sent.size > MAX_SENT_CACHE) job.sent.delete(job.sent.values().next().value);
-          await sock.sendMessage(jid, { text: formatSignal(r) });
+          await (global.currentSock || sock).sendMessage(jid, { text: formatSignal(r) });
           sentNow++;
         }
       }
@@ -89,6 +91,7 @@ async function handleAuto(sock, jid, args, extra) {
   const action = (args[0] || 'status').toLowerCase();
 
   if (action === 'off') {
+    await pocketStore.deleteSetting(AUTO_KEY_PREFIX + jid);
     return extra.reply(stopAuto(jid) ? '🛑 Auto-signal imezimwa kwenye chat hii.' : 'ℹ️ Auto-signal haikuwa imewashwa hapa.');
   }
 
@@ -110,6 +113,7 @@ async function handleAuto(sock, jid, args, extra) {
     const job = { tf, minStrength, mode, sent: new Set(), timer: null };
     autoJobs.set(jid, job);
     scheduleAuto(sock, jid, job);
+    await pocketStore.saveSetting(AUTO_KEY_PREFIX + jid, { tf, minStrength, mode });
     return extra.reply(
       `✅ *Auto-signal imewashwa*\n` +
         `⏱️ Timeframe: ${tfLabel(tf)}\n` +
@@ -118,14 +122,44 @@ async function handleAuto(sock, jid, args, extra) {
         (mode !== 'forex' && tf < 300 ? `⚠️ Orodha kubwa + timeframe fupi: scan inaweza kuchukua zaidi ya ${tfLabel(tf)}, baadhi ya candles zitarukwa. Tumia 5m au zaidi.\n` : '') +
         `_Signals ${MAX_PER_CYCLE} za juu tu kwa kila mzunguko._\n\n` +
         `_Itachanganua kila candle ikifungwa. Zima: .posignal auto off_\n` +
-        `_Kumbuka: ikiwa bot itarestart, lazima uiwashe tena._`
+        `_Mpangilio huu umehifadhiwa — bot ikirestart itaendelea yenyewe._`
     );
   }
 
   return extra.reply('❓ Tumia: .posignal auto on|off|status');
 }
 
+/**
+ * Inaitwa na index.js bot ikiunganishwa: inarejesha auto-signal jobs zilizokuwa
+ * zimewashwa kabla ya restart. Salama kuitwa tena baada ya reconnect (jobs
+ * zilizopo hazirudiwi; zinatumia global.currentSock ya sasa).
+ */
+async function restoreAutoJobs(sock) {
+  const saved = await pocketStore.loadSettings(AUTO_KEY_PREFIX);
+  let restored = 0;
+  for (const { key, value } of saved) {
+    const jid = key.slice(AUTO_KEY_PREFIX.length);
+    if (!jid || autoJobs.has(jid)) continue;
+    try {
+      const cfg = JSON.parse(value);
+      const tf = parseInt(cfg.tf, 10);
+      const minStrength = Math.min(100, Math.max(30, parseInt(cfg.minStrength, 10) || 70));
+      const mode = SCAN_MODES.includes(cfg.mode) ? cfg.mode : 'smart';
+      if (!tf || tf < 5) continue;
+      const job = { tf, minStrength, mode, sent: new Set(), timer: null };
+      autoJobs.set(jid, job);
+      scheduleAuto(sock, jid, job);
+      restored++;
+    } catch (err) {
+      console.error('[posignal auto] Setting iliyohifadhiwa si sahihi:', key, err.message);
+    }
+  }
+  if (restored) console.log(`[posignal auto] Auto-signal ${restored} zimerejeshwa kutoka database.`);
+  return restored;
+}
+
 module.exports = {
+  restoreAutoJobs,
   name: 'posignal',
   aliases: ['posig', 'posignals'],
   category: 'utility',
