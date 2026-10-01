@@ -197,7 +197,7 @@ function voteAt(s, i) {
     weakMarket = true;
     strength = Math.min(strength, 50);
   }
-  return { direction, strength, notes, weakMarket, adx, rsi, price: close };
+  return { direction, strength, notes, weakMarket, adx, rsi, price: close, buy, sell };
 }
 
 // Hit-rate ya mantiki hii kwenye candles zilizopo: signal ya bar i -> matokeo ya bar i+1.
@@ -238,6 +238,12 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   let raw;
   try {
     raw = await getCandles(p, timeframeSec, 220);
+    if (!raw || raw.length === 0) {
+      // Timeout ya mara moja ni kawaida — jaribu tena mara 1 kabla ya kukata tamaa.
+      console.log(`[posignal] ${p} ${tfLabel(timeframeSec)}: candles 0 (timeout) — najaribu tena`);
+      await new Promise((r) => setTimeout(r, 1500));
+      raw = await getCandles(p, timeframeSec, 220);
+    }
   } catch (err) {
     if (/invalid asset/i.test(err.message)) {
       throw new Error(`Jozi "${p}" haipo kwenye Pocket Option. Jaribu mfano: EURUSD, GBPUSD, USDJPY au ongeza _otc.`);
@@ -259,6 +265,10 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   const s = computeAllIndicatorSeries(candles);
   const last = candles.length - 1;
   const v = voteAt(s, last);
+  console.log(
+    `[posignal] ${p} ${tfLabel(timeframeSec)}: ${v.direction} buy=${v.buy} sell=${v.sell} ` +
+    `strength=${v.strength}% adx=${v.adx != null ? v.adx.toFixed(1) : '-'} rsi=${v.rsi != null ? v.rsi.toFixed(1) : '-'} candles=${candles.length}`
+  );
   return {
     pair: p,
     timeframeSec,
@@ -279,6 +289,8 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
 // Jozi zilizoshindwa (timeout / haipo) zinarukwa kwa muda, ili jozi zilizofungwa
 // zisipoteze sekunde 10 kila scan.
 const deadPairs = new Map(); // pair -> until(ms)
+const failCounts = new Map(); // pair -> idadi ya kushindwa mfululizo
+const DEAD_AFTER_FAILS = 2; // timeout/stale inahesabiwa dead baada ya kushindwa mara hii mfululizo
 const DEAD_MS = 10 * 60 * 1000;
 const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.POCKET_SCAN_CONCURRENCY || '', 10) || 3);
 
@@ -299,15 +311,31 @@ async function scanPairs(pairs = DEFAULT_PAIRS, timeframeSec = 60, opts = {}) {
       const pair = queue[next++];
       try {
         results.push(await analyzePair(pair, timeframeSec, opts));
+        failCounts.delete(pair);
       } catch (err) {
         errors.push({ pair, error: err.message });
-        if (/timeout|haikujibu|haipo kwenye|limefungwa/i.test(err.message)) deadPairs.set(pair, Date.now() + DEAD_MS);
+        console.log(`[posignal] ${pair} ${tfLabel(timeframeSec)}: KOSA — ${err.message}`);
+        if (/haipo kwenye/i.test(err.message)) {
+          // Jozi haipo kabisa — hakuna sababu ya kujaribu tena hivi karibuni.
+          deadPairs.set(pair, Date.now() + DEAD_MS);
+        } else if (/timeout|haikujibu|limefungwa/i.test(err.message)) {
+          const n = (failCounts.get(pair) || 0) + 1;
+          failCounts.set(pair, n);
+          if (n >= DEAD_AFTER_FAILS) {
+            deadPairs.set(pair, Date.now() + DEAD_MS);
+            failCounts.delete(pair);
+          }
+        }
       }
       await new Promise((r) => setTimeout(r, 150));
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
   results.sort((a, b) => b.strength - a.strength);
+  console.log(
+    `[posignal] scan ${tfLabel(timeframeSec)}: jozi=${pairs.length} zilizochanganuliwa=${results.length} ` +
+    `makosa=${errors.length} zilizorukwa(dead)=${skipped} NEUTRAL=${results.filter((r) => r.direction === 'NEUTRAL').length}`
+  );
   return { results, errors, skipped, total: pairs.length };
 }
 
