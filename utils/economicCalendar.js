@@ -61,6 +61,12 @@ const INVERSE_KEYWORDS = [
 ];
 
 let cache = { data: null, at: 0 };
+let inflight = null;        // ombi moja tu kwa wakati mmoja (zuia "thundering herd")
+let blockedUntil = 0;       // baada ya 429 tunasubiri kabla ya kujaribu tena
+let lastErrLoggedAt = 0;
+const RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000; // dakika 30 baada ya 429
+const ERROR_COOLDOWN_MS = 2 * 60 * 1000;       // dakika 2 baada ya hitilafu nyingine
+const STALE_MAX_MS = 24 * 60 * 60 * 1000;      // data ya zamani hadi saa 24 inakubalika kama fallback
 
 function isInverseIndicator(title) {
   const t = (title || '').toLowerCase();
@@ -76,15 +82,47 @@ function parseNumeric(v) {
 }
 
 async function fetchCalendarRaw() {
-  if (cache.data && Date.now() - cache.at < CACHE_MS) {
-    return cache.data;
+  const now = Date.now();
+  if (cache.data && now - cache.at < CACHE_MS) return cache.data;
+
+  // Tuko kwenye "cooldown" (429/hitilafu ya hivi karibuni) — usigonge feed
+  // tena; tumia data ya zamani kama ipo, vinginevyo tupa error.
+  if (now < blockedUntil) {
+    if (cache.data && now - cache.at < STALE_MAX_MS) return cache.data;
+    throw new Error('Economic calendar: feed imezuiwa kwa muda (rate limit), itajaribiwa tena baadaye');
   }
-  const { data } = await axios.get(FEED_URL, { timeout: TIMEOUT_MS });
-  if (!Array.isArray(data)) {
-    throw new Error('Economic calendar: muundo wa data haukutarajiwa');
-  }
-  cache = { data, at: Date.now() };
-  return data;
+
+  // Maombi yote yanayoingia kwa pamoja yanashiriki fetch MOJA.
+  if (inflight) return inflight;
+
+  inflight = (async () => {
+    try {
+      const { data } = await axios.get(FEED_URL, { timeout: TIMEOUT_MS });
+      if (!Array.isArray(data)) {
+        throw new Error('Economic calendar: muundo wa data haukutarajiwa');
+      }
+      cache = { data, at: Date.now() };
+      blockedUntil = 0;
+      return data;
+    } catch (err) {
+      const status = err.response && err.response.status;
+      let wait = status === 429 ? RATE_LIMIT_COOLDOWN_MS : ERROR_COOLDOWN_MS;
+      const retryAfter = Number(err.response && err.response.headers && err.response.headers['retry-after']);
+      if (Number.isFinite(retryAfter) && retryAfter > 0) wait = Math.max(wait, retryAfter * 1000);
+      blockedUntil = Date.now() + wait;
+      if (cache.data && Date.now() - cache.at < STALE_MAX_MS) {
+        if (Date.now() - lastErrLoggedAt > wait) {
+          lastErrLoggedAt = Date.now();
+          console.error(`economicCalendar: ${err.message}, natumia data ya zamani; nitajaribu tena baada ya dakika ${Math.round(wait / 60000)}.`);
+        }
+        return cache.data;
+      }
+      throw err;
+    } finally {
+      inflight = null;
+    }
+  })();
+  return inflight;
 }
 
 /**
@@ -101,7 +139,10 @@ async function getCalendarContext(currencyA, currencyB) {
   try {
     events = await fetchCalendarRaw();
   } catch (err) {
-    console.error('economicCalendar fetch error:', err.message);
+    if (Date.now() - lastErrLoggedAt > ERROR_COOLDOWN_MS) {
+      lastErrLoggedAt = Date.now();
+      console.error('economicCalendar fetch error:', err.message);
+    }
     return empty;
   }
 
@@ -237,7 +278,10 @@ async function getWeekView(currencies = MAJOR_CURRENCIES) {
   try {
     events = await fetchCalendarRaw();
   } catch (err) {
-    console.error('economicCalendar getWeekView error:', err.message);
+    if (Date.now() - lastErrLoggedAt > ERROR_COOLDOWN_MS) {
+      lastErrLoggedAt = Date.now();
+      console.error('economicCalendar getWeekView error:', err.message);
+    }
     return { available: false, events: [], error: err.message };
   }
 
