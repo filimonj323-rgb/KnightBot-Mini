@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pocket Option — Mr. IT MEDIATOR</title>
+<link rel="stylesheet" href="pocketoption.css" />
+</head>
+<body>
+
+<div id="poLogin">
+  <h1>💹 Pocket Option Login</h1>
+  <label class="po-label">Username</label>
+  <input class="po-input" id="poUser" type="text" autocomplete="username" />
+  <label class="po-label">Password</label>
+  <input class="po-input" id="poPass" type="password" autocomplete="current-password" />
+  <button class="po-btn primary" onclick="doLogin()">Ingia</button>
+  <div class="po-error" id="poLoginErr"></div>
+</div>
+
+<div id="poApp">
+  <div class="po-head">
+    <div class="po-top">
+      <div class="po-brand"><i></i> POCKET OPTION · Binary/Turbo</div>
+      <div class="po-top-actions">
+        <button class="po-btn small" onclick="location.href='admin.html'">← Ops Console</button>
+        <button class="po-btn small" onclick="location.href='fxtrading.html'">📈 FX</button>
+        <button class="po-btn small" onclick="logout()">Toka</button>
+      </div>
+    </div>
+    <div class="po-bar" id="poBar"></div>
+  </div>
+
+  <div class="po-wrap">
+    <div class="po-tabs" id="poTabs">
+      <div class="po-tab active" data-pane="overview"><em>🏠</em>Muhtasari</div>
+      <div class="po-tab" data-pane="signals"><em>📡</em>Signals</div>
+      <div class="po-tab" data-pane="trade"><em>🎯</em>Trade</div>
+      <div class="po-tab" data-pane="history"><em>🕘</em>History</div>
+    </div>
+
+    <!-- MUHTASARI -->
+    <div class="po-pane active" id="pane-overview">
+      <div class="po-card">
+        <h3><span>🔌 Bridge</span><button class="po-btn small" onclick="refresh()">🔄 Sasisha</button></h3>
+        <div id="bridgeBox"><div class="po-empty">Inapakia...</div></div>
+      </div>
+      <div class="po-card">
+        <h3><span>🤖 Auto-Signal (WhatsApp ya owner)</span></h3>
+        <div id="autoBox"></div>
+        <div class="po-grid3" style="margin-top:12px;">
+          <div><label class="po-label">Timeframe</label>
+            <select class="po-select" id="aTf"><option value="1m">1m</option><option value="5m" selected>5m</option><option value="15m">15m</option></select></div>
+          <div><label class="po-label">Nguvu ya chini (%)</label>
+            <input class="po-input" id="aStrength" type="number" min="30" max="100" value="70" /></div>
+          <div><label class="po-label">Jozi (mode)</label>
+            <select class="po-select" id="aMode"></select></div>
+        </div>
+        <div class="po-grid2">
+          <button class="po-btn up" onclick="setAuto('on')">▶️ Washa</button>
+          <button class="po-btn down" onclick="setAuto('off')">⏹ Zima</button>
+        </div>
+        <div class="po-toast" id="autoToast"></div>
+        <div class="po-note">Auto-signal huchanganua kila candle ikifungwa na kutuma signals bora kwenye WhatsApp yako; pia zinaonekana kwenye tab ya Signals (Live Feed). Mpangilio unahifadhiwa — bot ikirestart inaendelea yenyewe.</div>
+      </div>
+    </div>
+
+    <!-- SIGNALS -->
+    <div class="po-pane" id="pane-signals">
+      <div class="po-card">
+        <h3><span>🔍 Signal ya Jozi Moja</span></h3>
+        <div class="po-grid3">
+          <div><label class="po-label">Jozi</label>
+            <input class="po-input" id="sPair" list="pairList" value="EURUSD" placeholder="EURUSD au EURUSD_otc" /></div>
+          <div><label class="po-label">Timeframe</label>
+            <select class="po-select" id="sTf"><option value="30s">30s</option><option value="1m" selected>1m</option><option value="5m">5m</option><option value="15m">15m</option></select></div>
+          <div><label class="po-label">&nbsp;</label>
+            <button class="po-btn primary" id="sBtn" onclick="checkSignal()">Angalia</button></div>
+        </div>
+        <datalist id="pairList"></datalist>
+        <div class="po-toast" id="sToast"></div>
+        <div id="sResult" style="margin-top:12px;"></div>
+      </div>
+
+      <div class="po-card">
+        <h3><span>🔎 Scan ya Jozi Nyingi</span></h3>
+        <div class="po-grid3">
+          <div><label class="po-label">Mode</label><select class="po-select" id="scMode"></select></div>
+          <div><label class="po-label">Timeframe</label>
+            <select class="po-select" id="scTf"><option value="1m">1m</option><option value="5m" selected>5m</option><option value="15m">15m</option></select></div>
+          <div><label class="po-label">Nguvu ya chini (%)</label>
+            <input class="po-input" id="scStrength" type="number" min="30" max="100" value="60" /></div>
+        </div>
+        <button class="po-btn primary" id="scBtn" onclick="runScan()">▶️ Anza Scan</button>
+        <div class="po-toast" id="scToast"></div>
+        <div id="scResult" style="margin-top:12px;"></div>
+        <div class="po-note">Mode "smart" huchukua hadi dakika 1–2. Usifunge ukurasa wakati scan inaendelea.</div>
+      </div>
+
+      <div class="po-card">
+        <h3><span>📻 Live Feed (Auto-Signal)</span><span class="po-muted" id="feedCount"></span></h3>
+        <div id="feedBox"><div class="po-empty">Inapakia...</div></div>
+      </div>
+    </div>
+
+    <!-- TRADE -->
+    <div class="po-pane" id="pane-trade">
+      <div class="po-card">
+        <h3><span>🎯 Order Zilizo Wazi</span></h3>
+        <div id="openBox"></div>
+      </div>
+      <div class="po-card">
+        <h3><span>➕ Fungua Order (Mkono)</span></h3>
+        <div class="po-grid3">
+          <div><label class="po-label">Jozi</label>
+            <input class="po-input" id="tPair" list="pairList" value="EURUSD_otc" /></div>
+          <div><label class="po-label">Stake ($)</label>
+            <input class="po-input" id="tStake" type="number" min="1" step="0.5" value="1" /></div>
+          <div><label class="po-label">Expiry</label>
+            <select class="po-select" id="tExpiry"><option value="30">30s</option><option value="60" selected>1m</option><option value="180">3m</option><option value="300">5m</option><option value="900">15m</option></select></div>
+        </div>
+        <div class="po-grid2">
+          <button class="po-btn up" onclick="openOrder('BUY')">⬆️ UP (BUY)</button>
+          <button class="po-btn down" onclick="openOrder('SELL')">⬇️ DOWN (SELL)</button>
+        </div>
+        <div class="po-toast" id="tToast"></div>
+        <div class="po-note">Binary/Turbo: hakuna SL/TP — order inaisha yenyewe expiry ikifika. Anza na akaunti ya DEMO.</div>
+      </div>
+    </div>
+
+    <!-- HISTORY -->
+    <div class="po-pane" id="pane-history">
+      <div class="po-card">
+        <h3><span>🕘 Historia ya Trades</span><button class="po-btn small" onclick="refresh()">🔄 Sasisha</button></h3>
+        <div class="po-filters" id="hFilters"></div>
+        <div class="po-sum" id="hSummary"></div>
+        <div id="hBox"><div class="po-empty">Inapakia...</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Lazima ilingane na API_BASE ya admin.html / fxtrading.html
+  const API_BASE = 'https://botkuusite.up.railway.app';
+  let TOKEN = sessionStorage.getItem('adminToken') || '';
+  let state = { bridge: null, balance: null, trades: [], auto: [], pairs: [], modes: [] };
+  let hResult = 'all', hPair = 'all';
+  let pollTimer = null, tickTimer = null;
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (n, d = 2) => Number(n || 0).toFixed(d);
+  const signed = (n) => (n >= 0 ? '+' : '-') + '$' + fmt(Math.abs(n));
+  const tfLabel = (s) => (s % 3600 === 0 ? s / 3600 + 'h' : s % 60 === 0 ? s / 60 + 'm' : s + 's');
+  const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Africa/Dar_es_Salaam' });
+  const fmtDate = (ms) => (ms ? new Date(ms).toLocaleString('sw-TZ', { timeZone: 'Africa/Dar_es_Salaam', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+  const dirBadge = (d) => d === 'BUY' ? '<span class="po-up">🟢 UP</span>' : d === 'SELL' ? '<span class="po-down">🔴 DOWN</span>' : '<span class="po-muted">⚪ —</span>';
+
+  function toast(id, msg, ok) { const el = $(id); el.className = 'po-toast ' + (ok ? 'ok' : 'err'); el.textContent = msg; }
+  function clearToast(id) { $(id).className = 'po-toast'; }
+
+  async function api(path, opts = {}) {
+    const res = await fetch(API_BASE + path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}), ...(opts.headers || {}) },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { sessionStorage.removeItem('adminToken'); location.reload(); throw new Error('Session imeisha'); }
+    if (!res.ok || data.ok === false) throw new Error(data.error || 'Hitilafu');
+    return data;
+  }
+
+  async function doLogin() {
+    $('poLoginErr').textContent = '';
+    try {
+      const d = await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ username: $('poUser').value.trim(), password: $('poPass').value }) });
+      TOKEN = d.token; sessionStorage.setItem('adminToken', TOKEN); showApp();
+    } catch (e) { $('poLoginErr').textContent = e.message; }
+  }
+  function logout() { sessionStorage.removeItem('adminToken'); location.reload(); }
+
+  function openPane(name) {
+    document.querySelectorAll('.po-tab').forEach((t) => t.classList.toggle('active', t.dataset.pane === name));
+    document.querySelectorAll('.po-pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + name));
+  }
+  document.querySelectorAll('.po-tab').forEach((t) => t.addEventListener('click', () => openPane(t.dataset.pane)));
+
+  // ── Data ───────────────────────────────────────────────────────────
+  const outcome = (t) => (!t.closedAt ? 'open' : t.win === 1 ? 'win' : t.win === 0 ? 'loss' : 'unknown');
+  const isDemo = () => state.bridge && state.bridge.demo === true;
+
+  async function refresh() {
+    try {
+      const d = await api('/api/admin/po/overview');
+      state.bridge = d.bridge; state.balance = d.balance; state.trades = d.trades || [];
+      state.auto = d.auto || []; state.pairs = d.pairs || []; state.modes = d.scanModes || [];
+      fillStatic();
+    } catch (e) {
+      state.bridge = { ok: false, error: e.message };
+    }
+    renderBar(); renderBridge(); renderAuto(); renderOpen(); renderHistory();
+    refreshFeed();
+  }
+
+  let staticFilled = false;
+  function fillStatic() {
+    if (staticFilled) return; staticFilled = true;
+    $('pairList').innerHTML = state.pairs.map((p) => `<option value="${esc(p)}"></option>`).join('');
+    const modeOpts = state.modes.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    $('aMode').innerHTML = modeOpts; $('scMode').innerHTML = modeOpts;
+  }
+
+  function renderBar() {
+    const b = state.bridge || {};
+    const connected = b.ok && b.connected;
+    const today = dayKey(Date.now());
+    const closedToday = state.trades.filter((t) => t.closedAt && dayKey(t.closedAt) === today);
+    const pl = closedToday.reduce((s, t) => s + Number(t.profit || 0), 0);
+    const decided = state.trades.filter((t) => t.win === 1 || t.win === 0);
+    const wr = decided.length ? Math.round((decided.filter((t) => t.win === 1).length / decided.length) * 100) : null;
+    const open = state.trades.filter((t) => !t.closedAt).length;
+    const bal = state.balance ? `${fmt(state.balance.balance)} ${esc(state.balance.currency || '')}` : '—';
+    $('poBar').innerHTML = `
+      <div class="po-chip"><b>${b.ok ? (isDemo() ? '<span class="po-badge demo">DEMO</span>' : '<span class="po-badge real">REAL</span>') : '—'}</b><span>Akaunti</span></div>
+      <div class="po-chip"><b class="${connected ? 'po-up' : 'po-down'}">${connected ? 'Imeunganishwa' : 'Offline'}</b><span>Bridge</span></div>
+      <div class="po-chip"><b>${bal}</b><span>Balance</span></div>
+      <div class="po-chip"><b class="${pl >= 0 ? 'po-up' : 'po-down'}">${signed(pl)}</b><span>P/L leo</span></div>
+      <div class="po-chip"><b>${open}</b><span>Wazi</span></div>
+      <div class="po-chip"><b>${wr == null ? '—' : wr + '%'}</b><span>Win rate</span></div>`;
+  }
+
+  function renderBridge() {
+    const b = state.bridge || {};
+    if (!b.ok) { $('bridgeBox').innerHTML = `<div class="po-empty">❌ Bridge haipatikani${b.error ? ': ' + esc(b.error) : ''}</div>`; return; }
+    $('bridgeBox').innerHTML = `<table class="po-table"><tbody>
+      <tr><td class="po-muted">Muunganisho</td><td>${b.connected ? '<span class="po-badge on">Umeunganishwa</span>' : '<span class="po-badge off">Haujaunganika</span>'}</td></tr>
+      <tr><td class="po-muted">Aina ya akaunti</td><td>${isDemo() ? '<span class="po-badge demo">DEMO</span>' : '<span class="po-badge real">REAL — pesa halisi</span>'}</td></tr>
+      <tr><td class="po-muted">SSID</td><td>${b.ssid_set ? 'Imewekwa' : '<span class="po-down">Haijawekwa</span>'}</td></tr>
+      ${b.last_error ? `<tr><td class="po-muted">Kosa la mwisho</td><td class="po-warn">${esc(b.last_error)}</td></tr>` : ''}
+    </tbody></table>`;
+  }
+
+  // ── Auto-signal ────────────────────────────────────────────────────
+  function renderAuto() {
+    const a = state.auto || [];
+    $('autoBox').innerHTML = a.length
+      ? a.map((j) => `<div><span class="po-badge on">IMEWASHWA</span> timeframe <b>${tfLabel(j.tf)}</b> • nguvu ≥ <b>${j.minStrength}%</b> • jozi: <b>${esc(j.mode)}</b></div>`).join('')
+      : '<span class="po-badge off">IMEZIMWA</span> <span class="po-muted">Hakuna auto-signal inayofanya kazi.</span>';
+  }
+  async function setAuto(action) {
+    clearToast('autoToast');
+    try {
+      const body = { action, tf: $('aTf').value, minStrength: Number($('aStrength').value), mode: $('aMode').value };
+      const d = await api('/api/admin/po/auto', { method: 'POST', body: JSON.stringify(body) });
+      state.auto = d.auto || []; renderAuto();
+      toast('autoToast', action === 'on' ? '✅ Auto-signal imewashwa.' : '🛑 Auto-signal imezimwa.', true);
+    } catch (e) { toast('autoToast', '❌ ' + e.message, false); }
+  }
+
+  // ── Signals ────────────────────────────────────────────────────────
+  function sigCard(r, extra = '') {
+    const act = r.direction !== 'NEUTRAL'
+      ? `<button class="po-btn small" onclick="useSignal('${esc(r.pair)}','${r.direction}',${r.expirySec || r.timeframeSec || 60})">🎯 Trade</button>` : '';
+    const bt = r.backtest && r.backtest.all && r.backtest.all.trades
+      ? `<div class="po-note">📊 Backtest: yote ${r.backtest.all.winRate}% (${r.backtest.all.trades}) • strong ${r.backtest.strong.trades ? r.backtest.strong.winRate + '% (' + r.backtest.strong.trades + ')' : '—'}</div>` : '';
+    const notes = (r.notes || []).length ? `<ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : '';
+    return `<div class="po-sig">
+      <div class="po-sig-head">
+        <div><b>${esc(r.pair)}</b> <span class="po-muted">(${tfLabel(r.timeframeSec)})</span> ${dirBadge(r.direction)}
+          ${r.direction !== 'NEUTRAL' ? `<span class="po-muted"> • ${esc(r.grade)} ${r.strength}%</span>` : ''}${r.tier === 'fallback' ? ' <span class="po-badge off">fallback</span>' : ''}</div>
+        <div>${extra}${act}</div>
+      </div>
+      ${r.direction !== 'NEUTRAL' ? `<div class="po-meter"><i style="width:${r.strength}%"></i></div>` : ''}
+      ${r.price != null ? `<div class="po-note">Bei ${Number(r.price).toFixed(5)}${r.rsi != null ? ' • RSI ' + fmt(r.rsi, 1) : ''}${r.adx != null ? ' • ADX ' + fmt(r.adx, 1) : ''}${r.weakMarket ? ' • <span class="po-warn">soko tulivu</span>' : ''}</div>` : ''}
+      ${notes}${bt}
+    </div>`;
+  }
+
+  async function checkSignal() {
+    const btn = $('sBtn'); clearToast('sToast'); btn.disabled = true; btn.textContent = '⏳...';
+    try {
+      const d = await api('/api/admin/po/signal?pair=' + encodeURIComponent($('sPair').value.trim()) + '&tf=' + encodeURIComponent($('sTf').value));
+      $('sResult').innerHTML = sigCard(d.result);
+    } catch (e) { $('sResult').innerHTML = ''; toast('sToast', '❌ ' + e.message, false); }
+    btn.disabled = false; btn.textContent = 'Angalia';
+  }
+
+  async function runScan() {
+    const btn = $('scBtn'); clearToast('scToast'); btn.disabled = true; btn.textContent = '⏳ Inachanganua...';
+    $('scResult').innerHTML = '<div class="po-empty">Inachanganua jozi... subiri.</div>';
+    try {
+      const d = await api('/api/admin/po/scan', { method: 'POST', body: JSON.stringify({ mode: $('scMode').value, tf: $('scTf').value, minStrength: Number($('scStrength').value) }) });
+      const hits = (d.results || []).filter((r) => r.direction !== 'NEUTRAL' && r.strength >= d.minStrength);
+      const unavailable = (d.errors || []).length + (d.skipped || 0);
+      $('scResult').innerHTML =
+        (hits.length ? hits.slice(0, 20).map((r) => sigCard(r)).join('') : '<div class="po-empty">Hakuna signal yenye nguvu ya kutosha sasa hivi. Jaribu tena baada ya candle inayofuata.</div>') +
+        `<div class="po-note">📋 Jozi ${d.total}: zilizochanganuliwa ${(d.results || []).length}, zenye signal ${hits.length}, hazipatikani/zimefungwa ${unavailable}.${d.usedFallback ? ' (fallback imetumika)' : ''}</div>`;
+    } catch (e) { $('scResult').innerHTML = ''; toast('scToast', '❌ ' + e.message, false); }
+    btn.disabled = false; btn.textContent = '▶️ Anza Scan';
+  }
+
+  async function refreshFeed() {
+    try {
+      const d = await api('/api/admin/po/feed');
+      const s = d.signals || [];
+      $('feedCount').textContent = s.length ? s.length + ' signals' : '';
+      $('feedBox').innerHTML = s.length
+        ? s.map((r) => sigCard(r, `<span class="po-muted" style="font-size:11px;margin-right:8px;">${fmtDate(r.at)}</span>`)).join('')
+        : `<div class="po-empty">Hakuna signal bado. ${(d.auto || []).length ? 'Auto-signal inasubiri candle inayofuata.' : 'Washa Auto-Signal kwenye Muhtasari.'}</div>`;
+    } catch (e) { $('feedBox').innerHTML = `<div class="po-empty">❌ ${esc(e.message)}</div>`; }
+  }
+
+  function useSignal(pair, direction, expiry) {
+    $('tPair').value = pair;
+    const sel = $('tExpiry');
+    if (![...sel.options].some((o) => Number(o.value) === Number(expiry))) sel.add(new Option(tfLabel(expiry), expiry));
+    sel.value = String(expiry);
+    openPane('trade');
+    toast('tToast', `Imejazwa: ${pair} ${direction === 'BUY' ? 'UP' : 'DOWN'} • ${tfLabel(expiry)}. Chagua stake kisha bonyeza kitufe.`, true);
+  }
+
+  // ── Trade ──────────────────────────────────────────────────────────
+  async function openOrder(direction) {
+    clearToast('tToast');
+    const pair = $('tPair').value.trim(), stake = Number($('tStake').value), expirySeconds = Number($('tExpiry').value);
+    if (!pair) return toast('tToast', '❌ Weka jozi.', false);
+    if (!(stake > 0)) return toast('tToast', '❌ Stake lazima iwe zaidi ya 0.', false);
+    if (!isDemo() && !confirm(`⚠️ Akaunti ni REAL.\nFungua ${direction === 'BUY' ? 'UP' : 'DOWN'} ${pair} • $${stake} • ${tfLabel(expirySeconds)}?`)) return;
+    try {
+      const d = await api('/api/admin/po/open', { method: 'POST', body: JSON.stringify({ pair, direction, stake, expirySeconds }) });
+      toast('tToast', `✅ Order imefunguliwa — ID ${d.orderId}`, true);
+      refresh();
+    } catch (e) { toast('tToast', '❌ ' + e.message, false); }
+  }
+
+  function renderOpen() {
+    const open = state.trades.filter((t) => !t.closedAt);
+    $('openBox').innerHTML = open.length
+      ? `<div class="po-scroll"><table class="po-table"><thead><tr><th>Jozi</th><th>Dir</th><th>Stake</th><th>Inaisha</th><th>ID</th></tr></thead><tbody>${
+          open.map((t) => `<tr><td><b>${esc(t.pair)}</b></td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td>
+            <td data-exp="${Number(t.expiresAt)}">—</td><td class="po-muted" style="font-size:11px;">${esc(t.orderId)}</td></tr>`).join('')
+        }</tbody></table></div>`
+      : '<div class="po-empty">Hakuna order iliyo wazi.</div>';
+    tick();
+  }
+  function tick() {
+    document.querySelectorAll('[data-exp]').forEach((el) => {
+      const left = Math.round((Number(el.dataset.exp) - Date.now()) / 1000);
+      el.textContent = left > 0 ? `⏳ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'Inasubiri matokeo...';
+    });
+  }
+
+  // ── History ────────────────────────────────────────────────────────
+  function setHResult(k) { hResult = k; renderHistory(); }
+  function setHPair(v) { hPair = v; renderHistory(); }
+  function renderHistory() {
+    const all = state.trades;
+    const pairs = [...new Set(all.map((t) => t.pair))].sort();
+    if (hPair !== 'all' && !pairs.includes(hPair)) hPair = 'all';
+    const rBtn = (k, l) => `<button class="po-btn small ${hResult === k ? 'active' : ''}" onclick="setHResult('${k}')">${l}</button>`;
+    $('hFilters').innerHTML = rBtn('all', 'Zote') + rBtn('win', '✅ Win') + rBtn('loss', '🔴 Loss') + rBtn('open', '⏳ Wazi') +
+      `<select class="po-select" onchange="setHPair(this.value)"><option value="all">Jozi zote</option>${pairs.map((p) => `<option ${p === hPair ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`;
+
+    const rows = all.filter((t) => (hResult === 'all' || outcome(t) === hResult) && (hPair === 'all' || t.pair === hPair));
+    const closed = rows.filter((t) => t.closedAt);
+    const wins = closed.filter((t) => t.win === 1).length, losses = closed.filter((t) => t.win === 0).length;
+    const net = closed.reduce((s, t) => s + Number(t.profit || 0), 0);
+    const wr = wins + losses ? Math.round((wins / (wins + losses)) * 1000) / 10 : null;
+    $('hSummary').innerHTML =
+      `<div><b>${rows.length}</b><span>Trades</span></div><div><b class="po-up">${wins}</b><span>Win</span></div><div><b class="po-down">${losses}</b><span>Loss</span></div>` +
+      `<div><b>${wr == null ? '—' : wr + '%'}</b><span>Win rate</span></div><div><b class="${net >= 0 ? 'po-up' : 'po-down'}">${signed(net)}</b><span>Net P/L</span></div>`;
+
+    $('hBox').innerHTML = rows.length
+      ? `<div class="po-scroll" style="max-height:520px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Muda</th><th>Jozi</th><th>Dir</th><th>Stake</th><th>Expiry</th><th>Matokeo</th><th>P/L</th></tr></thead><tbody>${
+          rows.map((t) => {
+            const o = outcome(t);
+            const res = o === 'win' ? '<span class="po-up">✅ WIN</span>' : o === 'loss' ? '<span class="po-down">🔴 LOSS</span>' : o === 'open' ? '<span class="po-warn">⏳ wazi</span>' : '<span class="po-muted">? haijulikani</span>';
+            const p = t.profit != null ? `<span class="${t.profit >= 0 ? 'po-up' : 'po-down'}">${signed(Number(t.profit))}</span>` : '—';
+            return `<tr><td class="po-muted" style="white-space:nowrap;">${fmtDate(t.openedAt)}</td><td><b>${esc(t.pair)}</b></td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td><td>${tfLabel(t.expirySeconds)}</td><td>${res}</td><td>${p}</td></tr>`;
+          }).join('')
+        }</tbody></table></div>`
+      : '<div class="po-empty">Hakuna trades zinazolingana.</div>';
+  }
+
+  function showApp() {
+    $('poLogin').style.display = 'none'; $('poApp').style.display = 'block';
+    renderBar(); refresh();
+    clearInterval(pollTimer); pollTimer = setInterval(refresh, 10000);
+    clearInterval(tickTimer); tickTimer = setInterval(tick, 1000);
+  }
+  if (TOKEN) showApp();
+</script>
+</body>
+</html>
