@@ -15,6 +15,7 @@ Default port: 5055 (badilisha na POCKET_BRIDGE_PORT ukitaka)
 
 import os
 import re
+import sys
 import traceback
 import asyncio
 import threading
@@ -28,6 +29,13 @@ from dotenv import load_dotenv
 from pocketoptionapi_async import AsyncPocketOptionClient, OrderDirection
 
 load_dotenv()
+
+# Bridge inaendeshwa kama child process (stdout ni pipe) — bila hii, print() zinakusanywa
+# kwenye buffer na kufika kwenye logi za Railway kwa makundi dakika kadhaa baadaye.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 def _normalize_ssid(raw):
     """Ondoa nafasi/newline na nukuu za ziada ambazo mara nyingi huingia
@@ -259,6 +267,11 @@ def _order_result_payload(result):
     inatarajia, ikichukuliwa kutoka status au profit."""
     data = _to_jsonable(result)
     print(f"ℹ️  [pocket_bridge] matokeo ghafi ya order: {data!r}")  # kwa uchunguzi (win/status/profit)
+    # Maktaba ikikosa uthibitisho wa server (timeout), inaunda matokeo ya "fallback" yenye status
+    # ACTIVE milele — order hiyo kwa kawaida haikufunguliwa kabisa. Yaweke alama ili isisubiriwe bure.
+    if isinstance(data, dict) and "Timeout waiting for server confirmation" in str(data.get("error_message") or ""):
+        data["unconfirmed"] = True
+        return data
     if isinstance(data, dict) and not isinstance(data.get("win"), bool):
         status = str(data.get("status", "")).lower()
         profit = data.get("profit")
@@ -302,6 +315,51 @@ def assets():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _candle_secs(ts):
+    """Muda wa candle kama sekunde (inakubali datetime au namba)."""
+    if isinstance(ts, _dt.datetime):
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_dt.timezone.utc)
+        return ts.timestamp()
+    return float(ts)
+
+
+def _build_from_1m(client, pair, timeframe, count):
+    """Jenga candles za `timeframe` (sekunde, mfano 300) kutoka candles za 1m. Rudisha [] ikishindwa."""
+    try:
+        step = timeframe // 60
+        needed = min(1000, count * step + step * 2)
+        try:
+            raw = run_async(client.get_candles(asset=pair, timeframe=60, count=needed), timeout=60)
+        except TypeError:
+            raw = run_async(client.get_candles(asset=pair, timeframe=60), timeout=60)
+        if not raw:
+            return []
+        sample = raw[-1].timestamp
+        buckets = {}
+        for c in raw:
+            t = int(_candle_secs(c.timestamp))
+            buckets.setdefault(t - (t % timeframe), []).append((t, c))
+        keys = sorted(buckets)
+        out = []
+        for i, key in enumerate(keys):
+            if i == 0 and len(keys) > 1:
+                continue  # kundi la kwanza mara nyingi halijakamilika
+            items = [c for _, c in sorted(buckets[key], key=lambda x: x[0])]
+            time_val = _dt.datetime.fromtimestamp(key, tz=_dt.timezone.utc) if isinstance(sample, _dt.datetime) else key
+            out.append({
+                "time": time_val,
+                "open": float(items[0].open),
+                "high": max(float(c.high) for c in items),
+                "low": min(float(c.low) for c in items),
+                "close": float(items[-1].close),
+            })
+        return out
+    except Exception as e:
+        print(f"⚠️ [pocket_bridge] Kujenga candles kutoka 1m kumeshindwa ({pair} {timeframe}s): {e}")
+        return []
+
+
 @app.route("/candles", methods=["GET"])
 def candles():
     """
@@ -326,6 +384,21 @@ def candles():
             }
             for c in raw_candles
         ]
+
+        # Timeframe kubwa kuliko 1m: maktaba mara nyingi inarudisha candles za zamani (mfano saa 6
+        # zilizopita) hata soko likiwa wazi. Tukiona hivyo, jaribu kujenga candles kutoka 1m (ambazo
+        # ni mpya) na tumia hizo ikiwa ni mpya zaidi.
+        if timeframe > 60 and timeframe % 60 == 0 and raw_candles:
+            age = time.time() - _candle_secs(raw_candles[-1].timestamp)
+            if age > timeframe * 3:
+                print(f"⚠️ [pocket_bridge] {pair} {timeframe}s: candle ya mwisho ina umri wa {int(age // 60)} dk "
+                      f"(candles={len(raw_candles)}) — najaribu kuzijenga kutoka 1m")
+                agg = _build_from_1m(client, pair, timeframe, count)
+                if agg:
+                    agg_age = time.time() - _candle_secs(agg[-1]["time"])
+                    print(f"ℹ️  [pocket_bridge] {pair} {timeframe}s: zilizojengwa={len(agg)}, umri wa mwisho={int(agg_age // 60)} dk")
+                    if agg_age < age:
+                        candles_out = agg
         candles_out = candles_out[-count:]
         return jsonify({"ok": True, "pair": pair, "timeframe": timeframe, "candles": candles_out})
     except Exception as e:
@@ -356,6 +429,14 @@ def order():
             direction=po_direction,
             duration=expiry_seconds,
         ), timeout=75)
+        if "Timeout waiting for server confirmation" in str(getattr(order_result, "error_message", None) or ""):
+            print(f"⚠️ [pocket_bridge] Order {order_result.order_id} ({pair}) haikuthibitishwa na Pocket Option (timeout).")
+            return jsonify({
+                "ok": False,
+                "error": (f"Pocket Option haikuthibitisha order ya {pair} (timeout) — huenda HAIKUFUNGULIWA. "
+                          "Angalia history kwenye app ya Pocket Option kabla ya kujaribu tena. "
+                          "Ikijirudia, jaribu jozi ya _otc."),
+            }), 504
         return jsonify({
             "ok": True,
             "order_id": order_result.order_id,
