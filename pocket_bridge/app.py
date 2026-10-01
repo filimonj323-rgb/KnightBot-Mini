@@ -117,6 +117,14 @@ def run_async(coro, timeout=30):
     return future.result(timeout=timeout)
 
 
+def _err(e):
+    """Ujumbe wa error usio tupu (str(TimeoutError()) ni tupu)."""
+    if isinstance(e, TimeoutError):
+        return ("Pocket Option haikujibu kwa wakati (timeout). Angalia kwenye app ya "
+                "Pocket Option kama order imefunguliwa kabla ya kujaribu tena.")
+    return str(e) or f"{type(e).__name__} (hakuna ujumbe)"
+
+
 def _is_connected(client):
     """True kama client ipo na library inasema imeunganishwa."""
     if client is None:
@@ -346,7 +354,7 @@ def order():
             amount=amount,
             direction=po_direction,
             duration=expiry_seconds,
-        ))
+        ), timeout=75)
         return jsonify({
             "ok": True,
             "order_id": order_result.order_id,
@@ -358,7 +366,7 @@ def order():
             },
         })
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": _err(e)}), 500
 
 
 @app.route("/order/<order_id>/result", methods=["GET"])
@@ -367,10 +375,10 @@ def order_result(order_id):
         client = get_client()
         # check_order_result() inasubiri mpaka trade ikamilike na kurudisha
         # matokeo kamili (win/loss + profit); check_win() ni mbadala rahisi.
-        result = run_async(client.check_order_result(order_id))
+        result = run_async(client.check_order_result(order_id), timeout=200)
         return jsonify({"ok": True, "result": _order_result_payload(result)})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": _err(e)}), 500
 
 
 @app.route("/orders/active", methods=["GET"])
