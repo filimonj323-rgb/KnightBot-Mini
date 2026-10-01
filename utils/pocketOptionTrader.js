@@ -167,7 +167,7 @@ async function getOrderResult(orderId) {
 }
 
 // ── Ufuatiliaji wa matokeo (unaendelea hata baada ya restart) ───────────
-const SETTLE_RETRY_MS = 30 * 1000;
+const SETTLE_RETRY_MS = 10 * 1000;
 const SETTLE_GIVE_UP_MS = 15 * 60 * 1000; // baada ya expiry + dakika 15 bila jibu -> "unknown"
 const settling = new Set();
 
@@ -180,6 +180,7 @@ function scheduleSettle(orderId, expiresAt) {
       if (isFinalResult(result)) return settling.delete(orderId);
     } catch (err) {
       // bridge chini / order haijulikani kwa bridge mpya — jaribu tena hapa chini
+      console.log(`[pocket] matokeo ya order ${orderId} bado: ${err.message}`);
     }
     if (Date.now() - expiresAt > SETTLE_GIVE_UP_MS) {
       await pocketStore.recordClosedTrade(orderId, { status: 'unknown' });
@@ -187,7 +188,7 @@ function scheduleSettle(orderId, expiresAt) {
     }
     setTimeout(run, SETTLE_RETRY_MS);
   };
-  setTimeout(run, Math.max(0, expiresAt - Date.now()) + 5000);
+  setTimeout(run, Math.max(0, expiresAt - Date.now()) + 2000);
 }
 
 let tradesRestored = false;
