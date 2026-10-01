@@ -29,7 +29,18 @@ const ADX_WEAK = 20; // ADX chini ya hii = soko tulivu -> strength inapunguzwa
 // zote (mfano EURJPY) zipo kama "_otc" tu — normalizePair() inazibadilisha kiotomatiki.
 const REAL_MARKET_PAIRS = new Set(['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDUSD']);
 
-const DEFAULT_PAIRS = (process.env.POCKET_SIGNAL_PAIRS || 'EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF')
+// Forex majors (7) + minors/crosses (21) = jozi za KIPAUMBELE. Jozi nyingine zote
+// (dhahabu, crypto, indices, hisa, OTC nyingine) ni FALLBACK tu — zinachanganuliwa
+// pale ambapo majors/minors hazina signal (angalia scanPrioritized hapa chini).
+const MAJORS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDUSD'];
+const MINORS = [
+  'EURGBP', 'EURJPY', 'EURCHF', 'EURAUD', 'EURCAD', 'EURNZD',
+  'GBPJPY', 'GBPCHF', 'GBPAUD', 'GBPCAD', 'GBPNZD',
+  'AUDJPY', 'AUDCAD', 'AUDCHF', 'AUDNZD',
+  'CADJPY', 'CADCHF', 'CHFJPY',
+  'NZDJPY', 'NZDCAD', 'NZDCHF',
+];
+const DEFAULT_PAIRS = (process.env.POCKET_SIGNAL_PAIRS || [...MAJORS, ...MINORS].join(','))
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
@@ -93,9 +104,10 @@ function normalizePair(pair, now = new Date(), index = null) {
 
 // Jozi za kuchanganua kulingana na "mode":
 //   forex (default: DEFAULT_PAIRS) | otc (zote za _otc) | real (zote zisizo OTC) | all (zote)
-const SCAN_MODES = ['forex', 'otc', 'real', 'all'];
+//   smart (default: forex majors+minors kwanza, nyingine kama fallback) | forex (majors+minors tu)
+const SCAN_MODES = ['smart', 'forex', 'otc', 'real', 'all'];
 async function getUniverse(mode = 'forex') {
-  if (mode === 'forex') return DEFAULT_PAIRS;
+  if (mode === 'forex' || mode === 'smart') return DEFAULT_PAIRS;
   const list = await getAssets().catch(() => null);
   if (!list) throw new Error('Siwezi kupata orodha ya jozi kutoka bridge. Jaribu tena.');
   if (mode === 'otc') return list.filter((a) => /_otc$/i.test(a));
@@ -299,6 +311,42 @@ async function scanPairs(pairs = DEFAULT_PAIRS, timeframeSec = 60, opts = {}) {
   return { results, errors, skipped, total: pairs.length };
 }
 
+// Jozi za FALLBACK: kila asset isiyo majors/minors (OTC za jozi hizo hizo hazirudiwi
+// kwa sababu normalizePair() tayari inazichagua). Hisa (#...) zinawekwa mwisho, na
+// idadi inawekewa kikomo (POCKET_FALLBACK_MAX, default 40) ili scan isichukue muda mrefu.
+const FALLBACK_MAX = Math.max(0, parseInt(process.env.POCKET_FALLBACK_MAX || '', 10) || 40);
+async function getFallbackPairs() {
+  const list = await getAssets().catch(() => null);
+  if (!list) return [];
+  const primary = new Set(DEFAULT_PAIRS.map((p) => p.toUpperCase()));
+  return list
+    .filter((a) => !primary.has(a.replace(/_otc$/i, '').toUpperCase()))
+    .sort((a, b) => Number(a.startsWith('#')) - Number(b.startsWith('#')))
+    .slice(0, FALLBACK_MAX);
+}
+
+// Changanua forex majors+minors KWANZA. Jozi nyingine zinachanganuliwa tu kama hakuna
+// signal yenye nguvu >= minStrength kwenye forex.
+async function scanPrioritized(timeframeSec = 60, opts = {}) {
+  const minStrength = opts.minStrength ?? 50;
+  const primary = await scanPairs(DEFAULT_PAIRS, timeframeSec, opts);
+  primary.results.forEach((r) => { r.tier = 'primary'; });
+  const isHit = (r) => r.direction !== 'NEUTRAL' && r.strength >= minStrength;
+  if (primary.results.some(isHit)) return { ...primary, usedFallback: false };
+
+  const fbPairs = await getFallbackPairs();
+  if (!fbPairs.length) return { ...primary, usedFallback: false };
+  const fb = await scanPairs(fbPairs, timeframeSec, opts);
+  fb.results.forEach((r) => { r.tier = 'fallback'; });
+  return {
+    results: [...primary.results, ...fb.results].sort((a, b) => b.strength - a.strength),
+    errors: [...primary.errors, ...fb.errors],
+    skipped: primary.skipped + fb.skipped,
+    total: primary.total + fb.total,
+    usedFallback: true,
+  };
+}
+
 const EMOJI = { BUY: '🟢', SELL: '🔴', NEUTRAL: '⚪' };
 const LABEL = { BUY: 'UP (BUY) ⬆️', SELL: 'DOWN (SELL) ⬇️', NEUTRAL: 'HAKUNA SIGNAL' };
 
@@ -313,7 +361,7 @@ function formatSignal(r, { compact = false } = {}) {
     return `⚪ *${r.pair}* (${tfLabel(r.timeframeSec)}) — hakuna signal wazi sasa. Subiri.`;
   }
   if (compact) {
-    return `${EMOJI[r.direction]} *${r.pair}* ${r.direction} • ${r.grade} ${r.strength}% • expiry ${tfLabel(r.expirySec)}`;
+    return `${EMOJI[r.direction]} *${r.pair}* ${r.direction} • ${r.grade} ${r.strength}% • expiry ${tfLabel(r.expirySec)}${r.tier === 'fallback' ? ' • fallback' : ''}`;
   }
   const lines = [
     `${EMOJI[r.direction]} *SIGNAL — ${r.pair}*`,
@@ -323,6 +371,7 @@ function formatSignal(r, { compact = false } = {}) {
     `⏱️ Expiry: ${tfLabel(r.expirySec)} (ingia kwenye candle inayofuata)`,
     `💱 Bei: ${Number(r.price).toFixed(5)}`,
   ];
+  if (r.tier === 'fallback') lines.push('🔁 _Fallback — forex majors/minors hazikuwa na signal, hii inatoka jozi nyingine._');
   if (r.rsi != null) lines.push(`📈 RSI: ${r.rsi.toFixed(1)}${r.adx != null ? ` • ADX: ${r.adx.toFixed(1)}` : ''}`);
   if (r.weakMarket) lines.push('⚠️ Soko tulivu (ADX ndogo) — nguvu imepunguzwa.');
   lines.push('', '*Sababu:*', ...r.notes.map((n) => `• ${n}`), '', formatBacktest(r.backtest));
@@ -330,9 +379,10 @@ function formatSignal(r, { compact = false } = {}) {
   return lines.join('\n');
 }
 
-function formatScan({ results, errors, skipped = 0, total }, timeframeSec, minStrength = 50, maxShow = 10) {
+function formatScan({ results, errors, skipped = 0, total, usedFallback = false }, timeframeSec, minStrength = 50, maxShow = 10) {
   const hits = results.filter((r) => r.direction !== 'NEUTRAL' && r.strength >= minStrength);
   const lines = [`🔎 *Scan ya Pocket Option (${tfLabel(timeframeSec)})*`, ''];
+  if (usedFallback) lines.push('ℹ️ Forex majors/minors hazikuwa na signal — nimeongeza jozi nyingine (fallback).', '');
   if (!hits.length) lines.push('Hakuna signal yenye nguvu ya kutosha sasa hivi. Jaribu tena baada ya candle inayofuata.');
   else {
     hits.slice(0, maxShow).forEach((r) => lines.push(formatSignal(r, { compact: true })));
@@ -346,6 +396,8 @@ function formatScan({ results, errors, skipped = 0, total }, timeframeSec, minSt
 }
 
 module.exports = {
+  MAJORS,
+  MINORS,
   DEFAULT_PAIRS,
   SCAN_MODES,
   getUniverse,
@@ -357,6 +409,7 @@ module.exports = {
   backtest,
   analyzePair,
   scanPairs,
+  scanPrioritized,
   formatSignal,
   formatScan,
 };
