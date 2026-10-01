@@ -33,6 +33,20 @@ const MAX_SENT_CACHE = 200;
 const MAX_PER_CYCLE = 5; // signals za juu tu kwa kila mzunguko (kuzuia spam)
 const AUTO_KEY_PREFIX = 'autosignal:'; // po_settings key: autosignal:<jid>
 
+// Signals za hivi karibuni zilizotumwa na auto-signal (kumbukumbu ya RAM) —
+// zinaonyeshwa kwenye pocketoption.html bila kuhitaji command. Zinapotea restart.
+const recentSignals = [];
+const MAX_RECENT = 60;
+function pushRecent(r) {
+  recentSignals.unshift({
+    at: Date.now(), pair: r.pair, direction: r.direction, strength: r.strength,
+    grade: r.grade, timeframeSec: r.timeframeSec, expirySec: r.expirySec,
+    price: r.price, rsi: r.rsi, adx: r.adx, notes: r.notes, tier: r.tier || 'primary',
+    backtest: r.backtest,
+  });
+  if (recentSignals.length > MAX_RECENT) recentSignals.length = MAX_RECENT;
+}
+
 // Tenganisha mode na timeframe kutoka args (mpangilio wowote): ["otc","5m"] au ["5m","otc"]
 function parseModeTf(args) {
   let mode = 'smart';
@@ -74,6 +88,7 @@ function scheduleAuto(sock, jid, job) {
           if (job.sent.has(key)) continue;
           job.sent.add(key);
           if (job.sent.size > MAX_SENT_CACHE) job.sent.delete(job.sent.values().next().value);
+          pushRecent(r);
           await (global.currentSock || sock).sendMessage(jid, { text: formatSignal(r) });
           sentNow++;
         }
@@ -158,8 +173,30 @@ async function restoreAutoJobs(sock) {
   return restored;
 }
 
+// ── API kwa dashboard (pocketoption.html) — sawa na `.posignal auto ...` ──
+function getAutoStatus() {
+  return [...autoJobs.entries()].map(([jid, j]) => ({ jid, tf: j.tf, minStrength: j.minStrength, mode: j.mode }));
+}
+async function startAutoFromDashboard(sock, jid, { tf, minStrength, mode }) {
+  stopAuto(jid);
+  const job = { tf, minStrength, mode, sent: new Set(), timer: null };
+  autoJobs.set(jid, job);
+  scheduleAuto(sock, jid, job);
+  await pocketStore.saveSetting(AUTO_KEY_PREFIX + jid, { tf, minStrength, mode });
+  return { tf, minStrength, mode };
+}
+async function stopAutoFromDashboard(jid) {
+  await pocketStore.deleteSetting(AUTO_KEY_PREFIX + jid);
+  return stopAuto(jid);
+}
+function getRecentSignals() { return recentSignals.slice(); }
+
 module.exports = {
   restoreAutoJobs,
+  getAutoStatus,
+  startAutoFromDashboard,
+  stopAutoFromDashboard,
+  getRecentSignals,
   name: 'posignal',
   aliases: ['posig', 'posignals'],
   category: 'utility',
