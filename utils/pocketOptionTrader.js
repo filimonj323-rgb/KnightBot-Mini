@@ -71,12 +71,45 @@ async function getAssets() {
 }
 
 /**
+ * Linganisha jina la jozi na orodha halisi ya assets ya Pocket Option
+ * (majina ni case-sensitive: "USDJPY", "EURUSD_otc"). Mtumiaji akiandika
+ * "usdjpy" au "EURUSD_OTC" tunalirekebisha badala ya kupata "Invalid asset".
+ * Kama jina halipo kabisa, tunatupa error yenye mapendekezo.
+ */
+async function resolveAsset(pair) {
+  const raw = String(pair || '').trim();
+  if (!raw) throw new Error('pair inahitajika');
+  const norm = (x) => String(x).replace(/[^a-z0-9]/gi, '').toLowerCase();
+  let list;
+  try {
+    list = await getAssets();
+  } catch (err) {
+    // Orodha haipatikani — angalau sahihisha muundo wa kawaida.
+    const isOtc = /otc$/i.test(raw);
+    const base = norm(raw).replace(/otc$/, '').toUpperCase();
+    return isOtc ? `${base}_otc` : base;
+  }
+  const exact = list.find((a) => a === raw);
+  if (exact) return exact;
+  const wanted = norm(raw);
+  const ci = list.find((a) => norm(a) === wanted);
+  if (ci) return ci;
+  const stem = wanted.replace(/otc$/, '');
+  const suggestions = list.filter((a) => norm(a).includes(stem)).slice(0, 6);
+  throw new Error(
+    `Jozi "${raw}" haipo kwenye orodha ya Pocket Option.` +
+      (suggestions.length ? ` Labda: ${suggestions.join(', ')}` : '')
+  );
+}
+
+/**
  * @param {string} pair - mfano "EURUSD" au "EURUSD_otc"
  * @param {number} timeframeSeconds - mfano 60 (1min), 300 (5min)
  * @param {number} count - idadi ya candles za kurudi nyuma
  * @returns {Promise<{time:number, open:number, high:number, low:number, close:number}[]>}
  */
 async function getCandles(pair, timeframeSeconds = 60, count = 100) {
+  pair = await resolveAsset(pair);
   const query = new URLSearchParams({ pair, timeframe: timeframeSeconds, count });
   const data = await bridgeFetch(`/candles?${query.toString()}`);
   return data.candles;
@@ -88,6 +121,7 @@ async function getCandles(pair, timeframeSeconds = 60, count = 100) {
  */
 async function placeOrder({ pair, direction, amount, expirySeconds }) {
   if (!pair) throw new Error('pair inahitajika');
+  pair = await resolveAsset(pair);
   if (!(amount > 0)) throw new Error('amount lazima iwe zaidi ya 0');
   if (!(expirySeconds > 0)) throw new Error('expirySeconds lazima iwe zaidi ya 0');
 
