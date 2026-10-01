@@ -398,6 +398,32 @@ function bucketFor(strength) {
  * kwa mpangilio wa bucket ya juu kwenda chini, ikifuatiwa na safu ya
  * "OVERALL" (jumla ya buckets zote).
  */
+/**
+ * Historia ya trade zilizofungwa (mpya kwanza) kwa ajili ya tab ya
+ * "History" kwenye fxtrading.html.
+ */
+async function getTradeHistory(limit = 200) {
+  await fxTradesDb.initSchema();
+  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
+  const result = await fxTradesDb.query(
+    `SELECT contractId, code, direction, stake, buyPrice, sellPrice, profit, openedAt, closedAt, signalStrength
+       FROM fx_auto_trades WHERE closedAt IS NOT NULL ORDER BY closedAt DESC LIMIT ?`,
+    [lim]
+  );
+  return (result.rows || []).map((r) => ({
+    contractId: String(r.contractId),
+    code: r.code,
+    direction: r.direction,
+    stake: Number(r.stake) || 0,
+    buyPrice: r.buyPrice === null ? null : Number(r.buyPrice),
+    sellPrice: r.sellPrice === null ? null : Number(r.sellPrice),
+    profit: Number(r.profit) || 0,
+    openedAt: Number(r.openedAt) || null,
+    closedAt: Number(r.closedAt) || null,
+    signalStrength: r.signalStrength === null || r.signalStrength === undefined ? null : Number(r.signalStrength),
+  }));
+}
+
 async function getWinRateStats() {
   try {
     await fxTradesDb.initSchema();
@@ -1277,6 +1303,7 @@ module.exports = {
   setStakeUsd,
   setTrailingEnabled,
   getWinRateStats,
+  getTradeHistory,
   PAIRS,
   STRENGTH_THRESHOLD,
   openAutoTrades,
