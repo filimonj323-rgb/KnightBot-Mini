@@ -12,6 +12,8 @@
 // Bridge iko ndani ya container MOJA ile ile (Njia A — child process
 // inayoanzishwa na index.js), kwa hiyo URL ni localhost ya kudumu — si
 // env var tena. Port lazima ilingane na pocket_bridge/app.py (5055).
+const pocketStore = require('./pocketStore');
+
 const BRIDGE_URL = 'http://127.0.0.1:5055';
 // Secret inayounganisha Node↔Python — hii pekee inabaki env (Railway)
 // kwa sababu ni sensitive na lazima ilingane na POCKET_BRIDGE_SECRET
@@ -134,12 +136,73 @@ async function placeOrder({ pair, direction, amount, expirySeconds }) {
       expiry_seconds: expirySeconds,
     }),
   });
+
+  // Hifadhi trade kwenye database (Turso) ili restart isiipoteze, kisha
+  // anzisha ufuatiliaji wa matokeo yake itakapofika expiry.
+  const direct = direction === 'SELL' ? 'SELL' : 'BUY';
+  await pocketStore.recordOpenTrade({ orderId: data.order_id, pair, direction: direct, stake: amount, expirySeconds });
+  scheduleSettle(String(data.order_id), Date.now() + expirySeconds * 1000);
+
   return { orderId: data.order_id, raw: data.raw };
 }
 
+// Matokeo ni "ya mwisho" pale bridge inapoweza kubaini win/loss (boolean).
+const isFinalResult = (r) => r && typeof r.win === 'boolean';
+
 async function getOrderResult(orderId) {
+  // Trade iliyokwisha kufungwa na kuhifadhiwa (hata kabla ya restart) —
+  // rudisha matokeo yaliyohifadhiwa badala ya kuuliza bridge tena.
+  const stored = await pocketStore.getClosedResult(orderId);
+  if (stored) return stored;
+
   const data = await bridgeFetch(`/order/${encodeURIComponent(orderId)}/result`);
+  if (isFinalResult(data.result)) {
+    await pocketStore.recordClosedTrade(orderId, {
+      win: data.result.win,
+      profit: data.result.profit ?? data.result.pnl,
+      result: data.result,
+    });
+  }
   return data.result;
+}
+
+// ── Ufuatiliaji wa matokeo (unaendelea hata baada ya restart) ───────────
+const SETTLE_RETRY_MS = 30 * 1000;
+const SETTLE_GIVE_UP_MS = 15 * 60 * 1000; // baada ya expiry + dakika 15 bila jibu -> "unknown"
+const settling = new Set();
+
+function scheduleSettle(orderId, expiresAt) {
+  if (settling.has(orderId)) return;
+  settling.add(orderId);
+  const run = async () => {
+    try {
+      const result = await getOrderResult(orderId); // inahifadhi yenyewe kama ni ya mwisho
+      if (isFinalResult(result)) return settling.delete(orderId);
+    } catch (err) {
+      // bridge chini / order haijulikani kwa bridge mpya — jaribu tena hapa chini
+    }
+    if (Date.now() - expiresAt > SETTLE_GIVE_UP_MS) {
+      await pocketStore.recordClosedTrade(orderId, { status: 'unknown' });
+      return settling.delete(orderId);
+    }
+    setTimeout(run, SETTLE_RETRY_MS);
+  };
+  setTimeout(run, Math.max(0, expiresAt - Date.now()) + 5000);
+}
+
+let tradesRestored = false;
+/**
+ * Inaitwa kwenye startup (index.js): inarejesha trades zilizokuwa wazi
+ * kabla ya restart na kuendelea kufuatilia matokeo yao. Inaitwa mara moja tu
+ * hata 'open' ya WhatsApp ikirudiwa baada ya reconnect.
+ */
+async function restoreOpenTrades() {
+  if (tradesRestored) return 0;
+  tradesRestored = true;
+  const open = await pocketStore.getOpenTrades();
+  for (const t of open) scheduleSettle(String(t.orderId), Number(t.expiresAt));
+  if (open.length) console.log(`[pocket] Trades ${open.length} zilizokuwa wazi zimerejeshwa kutoka database.`);
+  return open.length;
 }
 
 /**
@@ -164,6 +227,7 @@ module.exports = {
   getAssets,
   placeOrder,
   getOrderResult,
+  restoreOpenTrades,
   getSignal,
   BRIDGE_URL,
 };
