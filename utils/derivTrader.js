@@ -68,105 +68,59 @@ const pending = new Map(); // req_id -> { resolve, reject }
 // kama pong haijarudi ndani ya sekunde 20, tunaua (terminate) socket
 // iliyokufa ili ensureConnected() iunganishe upya OTOMATIKI bila kuhitaji
 // restart ya bot nzima.
-const HEARTBEAT_INTERVAL_MS = 60 * 1000;
+const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const PONG_TIMEOUT_MS = 20 * 1000;
 let heartbeatTimer = null;
+let pongTimeoutTimer = null; // inaanza kila ping inapotumwa, inafutwa pong ikirudi
 let lastPongAt = 0;
+
+function clearPongTimeout() {
+  if (pongTimeoutTimer) {
+    clearTimeout(pongTimeoutTimer);
+    pongTimeoutTimer = null;
+  }
+}
 
 function stopHeartbeat() {
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
   }
+  clearPongTimeout();
 }
 
+// BUG ILIYOREKEBISHWA: toleo la awali lililinganisha "sasa - lastPongAt >
+// 20s" kwenye kila tick ya dakika 1 — lakini pong ya mwisho ilikuwa
+// imerudi ~dakika 1 iliyopita (tick iliyopita), kwa hiyo sharti hilo
+// lilikuwa kweli KILA MARA hata muunganiko ukiwa mzima, na socket
+// iliuawa kila baada ya dakika ~1. Sasa: kila ping ina timer yake ya
+// sekunde 20 — pong ikirudi timer inafutwa; isiporudi, ndipo tunaua socket.
 function startHeartbeat() {
   stopHeartbeat();
   lastPongAt = Date.now();
+  const sock = ws;
   heartbeatTimer = setInterval(() => {
-    if (!ws || !wsReady) return;
-    if (Date.now() - lastPongAt > PONG_TIMEOUT_MS) {
+    if (!ws || ws !== sock || !wsReady) return;
+    if (pongTimeoutTimer) return; // ping iliyotangulia bado inasubiriwa
+    try {
+      sock.ping();
+    } catch (err) {
+      console.error('[derivTrader] Imeshindwa kutuma ping:', err.message);
+      return;
+    }
+    pongTimeoutTimer = setTimeout(() => {
+      pongTimeoutTimer = null;
+      if (ws !== sock || !wsReady) return;
       console.error('[derivTrader] 💀 Hakuna pong kwa zaidi ya sekunde 20 — muunganiko "zombie", naukatisha ili uunganishwe upya moja kwa moja.');
       try {
-        ws.terminate(); // inalazimisha 'close' event mara moja (si .close() ya "graceful" inayoweza kunyamaza)
+        sock.terminate(); // inalazimisha 'close' event mara moja
       } catch (err) {
         console.error('[derivTrader] Imeshindwa ku-terminate socket iliyokufa:', err.message);
       }
-      return;
-    }
-    try {
-      ws.ping();
-    } catch (err) {
-      console.error('[derivTrader] Imeshindwa kutuma ping:', err.message);
-    }
+    }, PONG_TIMEOUT_MS);
   }, HEARTBEAT_INTERVAL_MS);
 }
 
-function checkEnv() {
-  const missing = [];
-  if (!APP_ID) missing.push('DERIV_APP_ID');
-  if (!API_TOKEN) missing.push('DERIV_API_TOKEN');
-  if (missing.length) {
-    throw new Error(`Env zifuatazo hazipo: ${missing.join(', ')}`);
-  }
-}
-
-let cachedAccountId = ACCOUNT_ID || null;
-
-// Badala ya kutegemea loginid ya kawaida (VRTC.../CR...) ambayo SI sahihi
-// kwenye mfumo huu mpya ("Options trading account"), tunauliza Deriv
-// yenyewe ni account ID gani ya kutumia — hii ndiyo sababu ya ile "404"
-// tuliyoiona (DERIV_ACCOUNT_ID iliyokisiwa haikutambulika).
-async function resolveAccountId() {
-  if (cachedAccountId) return cachedAccountId;
-
-  const { data } = await axios.get(`${API_BASE}/trading/v1/options/accounts`, {
-    headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
-      'Deriv-App-ID': APP_ID,
-    },
-    timeout: REST_TIMEOUT_MS,
-  });
-
-  const accounts = data?.data || data?.accounts || [];
-  if (!Array.isArray(accounts) || !accounts.length) {
-    throw new Error('Hakuna Options trading account iliyopatikana kwenye Deriv (angalia DERIV_APP_ID/DERIV_API_TOKEN)');
-  }
-
-  const acc = accounts.find((a) => a.is_virtual || a.demo || a.account_type === 'demo') || accounts[0];
-  cachedAccountId = acc.account_id || acc.id;
-  if (!cachedAccountId) {
-    throw new Error('Account ID haikupatikana kwenye response ya Deriv (muundo umebadilika?)');
-  }
-  return cachedAccountId;
-}
-
-function rejectAllPending(err) {
-  for (const [, p] of pending) p.reject(err);
-  pending.clear();
-}
-
-// Hatua ya 1 (REST): pata WebSocket URL yenye OTP tayari imethibitishwa.
-async function fetchOtpWsUrl() {
-  const accountId = await resolveAccountId();
-  const { data } = await axios.post(
-    `${API_BASE}/trading/v1/options/accounts/${accountId}/otp`,
-    {},
-    {
-      headers: {
-        Authorization: `Bearer ${API_TOKEN}`,
-        'Deriv-App-ID': APP_ID,
-      },
-      timeout: REST_TIMEOUT_MS,
-    }
-  );
-  const url = data?.data?.url;
-  if (!url) throw new Error('Deriv haikurudisha WebSocket URL (otp)');
-  return url;
-}
-
-// Hatua ya 2: unganisha kwenye URL hiyo (tayari imethibitishwa — hakuna
-// "authorize" inayohitajika).
 function connectWs(wsUrl) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -181,9 +135,12 @@ function connectWs(wsUrl) {
 
     ws.on('pong', () => {
       lastPongAt = Date.now();
+      clearPongTimeout();
     });
 
     ws.on('message', (raw) => {
+      lastPongAt = Date.now();
+      clearPongTimeout();
       let msg;
       try {
         msg = JSON.parse(raw);
