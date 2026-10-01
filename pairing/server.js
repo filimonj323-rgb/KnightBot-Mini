@@ -581,6 +581,13 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, stats });
       }
 
+      // Historia ya trade zilizofungwa (auto-trader) — tab ya History.
+      if (req.method === 'GET' && req.url.split('?')[0] === '/api/admin/fx/history') {
+        const q = new URL(req.url, 'http://x').searchParams;
+        const trades = await autoTrader.getTradeHistory(q.get('limit') || 200);
+        return sendJson(res, 200, { ok: true, trades });
+      }
+
       // Washa/zima trailing stop (breakeven-lock + profit-lock) — sawa na
       // command ya WhatsApp .fxtrailing (commands/owner/fxtrailing.js).
       if (req.method === 'POST' && req.url === '/api/admin/fx/trailing') {
