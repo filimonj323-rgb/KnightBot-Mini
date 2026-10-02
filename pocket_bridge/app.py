@@ -364,6 +364,59 @@ def _install_server_msg_logger():
 _install_server_msg_logger()
 
 
+def _page_1m_to_tf(client, pair, timeframe, need):
+    """Jenga candles za `timeframe` kwa kuomba candles za 1m (ambazo ni sahihi) kurasa kadhaa kwa
+    kutumia `end_time`, kisha kuziunganisha. Inajithibitisha: ikiona dalili yoyote ya data mbovu
+    (end_time haifanyi kazi, muda wa baadaye, n.k.) inarudisha [] ili tusilishe data mbaya."""
+    step = timeframe // 60
+    pages = min(12, -(-(need * step) // 90) + 1)
+    now = time.time()
+    seen = {}
+    end = now
+    for i in range(pages):
+        end_dt = _dt.datetime.fromtimestamp(end, tz=_dt.timezone.utc).replace(tzinfo=None)  # UTC isiyo na tz
+        try:
+            raw = run_async(client.get_candles(asset=pair, timeframe=60, count=100, end_time=end_dt), timeout=40)
+        except TypeError:
+            print("⚠️ [pocket_bridge] get_candles haikubali end_time — kurasa za 1m haziwezekani")
+            return []
+        if not raw:
+            break
+        stamps = [int(_candle_secs(c.timestamp)) for c in raw]
+        before = len(seen)
+        for t, c in zip(stamps, raw):
+            seen[t] = c
+        if len(seen) == before:
+            print(f"⚠️ [pocket_bridge] {pair}: ukurasa {i + 1} haukuleta candles mpya — end_time haifanyi kazi")
+            break
+        end = min(stamps) - 1
+    if len(seen) < 2 * step:
+        return []
+    ts_sorted = sorted(seen)
+    if ts_sorted[-1] > now + 90:  # candle ya baadaye = data mbovu
+        print(f"⚠️ [pocket_bridge] {pair}: candles za 1m zina muda wa baadaye — nimezikataa")
+        return []
+    sample = seen[ts_sorted[-1]].timestamp
+    buckets = {}
+    for t in ts_sorted:
+        buckets.setdefault(t - (t % timeframe), []).append(seen[t])
+    keys = sorted(buckets)
+    out = []
+    for i, key in enumerate(keys):
+        if i == 0 and len(keys) > 1:
+            continue  # kundi la kwanza mara nyingi halijakamilika
+        items = buckets[key]
+        time_val = _dt.datetime.fromtimestamp(key, tz=_dt.timezone.utc) if isinstance(sample, _dt.datetime) else key
+        out.append({
+            "time": time_val,
+            "open": float(items[0].open),
+            "high": max(float(c.high) for c in items),
+            "low": min(float(c.low) for c in items),
+            "close": float(items[-1].close),
+        })
+    return out
+
+
 @app.route("/candles", methods=["GET"])
 def candles():
     """
@@ -390,12 +443,23 @@ def candles():
         ]
 
         # Timeframe kubwa kuliko 1m: maktaba hii inarudisha candles za zamani (au zenye muda usio sahihi)
-        # hata soko likiwa wazi. Ni tatizo la maktaba — andika onyo moja tu ili lionekane kwenye logi.
-        if timeframe > 60 and raw_candles:
-            age = time.time() - _candle_secs(raw_candles[-1].timestamp)
+        # hata soko likiwa wazi. Tunajaribu kuzijenga kutoka kurasa za 1m; tukishindwa, tunaacha kama zilivyo.
+        if timeframe > 60 and timeframe % 60 == 0 and raw_candles:
+            now_ts = time.time()
+            age = now_ts - _candle_secs(raw_candles[-1].timestamp)
             if age > timeframe * 3:
-                print(f"⚠️ [pocket_bridge] {pair} {timeframe}s: maktaba imerudisha candles za zamani "
-                      f"(umri {int(age // 60)} dk) — timeframe zaidi ya 1m haiaminiki, tumia 1m au 30s.")
+                first_ts = _candle_secs(raw_candles[0].timestamp)
+                last_ts = _candle_secs(raw_candles[-1].timestamp)
+                print(f"⚠️ [pocket_bridge] {pair} {timeframe}s: candles za zamani — n={len(raw_candles)} "
+                      f"ya kwanza={_dt.datetime.fromtimestamp(first_ts, tz=_dt.timezone.utc):%m-%d %H:%M} "
+                      f"ya mwisho={_dt.datetime.fromtimestamp(last_ts, tz=_dt.timezone.utc):%m-%d %H:%M} "
+                      f"sasa={_dt.datetime.fromtimestamp(now_ts, tz=_dt.timezone.utc):%m-%d %H:%M} UTC — najaribu kurasa za 1m")
+                agg = _page_1m_to_tf(client, pair, timeframe, min(count, 60))
+                if agg:
+                    agg_age = now_ts - _candle_secs(agg[-1]["time"])
+                    print(f"ℹ️  [pocket_bridge] {pair} {timeframe}s: zilizojengwa={len(agg)}, umri wa mwisho={int(agg_age // 60)} dk")
+                    if 0 <= agg_age <= timeframe * 3:
+                        candles_out = agg
         candles_out = candles_out[-count:]
         return jsonify({"ok": True, "pair": pair, "timeframe": timeframe, "candles": candles_out})
     except Exception as e:
