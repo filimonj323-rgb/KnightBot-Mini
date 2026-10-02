@@ -49,8 +49,8 @@ module.exports = {
   TRIAL_WARNING_HOURS: 48,
 
   // ── ClickPesa (Dashboard -> Settings -> Developers -> Create Application) ──
-  CLICKPESA_CLIENT_ID: 'IDJwwKwcQaNUPWx5OTCjFaCPOuaGjeTG',
-  CLICKPESA_API_KEY: 'SKRYiIhnbJNt2cMD5uZLPo7tos08pd37tm03JrnmeW',
+  CLICKPESA_CLIENT_ID: 'IDbe0sqCEWvsLTZAAV9blyrZVQEepwHL',
+  CLICKPESA_API_KEY: 'SKCTI3z8ue17sUo0IUJpBchPODETua1Gbhr29H06k8',
   // Checksum key (Dashboard -> Settings -> Developers -> application yako ->
   // Checksum). Hii ni key TOFAUTI na API key — inatumika kusaini maombi
   // yanayotoka na kuthibitisha webhook zinazoingia kutoka ClickPesa.
