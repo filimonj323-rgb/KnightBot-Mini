@@ -35,6 +35,7 @@
     <div class="po-tabs" id="poTabs">
       <div class="po-tab active" data-pane="overview"><em>🏠</em>Muhtasari</div>
       <div class="po-tab" data-pane="signals"><em>📡</em>Signals</div>
+      <div class="po-tab" data-pane="auto"><em>🤖</em>Auto-Trade</div>
       <div class="po-tab" data-pane="trade"><em>🎯</em>Trade</div>
       <div class="po-tab" data-pane="history"><em>🕘</em>History</div>
     </div>
@@ -46,7 +47,11 @@
         <div id="bridgeBox"><div class="po-empty">Inapakia...</div></div>
       </div>
       <div class="po-card">
-        <h3><span>🤖 Auto-Signal (WhatsApp ya owner)</span></h3>
+        <h3><span>🤖 Auto-Trade</span><button class="po-btn small" onclick="openPane('auto')">Dhibiti →</button></h3>
+        <div id="atMini"><div class="po-empty">Inapakia...</div></div>
+      </div>
+      <div class="po-card">
+        <h3><span>📡 Auto-Signal (WhatsApp ya owner)</span></h3>
         <div id="autoBox"></div>
         <div class="po-grid3" style="margin-top:12px;">
           <div><label class="po-label">Timeframe</label>
@@ -103,6 +108,65 @@
       </div>
     </div>
 
+    <!-- AUTO-TRADE -->
+    <div class="po-pane" id="pane-auto">
+      <div class="po-card">
+        <h3><span>🤖 Auto-Trade</span><button class="po-btn small" onclick="refresh()">🔄 Sasisha</button></h3>
+        <div id="atStatus"><div class="po-empty">Inapakia...</div></div>
+        <div class="po-grid2" style="margin-top:12px;">
+          <button class="po-btn up" id="atOn" onclick="autoOn()">▶️ Washa</button>
+          <button class="po-btn down" id="atOff" onclick="autoAction('off')">⏹ Zima</button>
+        </div>
+        <button class="po-btn small" id="atResume" style="display:none;margin-top:10px;width:100%;" onclick="autoAction('resume')">⏯️ Ondoa pause sasa</button>
+        <div class="po-toast" id="atToast"></div>
+        <div class="po-note">Bot inachanganua kila candle ikifungwa, na signal STRONG ikipita vichujio vyote inafungua trade yenyewe. Kuzima hakufungi trades zilizo wazi — zinaendelea kufuatiliwa hadi matokeo. Akaunti REAL inahitaji uthibitisho. ⚠️ Hakuna signal inayohakikisha faida (break-even ≈ 54% kwa payout 85%).</div>
+      </div>
+
+      <div class="po-card">
+        <h3><span>🧯 Circuit Breakers & Takwimu</span></h3>
+        <div class="po-sum" id="atSum"></div>
+        <div id="atBreak"></div>
+      </div>
+
+      <div class="po-card">
+        <h3><span>⚙️ Mipangilio</span></h3>
+        <div class="po-grid3">
+          <div><label class="po-label">Stake ($)</label><input class="po-input at-f" id="fStake" type="number" min="1" step="0.5" /></div>
+          <div><label class="po-label">Nguvu ya chini (%)</label><input class="po-input at-f" id="fStrength" type="number" min="50" max="100" /></div>
+          <div><label class="po-label">Timeframe = Expiry</label>
+            <select class="po-select at-f" id="fTf"><option value="30s">30s</option><option value="1m">1m</option><option value="3m">3m</option><option value="5m">5m</option></select></div>
+          <div><label class="po-label">Jozi (mode)</label><select class="po-select at-f" id="fMode"></select></div>
+          <div><label class="po-label">Trades wazi za juu</label><input class="po-input at-f" id="fMax" type="number" min="1" max="10" /></div>
+          <div><label class="po-label">Trades za juu / siku</label><input class="po-input at-f" id="fPerday" type="number" min="1" max="200" /></div>
+          <div><label class="po-label">Kikomo hasara / siku ($)</label><input class="po-input at-f" id="fMaxloss" type="number" min="1" step="1" /></div>
+          <div><label class="po-label">Hasara mfululizo → cooldown</label><input class="po-input at-f" id="fLosses" type="number" min="1" max="20" /></div>
+          <div><label class="po-label">Cooldown (dakika)</label><input class="po-input at-f" id="fCooldown" type="number" min="5" max="1440" /></div>
+          <div><label class="po-label">Exposure ya currency (1-5)</label><input class="po-input at-f" id="fExposure" type="number" min="1" max="5" /></div>
+          <div><label class="po-label">Backtest ya chini (%) · 0 = zima</label><input class="po-input at-f" id="fBacktest" type="number" min="0" max="100" /></div>
+          <div><label class="po-label">News filter</label>
+            <select class="po-select at-f" id="fNews"><option value="on">ON</option><option value="off">OFF</option></select></div>
+          <div><label class="po-label">Dry-run (hakuna trade halisi)</label>
+            <select class="po-select at-f" id="fDry"><option value="off">OFF — trade halisi</option><option value="on">ON — ujumbe tu</option></select></div>
+        </div>
+        <div class="po-grid2" style="margin-top:12px;">
+          <button class="po-btn primary" id="atSave" onclick="saveAutoSettings()">💾 Hifadhi mipangilio</button>
+          <button class="po-btn small" onclick="resetAutoForm()">↩️ Rudisha za sasa</button>
+        </div>
+        <div class="po-toast" id="atSetToast"></div>
+        <div class="po-note">Mabadiliko yanatumika kwa trades MPYA, yanahifadhiwa kwenye database, na yanakuja WhatsApp kama taarifa. Timeframe ya 1m ndiyo ya kuaminika zaidi kwenye bridge hii. Anza na stake ndogo + Dry-run ON.</div>
+      </div>
+
+      <div class="po-card">
+        <h3><span>🤖 Trades za Auto</span><span class="po-muted" id="atTradeCount"></span></h3>
+        <div id="atTrades"></div>
+      </div>
+
+      <div class="po-card">
+        <h3><span>📜 Shughuli za Hivi Karibuni</span></h3>
+        <div id="atEvents"></div>
+      </div>
+    </div>
+
     <!-- TRADE -->
     <div class="po-pane" id="pane-trade">
       <div class="po-card">
@@ -147,7 +211,8 @@
   // Lazima ilingane na API_BASE ya admin.html / fxtrading.html
   const API_BASE = 'https://botkuusite.up.railway.app';
   let TOKEN = sessionStorage.getItem('adminToken') || '';
-  let state = { bridge: null, balance: null, trades: [], auto: [], pairs: [], modes: [] };
+  let state = { bridge: null, balance: null, trades: [], auto: [], pairs: [], modes: [], at: null, atStats: null };
+  let atDirty = false;
   let hResult = 'all', hPair = 'all';
   let pollTimer = null, tickTimer = null;
 
@@ -201,11 +266,12 @@
       const d = await api('/api/admin/po/overview');
       state.bridge = d.bridge; state.balance = d.balance; state.trades = d.trades || [];
       state.auto = d.auto || []; state.pairs = d.pairs || []; state.modes = d.scanModes || [];
+      state.at = d.autotrade || null; state.atStats = d.autotradeStats || null;
       fillStatic();
     } catch (e) {
       state.bridge = { ok: false, error: e.message };
     }
-    renderBar(); renderBridge(); renderAuto(); renderOpen(); renderHistory();
+    renderBar(); renderBridge(); renderAuto(); renderAutoTrade(); renderOpen(); renderHistory();
     refreshFeed();
     refreshing = false;
   }
@@ -215,7 +281,7 @@
     if (staticFilled) return; staticFilled = true;
     fillPairSelects();
     const modeOpts = state.modes.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
-    $('aMode').innerHTML = modeOpts; $('scMode').innerHTML = modeOpts;
+    $('aMode').innerHTML = modeOpts; $('scMode').innerHTML = modeOpts; $('fMode').innerHTML = modeOpts;
   }
 
   // ── Dropdown ya jozi (Signal + Trade) ──────────────────────────────
@@ -264,6 +330,7 @@
       <div class="po-chip"><b>${bal}</b><span>Balance</span></div>
       <div class="po-chip"><b class="${pl >= 0 ? 'po-up' : 'po-down'}">${signed(pl)}</b><span>P/L leo</span></div>
       <div class="po-chip"><b>${open}</b><span>Wazi</span></div>
+      <div class="po-chip"><b>${state.at ? (state.at.enabled ? (state.at.isPaused ? '<span class="po-warn">⏸ Pause</span>' : '<span class="po-up">🤖 ON</span>') : '<span class="po-muted">OFF</span>') : '—'}</b><span>Auto-Trade</span></div>
       <div class="po-chip"><b>${wr == null ? '—' : wr + '%'}</b><span>Win rate</span></div>`;
   }
 
@@ -293,6 +360,130 @@
       state.auto = d.auto || []; renderAuto();
       toast('autoToast', action === 'on' ? '✅ Auto-signal imewashwa.' : '🛑 Auto-signal imezimwa.', true);
     } catch (e) { toast('autoToast', '❌ ' + e.message, false); }
+  }
+
+  // ── Auto-Trade ─────────────────────────────────────────────────────
+  const PAUSE_TEXT = { daily_loss_limit: 'kikomo cha hasara ya siku kimefikiwa', consecutive_losses: 'cooldown baada ya hasara mfululizo', order_failures: 'orders zimeshindwa mfululizo (pause fupi)' };
+  const EV_ICON = { open: '🎯', skip: '⏭️', dry: '🧪', fail: '⚠️', win: '✅', loss: '🔴', pause: '⏸️', resume: '▶️', on: '🟢', off: '🛑' };
+  const rel = (ms) => { if (!ms) return '—'; const s = Math.round((Date.now() - ms) / 1000); if (s < 5) return 'sasa hivi'; if (s < 60) return s + 's zilizopita'; const m = Math.round(s / 60); return m < 60 ? 'dk ' + m + ' zilizopita' : 'saa ' + Math.floor(m / 60) + ' zilizopita'; };
+  const inMins = (ms) => { if (!ms) return '—'; const s = Math.max(0, Math.round((ms - Date.now()) / 1000)); if (s < 60) return 'sekunde ' + s; const m = Math.round(s / 60); return m < 60 ? 'dk ' + m : 'saa ' + Math.floor(m / 60) + ' dk ' + (m % 60); };
+
+  function atBadge(a) {
+    if (!a) return '<span class="po-badge off">—</span>';
+    if (!a.enabled) return '<span class="po-badge off">IMEZIMWA</span>';
+    if (a.isPaused) return '<span class="po-badge demo">⏸ IMESIMAMA</span>';
+    return '<span class="po-badge on">IMEWASHWA</span>' + (a.dryRun ? ' <span class="po-badge demo">🧪 DRY-RUN</span>' : '');
+  }
+
+  function renderAutoTrade() {
+    const a = state.at;
+    if (!a) { $('atMini').innerHTML = $('atStatus').innerHTML = '<div class="po-empty">Hali ya auto-trade haipatikani.</div>'; return; }
+    const acct = state.bridge && state.bridge.ok ? (isDemo() ? '<span class="po-badge demo">DEMO</span>' : '<span class="po-badge real">REAL</span>') : '';
+    const pausedTxt = a.isPaused ? `<div class="po-warn" style="margin-top:6px;">⏸ ${esc(PAUSE_TEXT[a.pauseReason] || 'kwa muda')} — inaisha: ${inMins(a.pausedUntil)}</div>` : '';
+
+    $('atMini').innerHTML = `${atBadge(a)} ${acct}
+      <div class="po-note">${tfLabel(a.tf)} • nguvu ≥ ${a.minStrength}% • stake $${fmt(a.stake)} • wazi ${a.openTrades.length}/${a.maxConcurrent} • P/L leo <b class="${a.dailyPnl >= 0 ? 'po-up' : 'po-down'}">${signed(a.dailyPnl)}</b></div>${pausedTxt}`;
+
+    $('atStatus').innerHTML = `<table class="po-table"><tbody>
+      <tr><td class="po-muted">Hali</td><td>${atBadge(a)} ${acct}</td></tr>
+      <tr><td class="po-muted">Mzunguko ujao</td><td>${a.enabled ? `<span id="atNext" data-next="${Number(a.nextCycleAt) || 0}">${inMins(a.nextCycleAt)}</span>` : '—'}</td></tr>
+      <tr><td class="po-muted">Mzunguko wa mwisho</td><td>${rel(a.lastCycleAt)}${a.running ? ' • <span class="po-warn">inachanganua...</span>' : ''}</td></tr>
+      <tr><td class="po-muted">Mwisho kurukwa</td><td class="po-muted" style="font-size:12px;">${esc(a.lastSkipReason || '—')}</td></tr>
+    </tbody></table>${pausedTxt}`;
+
+    $('atOn').disabled = a.enabled; $('atOff').disabled = !a.enabled;
+    $('atResume').style.display = a.isPaused ? '' : 'none';
+
+    // Circuit breakers + takwimu
+    const st = state.atStats, st2 = a.stats || {};
+    const wr = st && st.trades ? Math.round((st.wins / st.trades) * 1000) / 10 : null;
+    $('atSum').innerHTML =
+      `<div><b class="${a.dailyPnl >= 0 ? 'po-up' : 'po-down'}">${signed(a.dailyPnl)}</b><span>P/L leo (UTC)</span></div>` +
+      `<div><b>${a.consecutiveLosses}/${a.maxConsecLosses}</b><span>Hasara mfululizo</span></div>` +
+      `<div><b>${a.tradesToday}/${a.maxTradesPerDay}</b><span>Trades leo</span></div>` +
+      `<div><b>${a.openTrades.length}/${a.maxConcurrent}</b><span>Wazi</span></div>` +
+      `<div><b>${wr == null ? '—' : wr + '%'}</b><span>Win rate ${st && st.trades ? '(' + st.trades + ')' : ''}</span></div>` +
+      `<div><b class="${st && st.pnl >= 0 ? 'po-up' : 'po-down'}">${st ? signed(st.pnl) : '—'}</b><span>Net P/L (auto)</span></div>`;
+    const lim = `Kikomo hasara ya siku: <b>$${fmt(a.maxDailyLoss)}</b> (umebakiza <b>$${fmt(Math.max(0, a.maxDailyLoss + a.dailyPnl))}</b>)`;
+    $('atBreak').innerHTML = `<div class="po-note">${lim} • Tangu bot ianze: mizunguko ${st2.cycles || 0}, signals strong ${st2.signals || 0}, zilizofunguliwa ${st2.opened || 0}${st2.dry ? ', dry ' + st2.dry : ''}, zilizochelewa ${st2.late || 0}, zilizozuiwa ${st2.blocked || 0}, zilizoshindwa ${st2.failed || 0}.</div>` +
+      (wr != null && st.trades < 100 ? '<div class="po-note">ℹ️ Sampuli ndogo (chini ya trades 100) — win rate bado haithibitishi chochote. Break-even ≈ 54%.</div>' : '');
+
+    // Fomu ya mipangilio — usiiandike upya mtumiaji akiwa anahariri
+    if (!atDirty) fillAutoForm();
+
+    // Trades za auto
+    const mine = state.trades.filter((t) => t.source === 'auto');
+    $('atTradeCount').textContent = mine.length ? mine.length + ' trades' : '';
+    $('atTrades').innerHTML = mine.length
+      ? `<div class="po-scroll" style="max-height:340px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Muda</th><th>Jozi</th><th>Dir</th><th>Stake</th><th>Matokeo</th><th>P/L</th></tr></thead><tbody>${
+          mine.slice(0, 40).map((t) => {
+            const o = outcome(t);
+            const res = o === 'win' ? '<span class="po-up">✅ WIN</span>' : o === 'loss' ? '<span class="po-down">🔴 LOSS</span>' : o === 'open' ? `<span class="po-warn" data-exp="${Number(t.expiresAt)}" data-oid="${esc(t.orderId)}">⏳</span>` : '<span class="po-muted">? haijulikani</span>';
+            const pl = o === 'loss' ? -Number(t.stake) : t.profit != null ? Number(t.profit) : null;
+            return `<tr><td class="po-muted" style="white-space:nowrap;">${fmtDate(t.openedAt)}</td><td><b>${esc(t.pair)}</b></td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td><td>${res}</td><td>${pl == null ? '—' : `<span class="${pl >= 0 ? 'po-up' : 'po-down'}">${signed(pl)}</span>`}</td></tr>`;
+          }).join('')}</tbody></table></div>`
+      : '<div class="po-empty">Bado hakuna trade ya auto.</div>';
+
+    // Matukio
+    const ev = a.events || [];
+    $('atEvents').innerHTML = ev.length
+      ? `<div class="po-scroll" style="max-height:300px;overflow-y:auto;">${ev.map((e) => `<div class="po-note" style="margin:0;padding:6px 0;border-bottom:1px solid var(--po-line);"><span class="po-muted">${fmtDate(e.at)}</span> ${EV_ICON[e.type] || '•'} ${esc(e.text)}</div>`).join('')}</div>`
+      : '<div class="po-empty">Hakuna shughuli bado (matukio yanapotea bot ikirestart).</div>';
+  }
+
+  function fillAutoForm() {
+    const a = state.at; if (!a) return;
+    const set = (id, v) => { $(id).value = String(v); };
+    set('fStake', a.stake); set('fStrength', a.minStrength); set('fMax', a.maxConcurrent); set('fPerday', a.maxTradesPerDay);
+    set('fMaxloss', a.maxDailyLoss); set('fLosses', a.maxConsecLosses); set('fCooldown', a.cooldownMin);
+    set('fExposure', a.maxCurrencyExposure); set('fBacktest', a.minBacktest);
+    set('fNews', a.newsFilter ? 'on' : 'off'); set('fDry', a.dryRun ? 'on' : 'off');
+    const tf = tfLabel(a.tf), tfSel = $('fTf');
+    if (![...tfSel.options].some((o) => o.value === tf)) tfSel.add(new Option(tf, tf));
+    tfSel.value = tf;
+    if ([...$('fMode').options].some((o) => o.value === a.mode)) $('fMode').value = a.mode;
+  }
+  function resetAutoForm() { atDirty = false; fillAutoForm(); clearToast('atSetToast'); }
+  document.querySelectorAll('.at-f').forEach((el) => { el.addEventListener('input', () => { atDirty = true; }); el.addEventListener('change', () => { atDirty = true; }); });
+
+  async function autoAction(action, extra = {}) {
+    clearToast('atToast');
+    try {
+      const d = await api('/api/admin/po/autotrade', { method: 'POST', body: JSON.stringify({ action, ...extra }) });
+      state.at = d.autotrade; state.atStats = d.stats;
+      toast('atToast', action === 'on' ? '✅ Auto-trade imewashwa.' : action === 'off' ? '🛑 Auto-trade imezimwa.' : '▶️ Pause imeondolewa.', true);
+      renderBar(); renderAutoTrade();
+      return true;
+    } catch (e) { toast('atToast', '❌ ' + e.message, false); return false; }
+  }
+
+  async function autoOn() {
+    const a = state.at || {};
+    const real = !isDemo();
+    const msg = `⚠️ ${real ? 'Akaunti ni REAL (pesa halisi).\n\n' : ''}Auto-trade itafungua trade BILA kukuuliza kila mara:\n` +
+      `• Stake $${fmt(a.stake)} • ${tfLabel(a.tf || 60)} • nguvu ≥ ${a.minStrength}%${a.dryRun ? '\n• DRY-RUN: hakuna trade halisi' : ''}\n` +
+      `• Kikomo hasara/siku $${fmt(a.maxDailyLoss)}\n\nBinary option: unaweza kupoteza stake zote. Endelea?`;
+    if (real && !a.dryRun) { if (!confirm(msg)) return; }
+    else if (!confirm(msg)) return;
+    await autoAction('on', { confirmReal: real });
+  }
+
+  async function saveAutoSettings() {
+    clearToast('atSetToast');
+    const v = (id) => $(id).value;
+    const settings = { stake: v('fStake'), strength: v('fStrength'), tf: v('fTf'), mode: v('fMode'), max: v('fMax'), perday: v('fPerday'),
+      maxloss: v('fMaxloss'), losses: v('fLosses'), cooldown: v('fCooldown'), exposure: v('fExposure'), backtest: v('fBacktest'), news: v('fNews'), dry: v('fDry') };
+    const a = state.at || {};
+    if (!isDemo() && a.enabled && Number(settings.stake) > Number(a.stake) &&
+        !confirm(`⚠️ Unapandisha stake kutoka $${fmt(a.stake)} hadi $${fmt(settings.stake)} kwenye akaunti REAL. Endelea?`)) return;
+    const btn = $('atSave'); btn.disabled = true;
+    try {
+      const d = await api('/api/admin/po/autotrade', { method: 'POST', body: JSON.stringify({ action: 'set', settings }) });
+      state.at = d.autotrade; state.atStats = d.stats; atDirty = false;
+      toast('atSetToast', '✅ Mipangilio imehifadhiwa.', true);
+      renderBar(); renderAutoTrade();
+    } catch (e) { toast('atSetToast', '❌ ' + e.message, false); }
+    btn.disabled = false;
   }
 
   // ── Signals ────────────────────────────────────────────────────────
@@ -415,13 +606,15 @@
     const open = state.trades.filter((t) => !t.closedAt);
     $('openBox').innerHTML = open.length
       ? `<div class="po-scroll"><table class="po-table"><thead><tr><th>Jozi</th><th>Dir</th><th>Stake</th><th>Inaisha</th><th>ID</th></tr></thead><tbody>${
-          open.map((t) => `<tr><td><b>${esc(t.pair)}</b></td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td>
+          open.map((t) => `<tr><td><b>${esc(t.pair)}</b>${t.source === 'auto' ? ' 🤖' : ''}</td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td>
             <td data-exp="${Number(t.expiresAt)}" data-oid="${esc(t.orderId)}">—</td><td class="po-muted" style="font-size:11px;">${esc(t.orderId)}</td></tr>`).join('')
         }</tbody></table></div>`
       : '<div class="po-empty">Hakuna order iliyo wazi.</div>';
     tick();
   }
   function tick() {
+    const nx = document.getElementById('atNext');
+    if (nx && Number(nx.dataset.next)) nx.textContent = inMins(Number(nx.dataset.next));
     let waiting = false;
     document.querySelectorAll('[data-exp]').forEach((el) => {
       const left = Math.round((Number(el.dataset.exp) - Date.now()) / 1000);
@@ -444,10 +637,10 @@
     const pairs = [...new Set(all.map((t) => t.pair))].sort();
     if (hPair !== 'all' && !pairs.includes(hPair)) hPair = 'all';
     const rBtn = (k, l) => `<button class="po-btn small ${hResult === k ? 'active' : ''}" onclick="setHResult('${k}')">${l}</button>`;
-    $('hFilters').innerHTML = rBtn('all', 'Zote') + rBtn('win', '✅ Win') + rBtn('loss', '🔴 Loss') + rBtn('open', '⏳ Wazi') +
+    $('hFilters').innerHTML = rBtn('all', 'Zote') + rBtn('win', '✅ Win') + rBtn('loss', '🔴 Loss') + rBtn('open', '⏳ Wazi') + rBtn('auto', '🤖 Auto') +
       `<select class="po-select" onchange="setHPair(this.value)"><option value="all">Jozi zote</option>${pairs.map((p) => `<option ${p === hPair ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`;
 
-    const rows = all.filter((t) => (hResult === 'all' || outcome(t) === hResult) && (hPair === 'all' || t.pair === hPair));
+    const rows = all.filter((t) => (hResult === 'all' || (hResult === 'auto' ? t.source === 'auto' : outcome(t) === hResult)) && (hPair === 'all' || t.pair === hPair));
     const closed = rows.filter((t) => t.closedAt);
     const wins = closed.filter((t) => t.win === 1).length, losses = closed.filter((t) => t.win === 0).length;
     const net = closed.reduce((s, t) => s + Number(t.profit || 0), 0);
@@ -462,7 +655,7 @@
             const o = outcome(t);
             const res = o === 'win' ? '<span class="po-up">✅ WIN</span>' : o === 'loss' ? '<span class="po-down">🔴 LOSS</span>' : o === 'open' ? '<span class="po-warn">⏳ wazi</span>' : '<span class="po-muted">? haijulikani</span>';
             const p = t.profit != null ? `<span class="${t.profit >= 0 ? 'po-up' : 'po-down'}">${signed(Number(t.profit))}</span>` : '—';
-            return `<tr><td class="po-muted" style="white-space:nowrap;">${fmtDate(t.openedAt)}</td><td><b>${esc(t.pair)}</b></td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td><td>${tfLabel(t.expirySeconds)}</td><td>${res}</td><td>${p}</td></tr>`;
+            return `<tr><td class="po-muted" style="white-space:nowrap;">${fmtDate(t.openedAt)}</td><td><b>${esc(t.pair)}</b>${t.source === 'auto' ? ' <span title="Auto-trade">🤖</span>' : ''}</td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td><td>${tfLabel(t.expirySeconds)}</td><td>${res}</td><td>${p}</td></tr>`;
           }).join('')
         }</tbody></table></div>`
       : '<div class="po-empty">Hakuna trades zinazolingana.</div>';
