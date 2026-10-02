@@ -1526,6 +1526,7 @@
     return new Date(ms).toLocaleString('sw-TZ', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
+  let lastKnownPaidUntil = 0; // paidUntil kabla ya malipo — inatumika kugundua webhook iliyotangulia
   async function loadBilling() {
     try {
       const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/billing');
@@ -1535,6 +1536,7 @@
         return;
       }
 
+      lastKnownPaidUntil = data.paidUntil || 0;
       if (data.allowed && data.reason === 'paid') {
         billingStatusText.textContent = '✅ Umeshalipa — bot inafanya kazi hadi ' + fmtDateSw(data.paidUntil) + '. Unaweza kuongeza siku zaidi wakati wowote.';
       } else if (data.allowed && data.reason === 'trial') {
@@ -1576,12 +1578,46 @@
         throw new Error((data.error || 'Hitilafu haijulikani.') + detailText);
       }
       showMsg(billingMsgBox, true, '✅ ' + data.message);
+      waitForPayment(data.orderReference);
     } catch (e) {
       billingMsgBox.style.whiteSpace = 'pre-wrap';
       showMsg(billingMsgBox, false, '❌ ' + e.message);
     } finally {
       document.querySelectorAll('.planBtn').forEach(b => b.disabled = false);
     }
+  }
+
+  // Baada ya USSD-push, uliza server kila sekunde 4 (hadi dakika 5) kama
+  // malipo yamethibitishwa — huduma inaongezwa moja kwa moja, bila admin.
+  let paymentPoller = null;
+  function waitForPayment(orderReference) {
+    if (!orderReference) return;
+    if (paymentPoller) clearInterval(paymentPoller);
+    const startedAt = Date.now();
+    const beforePaidUntil = lastKnownPaidUntil;
+    paymentPoller = setInterval(async () => {
+      if (Date.now() - startedAt > 5 * 60 * 1000) {
+        clearInterval(paymentPoller);
+        showMsg(billingMsgBox, false, '⌛ Bado hatujapokea uthibitisho. Ukishalipa, huduma itaongezwa yenyewe — onyesha ukurasa upya baada ya muda mfupi.');
+        return;
+      }
+      try {
+        const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/pay-status?ref=' + encodeURIComponent(orderReference));
+        const d = await res.json();
+        if (!d.ok) return;
+        // PAID = tumethibitisha sasa hivi; NOT_FOUND + paidUntil imeongezeka =
+        // webhook ilitangulia kuthibitisha.
+        const confirmed = d.status === 'PAID' || (d.status === 'NOT_FOUND' && (d.paidUntil || 0) > beforePaidUntil);
+        if (confirmed) {
+          clearInterval(paymentPoller);
+          showMsg(billingMsgBox, true, '🎉 Malipo yamethibitishwa! Huduma yako imeongezwa.');
+          loadBilling();
+        } else if (d.status === 'FAILED') {
+          clearInterval(paymentPoller);
+          showMsg(billingMsgBox, false, '❌ Malipo hayakukamilika. Jaribu tena.');
+        }
+      } catch (e) { /* jaribu tena kwenye mzunguko unaofuata */ }
+    }, 4000);
   }
 
   if (token) {
