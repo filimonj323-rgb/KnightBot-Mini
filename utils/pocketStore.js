@@ -87,7 +87,7 @@ async function getTradeHistory(limit = 200) {
     const n = Math.min(1000, Math.max(1, parseInt(limit, 10) || 200));
     const r = await db.query(
       `SELECT orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt,
-              closedAt, win, profit, status
+              closedAt, win, profit, status, source
          FROM po_trades ORDER BY openedAt DESC LIMIT ?`,
       [n]
     );

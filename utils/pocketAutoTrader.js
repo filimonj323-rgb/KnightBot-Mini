@@ -80,6 +80,14 @@ const positions = new Map();
 const seenSignals = new Set(); // pair|direction|candleTime — kuzuia kuingia mara mbili kwenye candle ileile
 const stats = { cycles: 0, signals: 0, opened: 0, dry: 0, late: 0, blocked: 0, failed: 0 };
 
+// Kumbukumbu ya matukio ya hivi karibuni (RAM) — inaonyeshwa kwenye dashboard.
+const events = [];
+const MAX_EVENTS = 40;
+function logEvent(type, text) {
+  events.unshift({ at: Date.now(), type, text });
+  if (events.length > MAX_EVENTS) events.length = MAX_EVENTS;
+}
+
 let dailyKey = utcDateKey(Date.now());
 let dailyPnl = 0;
 let tradesToday = 0;
@@ -160,10 +168,10 @@ async function loadConfig() {
 const bool = (v) => ['on', 'true', '1', 'yes', 'ndio'].includes(String(v).toLowerCase());
 
 /**
- * Badilisha setting moja. Rudisha { ok, key, value, previous } au { ok:false, error }.
+ * Thibitisha setting moja BILA kuihifadhi. Rudisha { ok, field, value } au { ok:false, error }.
  * Funguo: stake, strength, tf, mode, max, maxloss, losses, cooldown, perday, exposure, news, backtest, dry
  */
-async function setSetting(name, raw) {
+function parseSetting(name, raw) {
   const key = String(name || '').toLowerCase();
   const num = Number(raw);
   const rangeErr = (what) => ({ ok: false, error: what });
@@ -217,13 +225,59 @@ async function setSetting(name, raw) {
       return rangeErr(`Setting "${name}" haijulikani.`);
   }
 
-  const previous = cfg[field];
-  cfg[field] = value;
+  return { ok: true, field, value };
+}
+
+/** Badilisha setting moja na kuihifadhi. Rudisha { ok, key, value, previous } au { ok:false, error }. */
+async function setSetting(name, raw) {
+  const p = parseSetting(name, raw);
+  if (!p.ok) return p;
+  const previous = cfg[p.field];
+  cfg[p.field] = p.value;
   await saveConfig();
   // tf/mode zimebadilika -> panga upya mzunguko ujao kwenye candle sahihi
-  if ((field === 'tf' || field === 'mode') && cfg.enabled && started) schedule();
-  console.log(`[pocketAuto] ${field}: ${previous} -> ${value}`);
-  return { ok: true, key: field, value, previous };
+  if ((p.field === 'tf' || p.field === 'mode') && cfg.enabled && started) schedule();
+  console.log(`[pocketAuto] ${p.field}: ${previous} -> ${p.value}`);
+  return { ok: true, key: p.field, value: p.value, previous };
+}
+
+/**
+ * Badilisha settings NYINGI kwa pamoja (dashboard). Zote zinathibitishwa KWANZA — kama moja
+ * ni batili hakuna inayohifadhiwa. Rudisha { ok, changed:[{key,previous,value}] } | { ok:false, error }.
+ */
+async function setSettings(map) {
+  const parsed = [];
+  for (const [name, raw] of Object.entries(map || {})) {
+    const p = parseSetting(name, raw);
+    if (!p.ok) return { ok: false, error: `${name}: ${p.error}` };
+    parsed.push(p);
+  }
+  const changed = [];
+  let reschedule = false;
+  for (const p of parsed) {
+    if (cfg[p.field] === p.value) continue;
+    changed.push({ key: p.field, previous: cfg[p.field], value: p.value });
+    cfg[p.field] = p.value;
+    if (p.field === 'tf' || p.field === 'mode') reschedule = true;
+  }
+  if (changed.length) {
+    await saveConfig();
+    if (reschedule && cfg.enabled && started) schedule();
+    console.log(`[pocketAuto] settings: ${changed.map((c) => `${c.key} ${c.previous}->${c.value}`).join(', ')}`);
+  }
+  return { ok: true, changed };
+}
+
+/** Ondoa pause (cooldown / hasara ya siku) kwa mkono. Breakers zinaendelea kuhesabu upya. */
+function resume() {
+  const was = isPaused();
+  const reason = pauseReason;
+  pausedUntil = null;
+  pauseReason = null;
+  consecutiveLosses = 0;
+  orderFailStreak = 0;
+  if (was) logEvent('resume', `Pause (${PAUSE_TEXT[reason] || reason}) imeondolewa kwa mkono`);
+  return { ok: true, was };
 }
 
 // ── Circuit breakers ────────────────────────────────────────────────────
@@ -253,6 +307,7 @@ function evaluateBreakers() {
   if (-dailyPnl >= cfg.maxDailyLoss && pauseReason !== 'daily_loss_limit') {
     pausedUntil = endOfUtcDay(Date.now());
     pauseReason = 'daily_loss_limit';
+    logEvent('pause', `Hasara ya siku ${money(dailyPnl)} — imesimama hadi kesho`);
     notify(
       `🛑 *Pocket Auto-Trade imesimama kwa leo*\n\n` +
         `Hasara ya siku imefika ${money(dailyPnl)} (kikomo: $${cfg.maxDailyLoss}).\n` +
@@ -261,6 +316,7 @@ function evaluateBreakers() {
   } else if (consecutiveLosses >= cfg.maxConsecLosses && pauseReason !== 'daily_loss_limit') {
     pausedUntil = Date.now() + cfg.cooldownMin * 60000;
     pauseReason = 'consecutive_losses';
+    logEvent('pause', `Hasara ${consecutiveLosses} mfululizo — cooldown ${fmtDuration(cfg.cooldownMin * 60000)}`);
     notify(
       `⏸️ *Pocket Auto-Trade: cooldown*\n\n` +
         `Hasara ${consecutiveLosses} mfululizo. Nasimama ${fmtDuration(cfg.cooldownMin * 60000)} kabla ya kufungua trade mpya.`
@@ -332,6 +388,7 @@ async function newsBlock(pair) {
 function skip(r, why, counter) {
   if (counter) stats[counter]++;
   lastSkipReason = `${r.pair} ${r.direction} ${r.strength}% — ${why}`;
+  logEvent('skip', lastSkipReason);
   console.log(`[pocketAuto] RUKA ${lastSkipReason}`);
 }
 
@@ -393,6 +450,7 @@ async function considerSignal(r) {
     tradesToday--;
     stats.dry++;
     console.log(`[pocketAuto] DRY ${r.pair} ${r.direction} ${r.strength}%`);
+    logEvent('dry', `${r.pair} ${r.direction} ${r.strength}% (dry-run)`);
     return notify(
       `🧪 *DRY-RUN — ingefungua trade*\n\n${arrow} *${r.pair}*\n💪 ${r.grade} ${r.strength}% • ⏱️ ${pocketSignal.tfLabel(r.expirySec)} • 💵 $${cfg.stake}\n\n${reasons}\n\n_Hakuna trade iliyofunguliwa. Zima dry-run: .poauto dry off_`
     );
@@ -411,6 +469,7 @@ async function considerSignal(r) {
     orderFailStreak = 0;
     stats.opened++;
     console.log(`[pocketAuto] ✅ ${r.pair} ${r.direction} ${r.strength}% stake=$${cfg.stake} order=${res.orderId}`);
+    logEvent('open', `${r.pair} ${r.direction === 'BUY' ? 'UP' : 'DOWN'} ${r.strength}% • $${cfg.stake} • ${pocketSignal.tfLabel(r.expirySec)}`);
     await notify(
       `🤖 *AUTO-TRADE imefunguliwa* ${accountLabel()}\n\n` +
         `${arrow} *${r.pair}*\n` +
@@ -425,6 +484,7 @@ async function considerSignal(r) {
     stats.failed++;
     orderFailStreak++;
     console.error(`[pocketAuto] ❌ Imeshindwa kufungua ${r.pair}:`, err.message);
+    logEvent('fail', `${r.pair} ${r.direction}: ${err.message}`);
     if (orderFailStreak === 1 || orderFailStreak % 5 === 0) {
       await notify(`⚠️ *Auto-trade: order imeshindwa* — ${r.pair} ${r.direction}\n${err.message}`);
     }
@@ -450,12 +510,14 @@ async function handleSettled({ orderId, status, result }) {
     const gain = Number.isFinite(p) && p > 0 ? p : 0;
     dailyPnl += gain;
     consecutiveLosses = 0;
+    logEvent('win', `${label} ${gain > 0 ? '+' + money(gain) : ''}`.trim());
     await notify(
       `✅ *WIN* — ${label}\n💵 ${gain > 0 ? `+${money(gain)}` : 'faida haijulikani'} • 🆔 ${id}\n📊 Leo: ${money(dailyPnl)} (trades ${tradesToday})`
     );
   } else if (status === 'loss') {
     dailyPnl -= pos.stake;
     consecutiveLosses++;
+    logEvent('loss', `${label} -${money(pos.stake)}`);
     await notify(
       `🔴 *LOSS* — ${label}\n💵 -${money(pos.stake)} • 🆔 ${id}\n📊 Leo: ${money(dailyPnl)} • hasara mfululizo: ${consecutiveLosses}/${cfg.maxConsecLosses}`
     );
@@ -600,6 +662,7 @@ async function enable({ confirmReal = false } = {}) {
   cfg.enabledOnDemo = st.demo === true;
   await saveConfig();
   schedule();
+  logEvent('on', `Imewashwa (${st.demo ? 'DEMO' : 'REAL'})`);
   console.log(`[pocketAuto] ✅ Imewashwa (${st.demo ? 'DEMO' : 'REAL'}).`);
   return { ok: true, demo: st.demo === true, nextCycleAt };
 }
@@ -611,6 +674,7 @@ async function disable() {
   timer = null;
   nextCycleAt = null;
   await saveConfig();
+  logEvent('off', 'Imezimwa');
   console.log('[pocketAuto] 🛑 Imezimwa.');
   return { ok: true, was, openTrades: positions.size };
 }
@@ -634,6 +698,7 @@ function getStatus() {
     openTrades: [...positions.entries()].map(([orderId, p]) => ({ orderId, ...p })),
     exposure: currencyExposure(),
     stats: { ...stats },
+    events: events.slice(),
     hardMaxStake: HARD_MAX_STAKE,
   };
 }
@@ -647,6 +712,8 @@ module.exports = {
   enable,
   disable,
   setSetting,
+  setSettings,
+  resume,
   getStatus,
   getStats,
   DEFAULTS,
