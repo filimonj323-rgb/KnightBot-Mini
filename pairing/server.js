@@ -75,6 +75,7 @@ const mainConfig = require('../config');
 const pocketTrader = require('../utils/pocketOptionTrader');
 const pocketStore = require('../utils/pocketStore');
 const pocketSignal = require('../utils/pocketSignal');
+const pocketAuto = require('../utils/pocketAutoTrader');
 const posignalCmd = require('../commands/utility/posignal');
 
 // Jozi kuu 7 zinazoweza kuangaliwa kwenye dashboard (.fxtrading.html) —
@@ -729,6 +730,8 @@ async function handlePairingRequest(req, res) {
               balance,
               trades,
               auto: posignalCmd.getAutoStatus(),
+              autotrade: pocketAuto.getStatus(),
+              autotradeStats: await pocketAuto.getStats(),
               pairs: pocketSignal.DEFAULT_PAIRS,
               scanModes: pocketSignal.SCAN_MODES,
               ownerJid: getOwnerJid(),
@@ -828,6 +831,43 @@ async function handlePairingRequest(req, res) {
             if (!global.currentSock) return sendJson(res, 503, { ok: false, error: 'Bot kuu haijaunganishwa na WhatsApp — auto-signal haiwezi kutuma.' });
             await posignalCmd.startAutoFromDashboard(global.currentSock, jid, { tf, minStrength, mode });
             return sendJson(res, 200, { ok: true, auto: posignalCmd.getAutoStatus() });
+          }
+          // ── AUTO-TRADE (trade za kiotomatiki) — sawa na `.poauto ...` ──────────
+          // GET: hali kamili. POST { action: 'on'|'off'|'resume'|'set', confirmReal?, settings? }
+          if (poPath === '/api/admin/po/autotrade') {
+            if (req.method === 'GET') {
+              return sendJson(res, 200, { ok: true, autotrade: pocketAuto.getStatus(), stats: await pocketAuto.getStats() });
+            }
+            if (req.method === 'POST') {
+              const body = await readJsonBody(req);
+              const action = String(body.action || '');
+              let note = null;
+              if (action === 'on') {
+                const r = await pocketAuto.enable({ confirmReal: body.confirmReal === true });
+                if (r.needsConfirm) {
+                  return sendJson(res, 409, { ok: false, needsConfirm: true, demo: r.demo, error: 'Akaunti ni REAL — uthibitisho unahitajika.' });
+                }
+                if (!r.ok) return sendJson(res, 400, { ok: false, error: r.error });
+                note = `🖥️ *AUTO-TRADE IMEWASHWA (Dashboard)* — ${r.demo ? '🧪 DEMO' : '💰 REAL'}`;
+              } else if (action === 'off') {
+                await pocketAuto.disable();
+                note = '🖥️ *AUTO-TRADE IMEZIMWA (Dashboard)*';
+              } else if (action === 'resume') {
+                pocketAuto.resume();
+                note = '🖥️ Auto-trade: pause imeondolewa kupitia Dashboard.';
+              } else if (action === 'set') {
+                const r = await pocketAuto.setSettings(body.settings || {});
+                if (!r.ok) return sendJson(res, 400, { ok: false, error: r.error });
+                if (r.changed.length) {
+                  note = `🖥️ *Auto-trade: mipangilio imebadilishwa (Dashboard)*\n` +
+                    r.changed.map((c) => `• ${c.key}: ${c.previous} → ${c.value}`).join('\n');
+                }
+              } else {
+                return sendJson(res, 400, { ok: false, error: 'action lazima iwe on, off, resume au set.' });
+              }
+              if (note) notifyOwnerWA(note);
+              return sendJson(res, 200, { ok: true, autotrade: pocketAuto.getStatus(), stats: await pocketAuto.getStats() });
+            }
           }
         } catch (err) {
           console.error('[po dashboard] error:', err.message);
