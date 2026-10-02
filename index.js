@@ -744,6 +744,15 @@ async function startBot() {
       try {
         require('./utils/pocketOptionTrader').restoreOpenTrades().catch(() => {});
         require('./commands/utility/posignal').restoreAutoJobs(sock).catch(() => {});
+
+        // Pocket Option AUTO-TRADE — inajisajili kwa matokeo ya trades, inarejesha hali
+        // (trades wazi + circuit breakers) na kuendelea ikiwa ilikuwa imewashwa kwa `.poauto on`.
+        // Haiwashi yenyewe kama haikuwashwa; notifications zinaenda DM ya owner.
+        const poOwnerRaw = Array.isArray(config.ownerNumber) ? config.ownerNumber[0] : config.ownerNumber;
+        const poOwnerJid = poOwnerRaw?.includes('@') ? poOwnerRaw : `${poOwnerRaw}@s.whatsapp.net`;
+        require('./utils/pocketAutoTrader').start({ sock, notifyJid: poOwnerJid }).catch((e) =>
+          console.error('❌ Imeshindwa kuanzisha Pocket auto-trader:', e.message)
+        );
       } catch (err) {
         console.error('❌ Imeshindwa kurejesha data ya Pocket Option:', err.message);
       }
