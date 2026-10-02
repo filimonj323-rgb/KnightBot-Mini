@@ -71,9 +71,28 @@ function verifyWebhookChecksum(payload) {
 
 let cachedToken = null;
 let cachedTokenExpiresAt = 0;
+let tokenInFlight = null;        // maombi ya wakati mmoja yanashiriki token MOJA
+let authBlockedUntil = 0;        // baada ya 429, usipige ClickPesa hadi muda huu
+const AUTH_BLOCK_MS = 30 * 60 * 1000;
+
+/** true = ClickPesa imetukataa (kikomo cha siku) — usipige API kwa sasa. */
+function isBlocked() {
+  return Date.now() < authBlockedUntil;
+}
 
 async function getAuthToken() {
   assertConfigured();
+  if (cachedToken && Date.now() < cachedTokenExpiresAt) return cachedToken;
+  if (isBlocked()) {
+    throw new Error('ClickPesa imefikia kikomo cha simu za siku (KYC haijakamilika). Jaribu tena baadaye.');
+  }
+  if (!tokenInFlight) {
+    tokenInFlight = fetchNewToken().finally(() => { tokenInFlight = null; });
+  }
+  return tokenInFlight;
+}
+
+async function fetchNewToken() {
   if (cachedToken && Date.now() < cachedTokenExpiresAt) {
     console.log(
       `[clickpesa][debug] tumia token iliyohifadhiwa (cached), itaisha muda baada ya ${Math.round((cachedTokenExpiresAt - Date.now()) / 1000)}s`
@@ -96,6 +115,10 @@ async function getAuthToken() {
   const data = await res.json().catch(() => ({}));
   console.log(`[clickpesa][debug] generate-token jibu: status=${res.status} body=${JSON.stringify(data)}`);
 
+  if (res.status === 429) {
+    authBlockedUntil = Date.now() + AUTH_BLOCK_MS;
+    console.error(`[clickpesa] kikomo cha siku kimefika (429) — nasimama kupiga ClickPesa kwa dakika ${AUTH_BLOCK_MS / 60000}.`);
+  }
   if (!res.ok) {
     console.error('[clickpesa] auth imekataliwa:', res.status, JSON.stringify(data));
     throw new Error(`ClickPesa auth imeshindwa (${res.status}): ${data.message || JSON.stringify(data)}`);
@@ -263,6 +286,7 @@ async function getPaymentStatus(orderReference) {
 module.exports = {
   initiateUssdPush,
   getPaymentStatus,
+  isBlocked,
   verifyWebhookChecksum,
   createChecksum,
 };

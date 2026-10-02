@@ -177,19 +177,63 @@ async function settlePaidOrder(orderReference, info = {}) {
 }
 
 const PAID_STATUSES = ['SUCCESS', 'SETTLED', 'COMPLETED', 'PAID'];
-const ORDER_MAX_AGE_MS = 2 * 60 * 60 * 1000; // order isiyolipwa baada ya saa 2 inafutwa
+const ORDER_MAX_AGE_MS = 2 * 60 * 60 * 1000; // order isiyolipwa baada ya saa 2 inafutwa (bila kupiga ClickPesa)
+
+// ClickPesa ina kikomo cha simu 100 kwa siku (hadi KYC ikamilike), kwa hiyo
+// webhook ndiyo njia KUU ya kuthibitisha malipo. Kuuliza ClickPesa moja kwa
+// moja ni akiba tu, na kunadhibitiwa kwa makali:
+//   - si kabla ya sekunde 90 tangu order iundwe (webhook kwanza)
+//   - upeo wa majaribio 3 kwa order, kila baada ya dakika 2 angalau
+//   - bajeti ya siku ya maswali 30 kwa jumla
+//   - hakuna swali lolote wakati ClickPesa imetuzuia (429)
+const STATUS_MIN_AGE_MS = 90 * 1000;
+const STATUS_MIN_GAP_MS = 2 * 60 * 1000;
+const STATUS_MAX_TRIES = 3;
+const STATUS_DAILY_BUDGET = 30;
+const statusTries = new Map(); // orderReference -> { n, last }
+let statusDay = { day: '', n: 0 };
+
+function mayQueryStatus(order) {
+  if (clickpesa.isBlocked()) return false;
+  const now = Date.now();
+  if (now - Number(order.createdAt) < STATUS_MIN_AGE_MS) return false;
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (statusDay.day !== today) statusDay = { day: today, n: 0 };
+  if (statusDay.n >= STATUS_DAILY_BUDGET) return false;
+
+  const t = statusTries.get(order.orderReference) || { n: 0, last: 0 };
+  if (t.n >= STATUS_MAX_TRIES || now - t.last < STATUS_MIN_GAP_MS) return false;
+
+  t.n += 1; t.last = now;
+  statusTries.set(order.orderReference, t);
+  statusDay.n += 1;
+  return true;
+}
+
+async function dropOrder(orderReference) {
+  statusTries.delete(orderReference);
+  await removePendingOrder(orderReference);
+}
 
 async function reconcilePendingOrders() {
   const res = await db.query('SELECT * FROM pending_orders');
   for (const order of res.rows) {
     try {
+      // 1) Orders za zamani/zilizoachwa — futa bila kugusa ClickPesa.
+      if (Date.now() - Number(order.createdAt) > ORDER_MAX_AGE_MS) {
+        await dropOrder(order.orderReference);
+        continue;
+      }
+      // 2) Uliza ClickPesa kwa kiasi tu (angalia mayQueryStatus).
+      if (!mayQueryStatus(order)) continue;
+
       const st = await clickpesa.getPaymentStatus(order.orderReference);
       if (st && PAID_STATUSES.includes(st.status)) {
+        statusTries.delete(order.orderReference);
         await settlePaidOrder(order.orderReference, st);
       } else if (st && st.status === 'FAILED') {
-        await removePendingOrder(order.orderReference);
-      } else if (Date.now() - Number(order.createdAt) > ORDER_MAX_AGE_MS) {
-        await removePendingOrder(order.orderReference);
+        await dropOrder(order.orderReference);
       }
     } catch (e) {
       console.error(`[payment/reconcile] ${order.orderReference}:`, e.message);
@@ -1093,10 +1137,14 @@ async function handlePairingRequest(req, res) {
       let status = 'NOT_FOUND'; // tayari imeshughulikiwa (webhook/reconciler) au haipo
       const order = await getPendingOrder(ref);
       if (order && order.phoneNumber === phone) {
-        const st = await clickpesa.getPaymentStatus(ref).catch((e) => {
-          console.error('[pay-status]', e.message);
-          return null;
-        });
+        // Ukurasa unauliza kila sekunde chache — hii inasoma Turso tu. ClickPesa
+        // inaulizwa mara chache tu (mayQueryStatus), webhook ndiyo inayothibitisha.
+        const st = mayQueryStatus(order)
+          ? await clickpesa.getPaymentStatus(ref).catch((e) => {
+              console.error('[pay-status]', e.message);
+              return null;
+            })
+          : null;
         if (st && PAID_STATUSES.includes(st.status)) {
           await settlePaidOrder(ref, st);
           status = 'PAID';
@@ -1133,7 +1181,10 @@ async function handlePairingRequest(req, res) {
         // Checksum haijawashwa kwenye ClickPesa — hatuamini body; tunauliza
         // ClickPesa moja kwa moja hali halisi ya reference hii.
         console.warn('[payment/webhook] hakuna checksum — natumia status query ya ClickPesa badala yake.');
-        const st = orderReference ? await clickpesa.getPaymentStatus(orderReference).catch(() => null) : null;
+        const known = orderReference ? await getPendingOrder(orderReference) : null;
+        const st = (known && !clickpesa.isBlocked())
+          ? await clickpesa.getPaymentStatus(orderReference).catch(() => null)
+          : null;
         status = st ? st.status : '';
         paymentInfo = st || paymentInfo;
       }
