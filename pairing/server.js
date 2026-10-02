@@ -77,6 +77,7 @@ const pocketStore = require('../utils/pocketStore');
 const pocketSignal = require('../utils/pocketSignal');
 const pocketAuto = require('../utils/pocketAutoTrader');
 const posignalCmd = require('../commands/utility/posignal');
+const signalTargets = require('../utils/signalTargets');
 
 // Jozi kuu 7 zinazoweza kuangaliwa kwenye dashboard (.fxtrading.html) —
 // EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY ndizo zinazofuatiliwa na
@@ -706,6 +707,40 @@ async function handlePairingRequest(req, res) {
           atr: snapshot.atr,
           checkedAt: Date.now(),
         });
+      }
+
+      // ── Group la signals + matokeo (profit/loss) — Deriv & Pocket Option ──
+      // UI: kadi ya "Group ya Signals" kwenye fxtrading.html na pocketoption.html.
+      // Mpangilio: utils/signalTargets.js (unahifadhiwa Turso).
+      if (req.url.split('?')[0] === '/api/admin/groups' && req.method === 'GET') {
+        try {
+          return sendJson(res, 200, { ok: true, groups: await signalTargets.listGroups() });
+        } catch (err) {
+          return sendJson(res, 503, { ok: false, error: err.message });
+        }
+      }
+      if (req.url.split('?')[0] === '/api/admin/targets' && req.method === 'GET') {
+        if (!signalTargets.isLoaded()) await signalTargets.load();
+        return sendJson(res, 200, { ok: true, targets: signalTargets.getAll() });
+      }
+      if (req.url.split('?')[0] === '/api/admin/targets' && req.method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          const platform = String(body.platform || '');
+          const saved = await signalTargets.set(platform, body);
+          return sendJson(res, 200, { ok: true, platform, target: saved });
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: err.message });
+        }
+      }
+      if (req.url.split('?')[0] === '/api/admin/targets/test' && req.method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          await signalTargets.sendTest(String(body.platform || ''));
+          return sendJson(res, 200, { ok: true });
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: err.message });
+        }
       }
 
       // ── Pocket Option (Binary/Turbo) — dashboard ──────────────────────
