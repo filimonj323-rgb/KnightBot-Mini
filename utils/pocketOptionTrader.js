@@ -119,9 +119,10 @@ async function getCandles(pair, timeframeSeconds = 60, count = 100) {
 
 /**
  * Fungua order ya Binary/Turbo Option.
- * @param {{pair:string, direction:'BUY'|'SELL', amount:number, expirySeconds:number}} opts
+ * @param {{pair:string, direction:'BUY'|'SELL', amount:number, expirySeconds:number, source?:string}} opts
+ * source = 'auto' kwa trades za pocketAutoTrader (zinahesabiwa kwenye circuit breakers).
  */
-async function placeOrder({ pair, direction, amount, expirySeconds }) {
+async function placeOrder({ pair, direction, amount, expirySeconds, source = null }) {
   if (!pair) throw new Error('pair inahitajika');
   pair = await resolveAsset(pair);
   if (!(amount > 0)) throw new Error('amount lazima iwe zaidi ya 0');
@@ -140,7 +141,7 @@ async function placeOrder({ pair, direction, amount, expirySeconds }) {
   // Hifadhi trade kwenye database (Turso) ili restart isiipoteze, kisha
   // anzisha ufuatiliaji wa matokeo yake itakapofika expiry.
   const direct = direction === 'SELL' ? 'SELL' : 'BUY';
-  await pocketStore.recordOpenTrade({ orderId: data.order_id, pair, direction: direct, stake: amount, expirySeconds });
+  await pocketStore.recordOpenTrade({ orderId: data.order_id, pair, direction: direct, stake: amount, expirySeconds, source });
   scheduleSettle(String(data.order_id), Date.now() + expirySeconds * 1000);
 
   return { orderId: data.order_id, raw: data.raw };
@@ -175,20 +176,47 @@ const SETTLE_RETRY_MS = 10 * 1000;
 const SETTLE_GIVE_UP_MS = 15 * 60 * 1000; // baada ya expiry + dakika 15 bila jibu -> "unknown"
 const settling = new Set();
 
+// Wasikilizaji wa "trade imefungwa" (mfano pocketAutoTrader). Kila listener inapewa
+// { orderId, status: 'win'|'loss'|'unconfirmed'|'unknown', result }. Makosa ya listener
+// hayaathiri ufuatiliaji. Zinaitwa pia kwa trades zilizorejeshwa baada ya restart.
+const settleListeners = [];
+function onSettled(fn) {
+  if (typeof fn === 'function' && !settleListeners.includes(fn)) settleListeners.push(fn);
+}
+function emitSettled(orderId, status, result) {
+  for (const fn of settleListeners) {
+    try {
+      Promise.resolve(fn({ orderId, status, result })).catch((err) =>
+        console.error('[pocket] settle listener error:', err.message)
+      );
+    } catch (err) {
+      console.error('[pocket] settle listener error:', err.message);
+    }
+  }
+}
+
 function scheduleSettle(orderId, expiresAt) {
   if (settling.has(orderId)) return;
   settling.add(orderId);
   const run = async () => {
     try {
       const result = await getOrderResult(orderId); // inahifadhi yenyewe kama ni ya mwisho
-      if (isFinalResult(result) || isUnconfirmed(result)) return settling.delete(orderId);
+      if (isFinalResult(result)) {
+        settling.delete(orderId);
+        return emitSettled(orderId, result.win ? 'win' : 'loss', result);
+      }
+      if (isUnconfirmed(result)) {
+        settling.delete(orderId);
+        return emitSettled(orderId, 'unconfirmed', result);
+      }
     } catch (err) {
       // bridge chini / order haijulikani kwa bridge mpya — jaribu tena hapa chini
       console.log(`[pocket] matokeo ya order ${orderId} bado: ${err.message}`);
     }
     if (Date.now() - expiresAt > SETTLE_GIVE_UP_MS) {
       await pocketStore.recordClosedTrade(orderId, { status: 'unknown' });
-      return settling.delete(orderId);
+      settling.delete(orderId);
+      return emitSettled(orderId, 'unknown', null);
     }
     setTimeout(run, SETTLE_RETRY_MS);
   };
@@ -233,6 +261,7 @@ module.exports = {
   placeOrder,
   getOrderResult,
   restoreOpenTrades,
+  onSettled,
   getSignal,
   BRIDGE_URL,
 };

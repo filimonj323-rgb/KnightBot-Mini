@@ -300,7 +300,8 @@ const DEAD_MS = 10 * 60 * 1000;
 const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.POCKET_SCAN_CONCURRENCY || '', 10) || 3);
 
 // Changanua jozi nyingi. `concurrency` maombi kwa wakati mmoja (default 3; weka
-// POCKET_SCAN_CONCURRENCY=1 ukiona makosa/timeouts nyingi).
+// POCKET_SCAN_CONCURRENCY=1 ukiona makosa/timeouts nyingi). opts.onResult(r) hiari:
+// inaitwa kwa kila jozi mara tu inapochanganuliwa.
 async function scanPairs(pairs = DEFAULT_PAIRS, timeframeSec = 60, opts = {}) {
   const concurrency = opts.concurrency ?? SCAN_CONCURRENCY;
   const results = [];
@@ -315,8 +316,15 @@ async function scanPairs(pairs = DEFAULT_PAIRS, timeframeSec = 60, opts = {}) {
     while (next < queue.length) {
       const pair = queue[next++];
       try {
-        results.push(await analyzePair(pair, timeframeSec, opts));
+        const analyzed = await analyzePair(pair, timeframeSec, opts);
+        results.push(analyzed);
         failCounts.delete(pair);
+        // onResult: inaitwa MARA MOJA matokeo ya jozi yanapofika (si baada ya scan nzima) —
+        // inatumiwa na auto-trader kuingia haraka kabla candle mpya haijazeeka.
+        if (typeof opts.onResult === 'function') {
+          try { await opts.onResult(analyzed); }
+          catch (cbErr) { console.error(`[posignal] onResult(${pair}) imeshindwa:`, cbErr.message); }
+        }
       } catch (err) {
         errors.push({ pair, error: err.message });
         console.log(`[posignal] ${pair} ${tfLabel(timeframeSec)}: KOSA — ${err.message}`);

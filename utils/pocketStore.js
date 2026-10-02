@@ -14,15 +14,15 @@ async function ready() {
 
 // ── Trades ──────────────────────────────────────────────────────────────
 
-async function recordOpenTrade({ orderId, pair, direction, stake, expirySeconds }) {
+async function recordOpenTrade({ orderId, pair, direction, stake, expirySeconds, source = null }) {
   try {
     await ready();
     const now = Date.now();
     await db.query(
-      `INSERT INTO po_trades (orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO po_trades (orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(orderId) DO NOTHING`,
-      [String(orderId), pair, direction, stake, expirySeconds, now, now + expirySeconds * 1000]
+      [String(orderId), pair, direction, stake, expirySeconds, now, now + expirySeconds * 1000, source]
     );
   } catch (err) {
     console.error('[pocketStore] Imeshindwa kuhifadhi trade iliyofunguliwa:', err.message);
@@ -98,6 +98,84 @@ async function getTradeHistory(limit = 200) {
   }
 }
 
+// ── Auto-trade (source = 'auto') ────────────────────────────────────────
+
+// Trades za auto ambazo bado ziko wazi (kwa kurejesha hali baada ya restart).
+async function getOpenAutoTrades() {
+  try {
+    await ready();
+    const r = await db.query(
+      `SELECT orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt
+         FROM po_trades WHERE closedAt IS NULL AND source = 'auto' ORDER BY openedAt ASC`
+    );
+    return r.rows || [];
+  } catch (err) {
+    console.error('[pocketStore] Imeshindwa kusoma auto-trades zilizo wazi:', err.message);
+    return null; // null = DB imeshindwa (tofauti na [] = hakuna)
+  }
+}
+
+// Hali ya hatari ya auto-trade tangu `sinceMs` (mwanzo wa siku ya UTC):
+//   dailyPnl (hasara = -stake; faida = profit chanya), tradesToday, na hasara mfululizo
+//   za mwisho (bila ushindi katikati). Rudisha null DB ikishindwa.
+async function getAutoRiskState(sinceMs) {
+  try {
+    await ready();
+    const day = await db.query(
+      `SELECT COUNT(*) AS n,
+              COALESCE(SUM(CASE WHEN win = 1 THEN MAX(COALESCE(profit, 0), 0)
+                                WHEN win = 0 THEN -stake ELSE 0 END), 0) AS pnl
+         FROM po_trades WHERE source = 'auto' AND openedAt >= ?`,
+      [sinceMs]
+    );
+    const row = (day.rows || [])[0] || {};
+    const last = await db.query(
+      `SELECT win, closedAt FROM po_trades
+        WHERE source = 'auto' AND closedAt IS NOT NULL AND win IS NOT NULL
+        ORDER BY closedAt DESC LIMIT 20`
+    );
+    let consecutiveLosses = 0;
+    let lastLossAt = null;
+    for (const t of last.rows || []) {
+      if (Number(t.win) === 1) break;
+      consecutiveLosses++;
+      if (lastLossAt == null) lastLossAt = Number(t.closedAt);
+    }
+    return {
+      tradesToday: Number(row.n) || 0,
+      dailyPnl: Number(row.pnl) || 0,
+      consecutiveLosses,
+      lastLossAt,
+    };
+  } catch (err) {
+    console.error('[pocketStore] Imeshindwa kusoma hali ya hatari ya auto-trade:', err.message);
+    return null;
+  }
+}
+
+// Takwimu za jumla za auto-trades zilizofungwa (kwa .poauto stats).
+async function getAutoStats(limit = 500) {
+  try {
+    await ready();
+    const r = await db.query(
+      `SELECT pair, stake, win, profit FROM po_trades
+        WHERE source = 'auto' AND closedAt IS NOT NULL AND win IS NOT NULL
+        ORDER BY closedAt DESC LIMIT ?`,
+      [limit]
+    );
+    const rows = r.rows || [];
+    let wins = 0, losses = 0, pnl = 0;
+    for (const t of rows) {
+      if (Number(t.win) === 1) { wins++; pnl += Math.max(Number(t.profit) || 0, 0); }
+      else { losses++; pnl -= Number(t.stake) || 0; }
+    }
+    return { trades: rows.length, wins, losses, pnl };
+  } catch (err) {
+    console.error('[pocketStore] Imeshindwa kusoma takwimu za auto-trade:', err.message);
+    return null;
+  }
+}
+
 // ── Settings ────────────────────────────────────────────────────────────
 
 async function saveSetting(key, value) {
@@ -141,6 +219,9 @@ module.exports = {
   recordOpenTrade,
   recordClosedTrade,
   getOpenTrades,
+  getOpenAutoTrades,
+  getAutoRiskState,
+  getAutoStats,
   getTradeHistory,
   getClosedResult,
   saveSetting,
