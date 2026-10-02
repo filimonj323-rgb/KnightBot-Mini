@@ -60,6 +60,7 @@ const {
   adminLookupNumberAcrossAllInstances,
   restoreAllInstances,
   adminAdjustDays,
+  notifyPaymentReceived,
 } = require('./instanceManager');
 const adminAuth = require('./adminAuth');
 const clickpesa = require('./clickpesa');
@@ -133,6 +134,74 @@ async function getPendingOrder(orderReference) {
 }
 async function removePendingOrder(orderReference) {
   await db.query('DELETE FROM pending_orders WHERE orderReference = ?', [orderReference]);
+}
+
+// ── Kuthibitisha malipo moja kwa moja (bila admin) ─────────────────────
+// Njia TATU zinaweza kugundua malipo yamekamilika: (1) webhook ya ClickPesa,
+// (2) dashboard.html inayouliza /pay-status mteja akisubiri, (3) reconciler
+// ya nyuma (kila sekunde 30) kwa wateja waliofunga ukurasa. Zote zinapitia
+// settlePaidOrder(), ambayo "inakamata" order kwa DELETE — ni moja tu
+// itakayofanikiwa, hivyo siku haziongezwi mara mbili.
+async function settlePaidOrder(orderReference, info = {}) {
+  const order = await getPendingOrder(orderReference);
+  if (!order) return null;
+
+  const claim = await db.query('DELETE FROM pending_orders WHERE orderReference = ?', [orderReference]);
+  if (!claim.rowsAffected) return null; // njia nyingine imeshaishughulikia
+
+  if (info.collectedAmount != null && Number(info.collectedAmount) < Number(order.amount)) {
+    console.warn(`[payment] ${orderReference}: kiasi kilichokusanywa (${info.collectedAmount}) < bei ya package (${order.amount}) — nimeendelea kutoa huduma, angalia ClickPesa dashboard.`);
+  }
+
+  try {
+    const user = await adminMarkPaid(order.phoneNumber, order.days, {
+      method: 'clickpesa',
+      orderReference,
+      amount: order.amount,
+      paymentReference: info.paymentReference || null,
+    });
+    console.log(`[payment] ✅ ${orderReference}: ${order.phoneNumber} ameongezewa siku ${order.days}`);
+    notifyPaymentReceived(order.phoneNumber, order.days, user && user.paidUntil).catch(() => {});
+    return { order, user };
+  } catch (e) {
+    // Rudisha order ili reconciler ijaribu tena — mteja asipoteze malipo.
+    await insertPendingOrder(orderReference, order.phoneNumber, order.days, order.amount).catch(() => {});
+    throw e;
+  }
+}
+
+const PAID_STATUSES = ['SUCCESS', 'SETTLED', 'COMPLETED', 'PAID'];
+const ORDER_MAX_AGE_MS = 2 * 60 * 60 * 1000; // order isiyolipwa baada ya saa 2 inafutwa
+
+async function reconcilePendingOrders() {
+  const res = await db.query('SELECT * FROM pending_orders');
+  for (const order of res.rows) {
+    try {
+      const st = await clickpesa.getPaymentStatus(order.orderReference);
+      if (st && PAID_STATUSES.includes(st.status)) {
+        await settlePaidOrder(order.orderReference, st);
+      } else if (st && st.status === 'FAILED') {
+        await removePendingOrder(order.orderReference);
+      } else if (Date.now() - Number(order.createdAt) > ORDER_MAX_AGE_MS) {
+        await removePendingOrder(order.orderReference);
+      }
+    } catch (e) {
+      console.error(`[payment/reconcile] ${order.orderReference}:`, e.message);
+    }
+  }
+}
+
+let _reconcilerStarted = false;
+function startPaymentReconciler() {
+  if (_reconcilerStarted) return;
+  _reconcilerStarted = true;
+  let running = false;
+  setInterval(async () => {
+    if (running) return;
+    running = true;
+    try { await reconcilePendingOrders(); } catch (e) { console.error('[payment/reconcile]', e.message); }
+    running = false;
+  }, 30 * 1000);
 }
 
 const PORT = process.env.PORT || process.env.PAIRING_PORT || 3000;
@@ -1007,32 +1076,72 @@ async function handlePairingRequest(req, res) {
       });
     }
 
+    // ── Mteja anauliza hali ya malipo yake (dashboard.html inapiga hii kila sekunde chache) ──
+    const payStatusMatch = req.method === 'GET' && /^\/api\/dashboard\/([^/?]+)\/pay-status\?ref=([A-Za-z0-9]+)/.exec(req.url);
+    if (payStatusMatch) {
+      const token = decodeURIComponent(payStatusMatch[1]);
+      const ref = payStatusMatch[2];
+      const phone = await getPhoneNumberByToken(token);
+      if (!phone) return sendJson(res, 404, { ok: false, error: 'Dashboard link si sahihi.' });
+
+      let status = 'NOT_FOUND'; // tayari imeshughulikiwa (webhook/reconciler) au haipo
+      const order = await getPendingOrder(ref);
+      if (order && order.phoneNumber === phone) {
+        const st = await clickpesa.getPaymentStatus(ref).catch((e) => {
+          console.error('[pay-status]', e.message);
+          return null;
+        });
+        if (st && PAID_STATUSES.includes(st.status)) {
+          await settlePaidOrder(ref, st);
+          status = 'PAID';
+        } else if (st && st.status === 'FAILED') {
+          await removePendingOrder(ref);
+          status = 'FAILED';
+        } else {
+          status = 'PENDING';
+        }
+      }
+      const billing = await getBillingForToken(token);
+      return sendJson(res, 200, { ok: true, status, ...billing });
+    }
+
     // ── ClickPesa webhook — called by ClickPesa, not the browser ───────
+    // Muundo halisi wa ClickPesa: { event: 'PAYMENT RECEIVED', data: { status,
+    // orderReference, paymentReference, collectedAmount, ... }, checksum,
+    // checksumMethod } — taarifa za malipo ziko ndani ya `data`.
     if (req.method === 'POST' && req.url === '/api/payment/webhook') {
       const body = await readJsonBody(req);
+      const data = (body && body.data) || body || {};
+      const orderReference = data.orderReference;
+      const event = String(body.event || '').toUpperCase();
 
-      if (!clickpesa.verifyWebhookChecksum(body)) {
-        console.error('[payment/webhook] checksum haikuthibitika:', JSON.stringify(body));
-        return sendJson(res, 400, { ok: false, error: 'Invalid checksum' });
+      let status = String(data.status || '').toUpperCase();
+      let paymentInfo = { paymentReference: data.paymentReference || null, collectedAmount: data.collectedAmount };
+
+      if (body.checksum) {
+        if (!clickpesa.verifyWebhookChecksum(body)) {
+          console.error('[payment/webhook] checksum haikuthibitika:', JSON.stringify(body));
+          return sendJson(res, 400, { ok: false, error: 'Invalid checksum' });
+        }
+      } else {
+        // Checksum haijawashwa kwenye ClickPesa — hatuamini body; tunauliza
+        // ClickPesa moja kwa moja hali halisi ya reference hii.
+        console.warn('[payment/webhook] hakuna checksum — natumia status query ya ClickPesa badala yake.');
+        const st = orderReference ? await clickpesa.getPaymentStatus(orderReference).catch(() => null) : null;
+        status = st ? st.status : '';
+        paymentInfo = st || paymentInfo;
       }
 
-      const orderReference = body.orderReference;
-      const order = await getPendingOrder(orderReference);
-      const status = String(body.status || '').toUpperCase();
-      const isSuccess = ['SUCCESS', 'COMPLETED', 'PAID'].includes(status);
+      const order = orderReference ? await getPendingOrder(orderReference) : null;
+      const isSuccess = PAID_STATUSES.includes(status) && event !== 'PAYMENT FAILED';
 
       if (order && isSuccess) {
-        await adminMarkPaid(order.phoneNumber, order.days, {
-          method: 'clickpesa',
-          orderReference,
-          amount: order.amount,
-          paymentReference: body.paymentReference || null,
-        });
-        await removePendingOrder(orderReference);
+        await settlePaidOrder(orderReference, paymentInfo);
       } else if (order && !isSuccess) {
-        console.log(`[payment/webhook] malipo ${orderReference} hayakufanikiwa: ${status}`);
+        console.log(`[payment/webhook] malipo ${orderReference} hayakufanikiwa: ${status || event}`);
+        if (status === 'FAILED' || event === 'PAYMENT FAILED') await removePendingOrder(orderReference);
       } else {
-        console.warn(`[payment/webhook] orderReference isiyojulikana: ${orderReference}`);
+        console.warn(`[payment/webhook] orderReference isiyojulikana au imeshashughulikiwa: ${orderReference}`);
       }
 
       return sendJson(res, 200, { ok: true });
@@ -1069,6 +1178,7 @@ async function initPairingServer() {
   const groupDb = require('../database');
   await groupDb.initializeDatabase();
   startReminderScheduler();
+  startPaymentReconciler();
   // Bring back every previously-paired customer's bot automatically —
   // sessions live in Turso, so this works even without a Railway Volume
   // (see restoreAllInstances()'s comment for details).

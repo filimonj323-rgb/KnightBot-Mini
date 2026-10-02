@@ -26,6 +26,9 @@ const cfg = require('./pairingConfig');
 
 const CLIENT_ID = cfg.CLICKPESA_CLIENT_ID;
 const API_KEY = cfg.CLICKPESA_API_KEY;
+// Checksum key ni TOFAUTI na API key (ClickPesa Dashboard -> Developers ->
+// Checksum). Tukiikosa, tunarudi kwenye API key kama zamani.
+const CHECKSUM_KEY = cfg.CLICKPESA_CHECKSUM_KEY || API_KEY;
 const BASE_URL = (cfg.CLICKPESA_BASE_URL || 'https://api.clickpesa.com').replace(/\/+$/, '');
 
 function assertConfigured() {
@@ -50,7 +53,7 @@ function canonicalize(obj) {
 function createChecksum(payload) {
   const canonical = canonicalize(payload);
   const payloadString = JSON.stringify(canonical);
-  return crypto.createHmac('sha256', API_KEY).update(payloadString).digest('hex');
+  return crypto.createHmac('sha256', CHECKSUM_KEY).update(payloadString).digest('hex');
 }
 
 /**
@@ -61,7 +64,9 @@ function createChecksum(payload) {
 function verifyWebhookChecksum(payload) {
   if (!payload || !payload.checksum) return false;
   const { checksum, checksumMethod, ...rest } = payload;
-  return createChecksum(rest) === checksum;
+  const expected = Buffer.from(createChecksum(rest));
+  const received = Buffer.from(String(checksum));
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received);
 }
 
 let cachedToken = null;
@@ -218,8 +223,40 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
   return data;
 }
 
+/**
+ * Inauliza ClickPesa hali ya malipo kwa orderReference (bila kusubiri
+ * webhook). Inarudisha { status, paymentReference, collectedAmount } au
+ * null kama ClickPesa haina rekodi ya reference hiyo bado.
+ * status: PROCESSING | PENDING | SUCCESS | SETTLED | FAILED
+ */
+async function getPaymentStatus(orderReference) {
+  const token = await getAuthToken();
+  const ref = String(orderReference || '').replace(/[^a-zA-Z0-9]/g, '').slice(-20);
+  const res = await fetch(`${BASE_URL}/third-parties/payments/${encodeURIComponent(ref)}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (res.status === 404) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(`ClickPesa status query imeshindwa (${res.status}): ${(data && data.message) || ''}`);
+  }
+  // Jibu linaweza kuwa array ya malipo (majaribio mengi kwa reference moja)
+  // au object moja — tunachagua lililofanikiwa kwanza, la sivyo la mwisho.
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : (data ? [data] : []));
+  if (!list.length) return null;
+  const isPaid = (p) => ['SUCCESS', 'SETTLED'].includes(String(p.status || '').toUpperCase());
+  const pick = list.find(isPaid) || list[list.length - 1];
+  return {
+    status: String(pick.status || '').toUpperCase(),
+    paymentReference: pick.paymentReference || pick.id || null,
+    collectedAmount: pick.collectedAmount != null ? Number(pick.collectedAmount) : null,
+  };
+}
+
 module.exports = {
   initiateUssdPush,
+  getPaymentStatus,
   verifyWebhookChecksum,
   createChecksum,
 };

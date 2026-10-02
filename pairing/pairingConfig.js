@@ -50,7 +50,11 @@ module.exports = {
 
   // ── ClickPesa (Dashboard -> Settings -> Developers -> Create Application) ──
   CLICKPESA_CLIENT_ID: 'IDJwwKwcQaNUPWx5OTCjFaCPOuaGjeTG',
-  CLICKPESA_API_KEY: 'SKUPUAIslmBCgrSpS5A3t5uP8E3vdn00D4nuA6w1FX',
+  CLICKPESA_API_KEY: 'SKRYiIhnbJNt2cMD5uZLPo7tos08pd37tm03JrnmeW',
+  // Checksum key (Dashboard -> Settings -> Developers -> application yako ->
+  // Checksum). Hii ni key TOFAUTI na API key — inatumika kusaini maombi
+  // yanayotoka na kuthibitisha webhook zinazoingia kutoka ClickPesa.
+  CLICKPESA_CHECKSUM_KEY: 'CHKs7WiXSBfa5DZi58Pq4VVC9oLGT9FMNQg',
   CLICKPESA_BASE_URL: 'https://api.clickpesa.com',
 
   // ── Pairing website base URL (used in WhatsApp dashboard-link messages) ──

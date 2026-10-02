@@ -1614,6 +1614,21 @@ async function adminAdjustDays(phoneNumber, deltaDays) {
 }
 
 /**
+ * Inamtumia mteja ujumbe wa uthibitisho kwenye WhatsApp yake mwenyewe mara
+ * malipo yanapothibitishwa (bila admin). Kimya kama bot yake haijaunganishwa
+ * kwa sasa — huduma tayari imeongezwa kwenye database.
+ */
+async function notifyPaymentReceived(phoneNumber, days, paidUntil) {
+  const record = instances.get(phoneNumber);
+  if (!record || record.status !== 'connected' || !record.sock) return;
+  const until = paidUntil
+    ? new Date(paidUntil).toLocaleString('sw-TZ', { timeZone: 'Africa/Dar_es_Salaam', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  const text = `✅ *Malipo yamepokelewa!*\n\nUmeongezewa siku ${days}.` + (until ? `\nBot yako itafanya kazi hadi: *${until}*` : '') + '\n\nAsante kwa kulipia 🙏';
+  await record.sock.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text });
+}
+
+/**
  * Dashboard "Billing" tab — a customer's own trial/paid status, used to
  * show a countdown / pay button on their dashboard.html.
  */
@@ -2196,4 +2211,5 @@ module.exports = {
   adminLookupNumberAcrossAllInstances,
   restoreAllInstances,
   adminAdjustDays,
+  notifyPaymentReceived,
 };
