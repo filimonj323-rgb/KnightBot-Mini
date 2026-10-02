@@ -131,7 +131,8 @@ async function initSchema() {
       win           INTEGER,
       profit        REAL,
       status        TEXT,
-      resultJson    TEXT
+      resultJson    TEXT,
+      source        TEXT
     )`,
     // Key/value ya settings za Pocket Option (mfano auto-signal kwa kila chat).
     `CREATE TABLE IF NOT EXISTS po_settings (
@@ -143,6 +144,15 @@ async function initSchema() {
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
     `CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_open ON fx_auto_trades(closedAt)`,
   ], 'write');
+
+  // Migration: po_trades.source ('auto' = trade iliyofunguliwa na pocketAutoTrader,
+  // NULL = manual .pobuy/.posell au dashboard). DB zilizopo hazipati column
+  // kutoka CREATE TABLE IF NOT EXISTS — swallow "duplicate column" kama zile za juu.
+  try {
+    await client.execute('ALTER TABLE po_trades ADD COLUMN source TEXT');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
+  }
 
   // Migration for a DB created before the `automation` column existed —
   // CREATE TABLE IF NOT EXISTS above never touches an already-existing
