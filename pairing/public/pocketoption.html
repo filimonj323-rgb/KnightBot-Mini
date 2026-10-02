@@ -68,6 +68,19 @@
         <div class="po-toast" id="autoToast"></div>
         <div class="po-note">Auto-signal huchanganua kila candle ikifungwa na kutuma signals bora kwenye WhatsApp yako; pia zinaonekana kwenye tab ya Signals (Live Feed). Mpangilio unahifadhiwa — bot ikirestart inaendelea yenyewe.</div>
       </div>
+      <div class="po-card">
+        <h3><span>👥 Group ya Signals &amp; Matokeo (Pocket Option)</span><button class="po-btn small" onclick="loadTargets(true)">🔄 Orodha</button></h3>
+        <label class="po-label">Group la kutuma</label>
+        <select class="po-select" id="tgGroup"><option value="">— Chagua group —</option></select>
+        <label style="display:flex;align-items:center;gap:8px;margin:0 0 10px;cursor:pointer;"><input type="checkbox" id="tgSignals" style="width:auto;margin:0;" /> Tuma signals kwenye group</label>
+        <label style="display:flex;align-items:center;gap:8px;margin:0 0 12px;cursor:pointer;"><input type="checkbox" id="tgResults" style="width:auto;margin:0;" /> Tuma profit / loss kiotomatiki</label>
+        <div class="po-grid2">
+          <button class="po-btn up" onclick="saveTargets()">💾 Hifadhi</button>
+          <button class="po-btn" onclick="testTarget()">📨 Tuma Test</button>
+        </div>
+        <div class="po-toast" id="tgToast"></div>
+        <div class="po-note">Signals (auto-signal na auto-trade) na matokeo ya WIN/LOSS yatatumwa kwenye group hili, pamoja na DM yako ya kawaida. Bot kuu lazima iwe member wa group.</div>
+      </div>
     </div>
 
     <!-- SIGNALS -->
@@ -661,9 +674,49 @@
       : '<div class="po-empty">Hakuna trades zinazolingana.</div>';
   }
 
+
+  // ── Group la signals + matokeo (profit/loss) ─────────────────────────
+  async function loadTargets(manual) {
+    try {
+      const [t, g] = await Promise.all([
+        api('/api/admin/targets'),
+        api('/api/admin/groups').catch((e) => ({ groups: [], error: e.message })),
+      ]);
+      const cur = t.targets.po;
+      const groups = (g.groups || []).slice();
+      if (cur.groupJid && !groups.some((x) => x.id === cur.groupJid)) groups.unshift({ id: cur.groupJid, subject: cur.groupName || cur.groupJid, participants: 0 });
+      $('tgGroup').innerHTML = '<option value="">— Chagua group —</option>' +
+        groups.map((x) => `<option value="${esc(x.id)}">${esc(x.subject)}${x.participants ? ' (' + x.participants + ')' : ''}</option>`).join('');
+      $('tgGroup').value = cur.groupJid || '';
+      $('tgSignals').checked = !!cur.sendSignals;
+      $('tgResults').checked = !!cur.sendResults;
+      if (g.error) toast('tgToast', 'Orodha ya groups: ' + g.error, false);
+      else if (manual) toast('tgToast', 'Orodha imesasishwa (groups ' + groups.length + ')', true);
+    } catch (e) { toast('tgToast', e.message, false); }
+  }
+  async function saveTargets() {
+    const sel = $('tgGroup');
+    const name = sel.value ? sel.options[sel.selectedIndex].textContent.replace(/ \(\d+\)$/, '') : '';
+    try {
+      await api('/api/admin/targets', { method: 'POST', body: JSON.stringify({
+        platform: 'po', groupJid: sel.value, groupName: name,
+        sendSignals: $('tgSignals').checked, sendResults: $('tgResults').checked,
+      }) });
+      toast('tgToast', '✅ Imehifadhiwa', true);
+      return true;
+    } catch (e) { toast('tgToast', e.message, false); return false; }
+  }
+  async function testTarget() {
+    if (!(await saveTargets())) return;
+    try {
+      await api('/api/admin/targets/test', { method: 'POST', body: JSON.stringify({ platform: 'po' }) });
+      toast('tgToast', '✅ Imehifadhiwa na ujumbe wa test umetumwa kwenye group', true);
+    } catch (e) { toast('tgToast', e.message, false); }
+  }
+
   function showApp() {
     $('poLogin').style.display = 'none'; $('poApp').style.display = 'block';
-    renderBar(); refresh();
+    renderBar(); refresh(); loadTargets();
     clearInterval(pollTimer); pollTimer = setInterval(refresh, 10000);
     clearInterval(tickTimer); tickTimer = setInterval(tick, 1000);
   }

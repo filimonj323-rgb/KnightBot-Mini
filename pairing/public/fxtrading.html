@@ -214,6 +214,23 @@
 
       <div class="card">
         <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>👥 Group ya Signals &amp; Matokeo (Deriv)</span>
+          <button onclick="loadTargets(true)">🔄 Orodha</button>
+        </div>
+        <label>Group la kutuma</label>
+        <select id="tgGroup"><option value="">— Chagua group —</option></select>
+        <label style="display:flex; align-items:center; gap:8px; margin:0 0 10px; cursor:pointer; font-size:12px;"><input type="checkbox" id="tgSignals" style="width:auto; margin:0;" /> Tuma signals kwenye group</label>
+        <label style="display:flex; align-items:center; gap:8px; margin:0 0 12px; cursor:pointer; font-size:12px;"><input type="checkbox" id="tgResults" style="width:auto; margin:0;" /> Tuma profit / loss kiotomatiki</label>
+        <div class="grid2">
+          <button class="primary" onclick="saveTargets()">💾 Hifadhi</button>
+          <button class="primary" onclick="testTarget()">📨 Tuma Test</button>
+        </div>
+        <div class="toast" id="tgToast"></div>
+        <div class="section-label" style="margin:12px 0 0;">Signal ya auto-trade na matokeo yake (WIN/LOSS + kiasi) vitatumwa kwenye group hili, pamoja na DM yako ya kawaida. Bot kuu lazima iwe member wa group.</div>
+      </div>
+
+      <div class="card">
+        <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
           <span>🧠 AI Predictions (Technical + Calendar)</span>
           <span class="ai-tag" id="predGeneratedAt"></span>
         </div>
@@ -1103,12 +1120,61 @@
     }
   }
 
+
+  // ── Group la signals + matokeo (profit/loss) ─────────────────────────
+  const tgEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function tgToast(msg, ok) {
+    const el = document.getElementById('tgToast');
+    el.className = 'toast ' + (ok ? 'success' : 'error');
+    el.textContent = msg;
+  }
+  async function loadTargets(manual) {
+    try {
+      const [t, g] = await Promise.all([
+        api('/api/admin/targets'),
+        api('/api/admin/groups').catch((e) => ({ groups: [], error: e.message })),
+      ]);
+      const cur = t.targets.deriv;
+      const groups = (g.groups || []).slice();
+      if (cur.groupJid && !groups.some((x) => x.id === cur.groupJid)) groups.unshift({ id: cur.groupJid, subject: cur.groupName || cur.groupJid, participants: 0 });
+      const sel = document.getElementById('tgGroup');
+      sel.innerHTML = '<option value="">— Chagua group —</option>' +
+        groups.map((x) => `<option value="${tgEsc(x.id)}">${tgEsc(x.subject)}${x.participants ? ' (' + x.participants + ')' : ''}</option>`).join('');
+      sel.value = cur.groupJid || '';
+      document.getElementById('tgSignals').checked = !!cur.sendSignals;
+      document.getElementById('tgResults').checked = !!cur.sendResults;
+      if (g.error) tgToast('Orodha ya groups: ' + g.error, false);
+      else if (manual) tgToast('Orodha imesasishwa (groups ' + groups.length + ')', true);
+    } catch (e) { tgToast(e.message, false); }
+  }
+  async function saveTargets() {
+    const sel = document.getElementById('tgGroup');
+    const name = sel.value ? sel.options[sel.selectedIndex].textContent.replace(/ \(\d+\)$/, '') : '';
+    try {
+      await api('/api/admin/targets', { method: 'POST', body: JSON.stringify({
+        platform: 'deriv', groupJid: sel.value, groupName: name,
+        sendSignals: document.getElementById('tgSignals').checked,
+        sendResults: document.getElementById('tgResults').checked,
+      }) });
+      tgToast('✅ Imehifadhiwa', true);
+      return true;
+    } catch (e) { tgToast(e.message, false); return false; }
+  }
+  async function testTarget() {
+    if (!(await saveTargets())) return;
+    try {
+      await api('/api/admin/targets/test', { method: 'POST', body: JSON.stringify({ platform: 'deriv' }) });
+      tgToast('✅ Imehifadhiwa na ujumbe wa test umetumwa kwenye group', true);
+    } catch (e) { tgToast(e.message, false); }
+  }
+
   function showApp() {
     document.getElementById('loginCard').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     renderLiveBar();
     renderSignals(); // jedwali tupu mara moja, kabla ya refresh ya kwanza
     renderCalendarFilters();
+    loadTargets();
     refresh();
     refreshCalendar();
     refreshPredictions();
