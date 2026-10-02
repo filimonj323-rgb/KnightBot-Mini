@@ -14,4 +14,4 @@ cmds = [
 ]
 
 [start]
-cmd = "node index.js"
+cmd = "node start.js"
