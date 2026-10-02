@@ -743,6 +743,7 @@ async function startBot() {
       // kutoka Turso (zote ni salama kuitwa tena baada ya reconnect).
       try {
         require('./utils/pocketOptionTrader').restoreOpenTrades().catch(() => {});
+        require('./utils/signalTargets').load().catch(() => {});
         require('./commands/utility/posignal').restoreAutoJobs(sock).catch(() => {});
 
         // Pocket Option AUTO-TRADE — inajisajili kwa matokeo ya trades, inarejesha hali
