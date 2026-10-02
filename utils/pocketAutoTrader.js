@@ -35,6 +35,7 @@
 const pocketTrader = require('./pocketOptionTrader');
 const pocketStore = require('./pocketStore');
 const pocketSignal = require('./pocketSignal');
+const signalTargets = require('./signalTargets');
 
 const CONFIG_KEY = 'autotrade:config';
 const CURRENCIES = new Set(['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD']);
@@ -478,6 +479,15 @@ async function considerSignal(r) {
         `🆔 ${res.orderId}\n\n${reasons}\n\n` +
         `_Leo: trades ${tradesToday}/${cfg.maxTradesPerDay} • P/L ${money(dailyPnl)}. Zima: .poauto off_`
     );
+
+    // Signal kwa group lililochaguliwa kwenye dashboard (ikiwa imewashwa).
+    signalTargets.sendSignal(
+      'po',
+      `📡 *SIGNAL — ${r.pair}* (Pocket Option)\n\n` +
+        `${arrow}\n` +
+        `💪 ${r.grade} ${r.strength}% • ⏱️ Expiry: ${pocketSignal.tfLabel(r.expirySec)}\n\n` +
+        `${reasons}\n\n⚠️ Hii SI ushauri wa kifedha.`
+    ).catch(() => {});
   } catch (err) {
     positions.delete(resKey);
     tradesToday--;
@@ -514,6 +524,7 @@ async function handleSettled({ orderId, status, result }) {
     await notify(
       `✅ *WIN* — ${label}\n💵 ${gain > 0 ? `+${money(gain)}` : 'faida haijulikani'} • 🆔 ${id}\n📊 Leo: ${money(dailyPnl)} (trades ${tradesToday})`
     );
+    signalTargets.sendResult('po', `✅ *WIN* — ${label}\n💵 ${gain > 0 ? `+${money(gain)}` : 'faida haijulikani'}`).catch(() => {});
   } else if (status === 'loss') {
     dailyPnl -= pos.stake;
     consecutiveLosses++;
@@ -521,6 +532,7 @@ async function handleSettled({ orderId, status, result }) {
     await notify(
       `🔴 *LOSS* — ${label}\n💵 -${money(pos.stake)} • 🆔 ${id}\n📊 Leo: ${money(dailyPnl)} • hasara mfululizo: ${consecutiveLosses}/${cfg.maxConsecLosses}`
     );
+    signalTargets.sendResult('po', `🔴 *LOSS* — ${label}\n💵 -${money(pos.stake)}`).catch(() => {});
     evaluateBreakers();
   } else if (status === 'unconfirmed') {
     tradesToday = Math.max(0, tradesToday - 1); // haikufunguliwa kweli

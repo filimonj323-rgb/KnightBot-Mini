@@ -102,6 +102,7 @@ const {
 // (angalia restoreOpenTradesFromDb() chini — hii ndiyo fix ya tatizo la
 // "auto-trade inafungua mara mbili kwa jozi ile ile baada ya redeploy").
 const fxTradesDb = require('../pairing/db');
+const signalTargets = require('./signalTargets');
 
 const ENABLED = String(process.env.AUTO_TRADE_ENABLED || 'false').toLowerCase() === 'true';
 const CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 * 60 * 1000); // saa 1
@@ -1021,6 +1022,16 @@ async function checkPairAndTradeInner(pairInfo) {
         (sig.notes.length ? `🧠 Sababu:\n${sig.notes.map((n) => `   • ${n}`).join('\n')}\n\n` : '') +
         `⚠️ Trade hii ilifunguliwa KIOTOMATIKO kutokana na signal. Hii SI ushauri wa kifedha.`
     );
+
+    // Signal kwa group lililochaguliwa kwenye dashboard (ikiwa imewashwa).
+    signalTargets.sendSignal(
+      'deriv',
+      `📡 *SIGNAL — ${code}* (Deriv)\n\n` +
+        `${sig.direction === 'BUY' ? '🟢 BUY ⬆️' : '🔴 SELL ⬇️'}\n` +
+        `💪 Nguvu: ${sig.strength}%\n` +
+        (sig.notes.length ? `\n🧠 Sababu:\n${sig.notes.slice(0, 3).map((n) => `• ${n}`).join('\n')}\n` : '') +
+        `\n⚠️ Hii SI ushauri wa kifedha. Trade kwa hatari yako mwenyewe.`
+    ).catch(() => {});
   } catch (err) {
     console.error(`[autoTrader] Imeshindwa kufungua trade ${code}:`, err.message);
     await notify(`❌ Bot imeshindwa kufungua auto-trade ya ${code}: ${err.message}`);
@@ -1149,6 +1160,13 @@ async function pollClosedTrades() {
           `Bei ya kufunga: $${Number.isFinite(sellPrice) ? fmt(sellPrice) : 'N/A'}\n` +
           `🆔 Contract ID: ${contractId}`
       );
+
+      // Matokeo (profit/loss) kwa group lililochaguliwa kwenye dashboard (ikiwa imewashwa).
+      signalTargets.sendResult(
+        'deriv',
+        `${won ? '✅ *WIN*' : '🔴 *LOSS*'} — ${info.code} ${info.direction}\n` +
+          `💵 ${won ? '+' : '-'}$${fmt(Math.abs(profit))}`
+      ).catch(() => {});
 
       // Kikomo cha hasara ya SIKU (UTC) — kinapewa kipaumbele juu ya
       // "consecutive losses" (havichanganywi — kimoja tu kwa wakati mmoja).
