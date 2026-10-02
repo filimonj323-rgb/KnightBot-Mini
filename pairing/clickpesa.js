@@ -232,21 +232,27 @@ async function initiateUssdPush({ amount, phoneNumber, orderReference }) {
 async function getPaymentStatus(orderReference) {
   const token = await getAuthToken();
   const ref = String(orderReference || '').replace(/[^a-zA-Z0-9]/g, '').slice(-20);
+  if (!ref) return null;
   const res = await fetch(`${BASE_URL}/third-parties/payments/${encodeURIComponent(ref)}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 404) return null;
   const data = await res.json().catch(() => null);
+  console.log(`[clickpesa][debug] status query ref=${ref} status=${res.status} body=${JSON.stringify(data).slice(0, 600)}`);
   if (!res.ok) {
     throw new Error(`ClickPesa status query imeshindwa (${res.status}): ${(data && data.message) || ''}`);
   }
-  // Jibu linaweza kuwa array ya malipo (majaribio mengi kwa reference moja)
-  // au object moja — tunachagua lililofanikiwa kwanza, la sivyo la mwisho.
   const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : (data ? [data] : []));
-  if (!list.length) return null;
+
+  // USALAMA: kubali TU rekodi ambayo orderReference yake inalingana HASA na
+  // ile tuliyouliza. Bila hili, jibu lolote (mf. orodha ya malipo mengine,
+  // au rekodi ya mteja mwingine) lingeweza kuhesabiwa kama malipo ya mteja huyu.
+  const mine = list.filter((p) => p && String(p.orderReference || '').replace(/[^a-zA-Z0-9]/g, '').slice(-20) === ref);
+  if (!mine.length) return null;
+
   const isPaid = (p) => ['SUCCESS', 'SETTLED'].includes(String(p.status || '').toUpperCase());
-  const pick = list.find(isPaid) || list[list.length - 1];
+  const pick = mine.find(isPaid) || mine[mine.length - 1];
   return {
     status: String(pick.status || '').toUpperCase(),
     paymentReference: pick.paymentReference || pick.id || null,

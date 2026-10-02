@@ -146,6 +146,12 @@ async function settlePaidOrder(orderReference, info = {}) {
   const order = await getPendingOrder(orderReference);
   if (!order) return null;
 
+  // Kiasi kilichokusanywa kikiwa 0 au chini, hakuna malipo halisi.
+  if (info.collectedAmount != null && Number(info.collectedAmount) <= 0) {
+    console.warn(`[payment] ${orderReference}: collectedAmount=${info.collectedAmount} — sitoi huduma.`);
+    return null;
+  }
+
   const claim = await db.query('DELETE FROM pending_orders WHERE orderReference = ?', [orderReference]);
   if (!claim.rowsAffected) return null; // njia nyingine imeshaishughulikia
 
