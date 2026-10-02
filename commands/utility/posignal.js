@@ -14,6 +14,7 @@
 
 const { isBridgeUp } = require('../../utils/pocketOptionTrader');
 const pocketStore = require('../../utils/pocketStore');
+const signalTargets = require('../../utils/signalTargets');
 const {
   DEFAULT_PAIRS,
   SCAN_MODES,
@@ -90,6 +91,7 @@ function scheduleAuto(sock, jid, job) {
           if (job.sent.size > MAX_SENT_CACHE) job.sent.delete(job.sent.values().next().value);
           pushRecent(r);
           await (global.currentSock || sock).sendMessage(jid, { text: formatSignal(r) });
+          signalTargets.sendSignal('po', formatSignal(r)).catch(() => {});
           sentNow++;
         }
       }
