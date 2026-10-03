@@ -305,8 +305,9 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   if (stale != null) {
     const age = stale >= 120 ? `saa ${Math.round(stale / 60)}` : `dakika ${stale}`;
     if (timeframeSec > 60) {
-      // Maktaba ya Pocket Option inarudisha candles za zamani kwa timeframe zaidi ya 1m hata soko likiwa wazi.
-      throw new Error(`Candles za ${p} (${tfLabel(timeframeSec)}) ni za zamani (umri wa ${age}) — tatizo la maktaba, tumia 1m au 30s.`);
+      // Bridge sasa inatumia loadHistoryPeriod kwa timeframe > 1m; ikiwa bado ni ya zamani,
+      // soko limefungwa au historia haikupatikana.
+      throw new Error(`Candles za ${p} (${tfLabel(timeframeSec)}) ni za zamani (umri wa ${age}) — soko limefungwa au historia haikupatikana. Jaribu 1m.`);
     }
     throw new Error(`Soko la ${p} limefungwa (candle ya mwisho ina umri wa ${age}).`);
   }
