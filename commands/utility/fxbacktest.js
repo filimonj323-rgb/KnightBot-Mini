@@ -26,14 +26,15 @@ module.exports = {
   aliases: ['backtest', 'fxbt'],
   category: 'owner',
   description: 'Jaribu mkakati wa auto-trade dhidi ya historia (Twelve Data) kabla ya kuutumia na pesa halisi',
-  usage: '.fxbacktest <JOZI, mfano EURUSD> [bars, default 1500]',
+  usage: '.fxbacktest <JOZI, mfano EURUSD> [bars, default 1500] [nogate|nodaily]',
   ownerOnly: true,
 
   async execute(sock, msg, args, extra) {
     if (!args[0]) {
       return extra.reply(
         `📋 *Backtest ya Mkakati wa Forex*\n\n` +
-          `Matumizi: *.fxbacktest <JOZI> [bars]*\n` +
+          `Matumizi: *.fxbacktest <JOZI> [bars] [nogate|nodaily]*\n` +
+          `_nogate_ = zima gate ya 4h+1day, _nodaily_ = zima gate ya 1day tu (kulinganisha kabla/baada)\n` +
           `Mfano: *.fxbacktest EURUSD*  au  *.fxbacktest GBPUSD 3000*\n\n` +
           `Jozi zilizowekwa kwa auto-trade: ${PAIRS.map((p) => p.code).join(', ')}\n` +
           `(unaweza pia kujaribu jozi nyingine yoyote ya herufi 6, mfano AUDNZD)\n\n` +
@@ -46,9 +47,15 @@ module.exports = {
       return extra.reply(`❌ Jozi "${args[0]}" haieleweki. Tumia mfano: EURUSD, GBPJPY, AUDNZD.`);
     }
 
-    const bars = args[1] ? Number(args[1]) : undefined;
-    if (args[1] && (!Number.isFinite(bars) || bars <= 0)) {
-      return extra.reply(`❌ "${args[1]}" si namba sahihi ya bars.`);
+    // Flags za kulinganisha: nogate (zima gate ya 4h) / nodaily (zima gate ya 1day)
+    const flags = args.slice(1).map((a) => String(a).toLowerCase());
+    const htfGate = flags.includes('nogate') ? false : undefined;
+    const dailyGate = flags.includes('nogate') || flags.includes('nodaily') ? false : undefined;
+    const barsArg = args.slice(1).find((a) => !['nogate', 'nodaily'].includes(String(a).toLowerCase()));
+
+    const bars = barsArg ? Number(barsArg) : undefined;
+    if (barsArg && (!Number.isFinite(bars) || bars <= 0)) {
+      return extra.reply(`❌ \"${barsArg}\" si namba sahihi ya bars.`);
     }
 
     await extra.reply(
@@ -57,7 +64,7 @@ module.exports = {
 
     let result;
     try {
-      result = await runBacktest({ code: resolved.code, symbol: resolved.symbol, bars });
+      result = await runBacktest({ code: resolved.code, symbol: resolved.symbol, bars, htfGate, dailyGate });
     } catch (err) {
       return extra.reply(`❌ Backtest imeshindwa: ${err.message}`);
     }
@@ -66,6 +73,7 @@ module.exports = {
     lines.push(`⎯⎯⎯ 『 *BACKTEST — ${result.code}* 』 ⎯⎯⎯`);
     lines.push('');
     lines.push(`📅 Kipindi: ${result.from} → ${result.to} (candles ${result.bars})`);
+    lines.push(`🧭 Gates: 4h ${result.htfGate ? 'ON' : 'OFF'}  •  1day ${result.dailyGate ? 'ON' : 'OFF'}`);
     lines.push(`💵 Stake: $${result.stake}  •  Multiplier: x${result.multiplier}  •  Kikomo cha signal: ≥${result.strengthThreshold}%`);
     lines.push('');
     lines.push(`📊 *Matokeo*`);

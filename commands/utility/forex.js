@@ -14,7 +14,7 @@
  * dakika kwa dakika). Hii SI ushauri wa kifedha wala wa uwekezaji.
  */
 
-const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('../../utils/forexSignal');
+const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = require('../../utils/forexSignal');
 
 // ─────────────────────────────────────────────
 // Formatting helpers — mtindo uleule wa stock.js/analyze.js
@@ -89,6 +89,15 @@ function buildForexMessage(pairSymbol, s, sig) {
   );
   L.push('');
 
+  // Timeframes — mwelekeo wa kila moja (kwa uamuzi wa trade ya mkono)
+  const tr = getTrends(s);
+  const arrow = (t) => (t === 'BUY' ? '🟢 BUY' : t === 'SELL' ? '🔴 SELL' : '⚪ N/A');
+  L.push(`🧭 *Timeframes:* 1h ${arrow(tr.h1)}  •  4h ${arrow(tr.h4)}  •  1d ${arrow(tr.d1)}`);
+  if (sig.gated) {
+    L.push(`⛔ *Gate imezuia:* 1h ilisema ${sig.rawDirection} (${sig.rawStrength}%) lakini timeframe kubwa inapinga — si salama kuingia.`);
+  }
+  L.push('');
+
   if (sig.newsRisk) {
     L.push(`🚨 *TAHADHARI: Habari kubwa (High impact) iko karibu* — spread/slippage inaweza kuongezeka, epuka kuingia trade mpya sasa hivi.`);
     L.push('');
@@ -154,7 +163,7 @@ async function runForexCommand(sock, msg, args, extra, forcedPair) {
   }
 
   try {
-    const snapshot = await fetchForexSnapshot(pairSymbol, DEFAULT_INTERVAL);
+    const snapshot = await fetchForexSnapshot(pairSymbol, DEFAULT_INTERVAL, { daily: true });
     const sig = computeSignal(snapshot);
     return await sock.sendMessage(
       jid,
