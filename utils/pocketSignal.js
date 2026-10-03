@@ -24,6 +24,12 @@ const MIN_NET_VOTES = 2; // chini ya hii = NEUTRAL
 const WARMUP = 40;
 const MIN_BACKTEST_TRADES = 30; // chini ya hii = sampuli ndogo mno
 const ADX_WEAK = 20; // ADX chini ya hii = soko tulivu -> strength inapunguzwa
+const ADX_TREND = 25; // ADX >= hii = soko lina trend (kura za trend pekee)
+const ADX_DEAD = 1; // ADX chini ya hii = bei haisogei (soko limefungwa / data imekufa)
+const TREND_MAX = 4; // EMA 2 + MACD hist 1 + MACD momentum 1
+const REVERSAL_MAX = 3; // RSI 1 + Bollinger 1 + StochRSI 1
+// Kuchuja kwa hali ya soko (regime). Zima kwa POCKET_REGIME_FILTER=false (mantiki ya zamani).
+const regimeOn = () => String(process.env.POCKET_REGIME_FILTER || 'true').toLowerCase() !== 'false';
 
 // Jozi za soko halisi zinazotambulika na Pocket Option (maktaba ya bridge). Nyingine
 // zote (mfano EURJPY) zipo kama "_otc" tu — normalizePair() inazibadilisha kiotomatiki.
@@ -204,32 +210,56 @@ function voteAt(s, i) {
   const k = get(s.stochK), d = get(s.stochD);
   const adx = get(s.adx);
 
-  let buy = 0, sell = 0;
-  const notes = [];
+  // Makundi mawili ya kura: TREND (kufuata mwelekeo) na REVERSAL (kugeuka). Zinapingana kwa
+  // asili, kwa hiyo hazichanganywi tena kwenye kura moja isipokuwa ADX haijulikani.
+  let tBuy = 0, tSell = 0, rBuy = 0, rSell = 0;
+  const tNotes = [], rNotes = [];
 
   if (ema9 != null && ema21 != null) {
-    if (ema9 > ema21) { buy += 2; notes.push('EMA9 > EMA21 (trend juu)'); }
-    else if (ema9 < ema21) { sell += 2; notes.push('EMA9 < EMA21 (trend chini)'); }
+    if (ema9 > ema21) { tBuy += 2; tNotes.push('EMA9 > EMA21 (trend juu)'); }
+    else if (ema9 < ema21) { tSell += 2; tNotes.push('EMA9 < EMA21 (trend chini)'); }
   }
   if (hist != null) {
-    if (hist > 0) { buy += 1; notes.push('MACD histogram chanya'); }
-    else if (hist < 0) { sell += 1; notes.push('MACD histogram hasi'); }
+    if (hist > 0) { tBuy += 1; tNotes.push('MACD histogram chanya'); }
+    else if (hist < 0) { tSell += 1; tNotes.push('MACD histogram hasi'); }
     if (histPrev != null) {
-      if (hist > histPrev) { buy += 1; notes.push('Momentum ya MACD inaongezeka'); }
-      else if (hist < histPrev) { sell += 1; notes.push('Momentum ya MACD inapungua'); }
+      if (hist > histPrev) { tBuy += 1; tNotes.push('Momentum ya MACD inaongezeka'); }
+      else if (hist < histPrev) { tSell += 1; tNotes.push('Momentum ya MACD inapungua'); }
     }
   }
   if (rsi != null) {
-    if (rsi < 30) { buy += 1; notes.push(`RSI ${rsi.toFixed(1)} — oversold`); }
-    else if (rsi > 70) { sell += 1; notes.push(`RSI ${rsi.toFixed(1)} — overbought`); }
+    if (rsi < 30) { rBuy += 1; rNotes.push(`RSI ${rsi.toFixed(1)} — oversold`); }
+    else if (rsi > 70) { rSell += 1; rNotes.push(`RSI ${rsi.toFixed(1)} — overbought`); }
   }
   if (bbU != null && bbL != null) {
-    if (close <= bbL) { buy += 1; notes.push('Bei imegusa Bollinger ya chini'); }
-    else if (close >= bbU) { sell += 1; notes.push('Bei imegusa Bollinger ya juu'); }
+    if (close <= bbL) { rBuy += 1; rNotes.push('Bei imegusa Bollinger ya chini'); }
+    else if (close >= bbU) { rSell += 1; rNotes.push('Bei imegusa Bollinger ya juu'); }
   }
   if (k != null && d != null) {
-    if (k < 20 && k > d) { buy += 1; notes.push(`StochRSI ${k.toFixed(0)} — inageuka juu`); }
-    else if (k > 80 && k < d) { sell += 1; notes.push(`StochRSI ${k.toFixed(0)} — inageuka chini`); }
+    if (k < 20 && k > d) { rBuy += 1; rNotes.push(`StochRSI ${k.toFixed(0)} — inageuka juu`); }
+    else if (k > 80 && k < d) { rSell += 1; rNotes.push(`StochRSI ${k.toFixed(0)} — inageuka chini`); }
+  }
+
+  // Data iliyokufa: ADX ~0 inamaanisha bei haisogei (mfano indices usiku) — hakuna signal.
+  if (adx != null && adx < ADX_DEAD) {
+    return { direction: 'NEUTRAL', strength: 0, notes: ['Bei haisogei (soko limefungwa?)'], weakMarket: false,
+      regime: 'DEAD', adx, rsi, price: close, buy: 0, sell: 0 };
+  }
+
+  let buy, sell, notes, maxScore, regime;
+  if (regimeOn() && adx != null) {
+    if (adx >= ADX_TREND) {
+      regime = 'TREND'; buy = tBuy; sell = tSell; notes = tNotes; maxScore = TREND_MAX;
+    } else if (adx < ADX_WEAK) {
+      regime = 'RANGE'; buy = rBuy; sell = rSell; notes = rNotes; maxScore = REVERSAL_MAX;
+    } else {
+      // ADX 20-25: hakuna mwelekeo wala range wazi — subiri.
+      return { direction: 'NEUTRAL', strength: 0, notes: [], weakMarket: false, regime: 'TRANSITION',
+        adx, rsi, price: close, buy: tBuy + rBuy, sell: tSell + rSell };
+    }
+  } else {
+    regime = regimeOn() ? 'UNKNOWN' : 'MIXED';
+    buy = tBuy + rBuy; sell = tSell + rSell; notes = [...tNotes, ...rNotes]; maxScore = MAX_SCORE;
   }
 
   const net = buy - sell;
@@ -237,14 +267,18 @@ function voteAt(s, i) {
   let strength = 0;
   if (Math.abs(net) >= MIN_NET_VOTES) {
     direction = net > 0 ? 'BUY' : 'SELL';
-    strength = Math.round((Math.abs(net) / MAX_SCORE) * 100);
+    strength = Math.round((Math.abs(net) / maxScore) * 100);
   }
+  // Mantiki ya zamani tu: kupunguza strength kwenye soko tulivu. Kwenye regime mpya, RANGE
+  // ni hali inayokusudiwa (reversal), kwa hiyo hakuna kikomo cha ziada.
   let weakMarket = false;
-  if (adx != null && adx < ADX_WEAK && direction !== 'NEUTRAL') {
-    weakMarket = true;
-    strength = Math.min(strength, 50);
+  if (!regimeOn() || adx == null) {
+    if (adx != null && adx < ADX_WEAK && direction !== 'NEUTRAL') {
+      weakMarket = true;
+      strength = Math.min(strength, 50);
+    }
   }
-  return { direction, strength, notes, weakMarket, adx, rsi, price: close, buy, sell };
+  return { direction, strength, notes, weakMarket, regime, adx, rsi, price: close, buy, sell };
 }
 
 // Hit-rate ya mantiki hii kwenye candles zilizopo: signal ya bar i -> matokeo ya bar i+1.
@@ -334,7 +368,7 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   }
 
   console.log(
-    `[posignal] ${p} ${tfLabel(timeframeSec)}: ${v.direction} buy=${v.buy} sell=${v.sell} ` +
+    `[posignal] ${p} ${tfLabel(timeframeSec)}: ${v.direction} [${v.regime || '-'}] buy=${v.buy} sell=${v.sell} ` +
     `strength=${v.strength}% adx=${v.adx != null ? v.adx.toFixed(1) : '-'} rsi=${v.rsi != null ? v.rsi.toFixed(1) : '-'} candles=${candles.length}`
   );
   return {
@@ -349,6 +383,7 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
     adx: v.adx,
     notes: v.notes,
     weakMarket: v.weakMarket,
+    regime: v.regime,
     htf,
     htfBlocked,
     candleTime: candles[last].time,
@@ -455,6 +490,7 @@ async function scanPrioritized(timeframeSec = 60, opts = {}) {
 
 const EMOJI = { BUY: '🟢', SELL: '🔴', NEUTRAL: '⚪' };
 const HTF_LABEL = { UP: 'JUU ⬆️', DOWN: 'CHINI ⬇️', FLAT: 'TULIVU ➡️' };
+const REGIME_LABEL = { TREND: 'Trend (kufuata mwelekeo)', RANGE: 'Range (kugeuka)', TRANSITION: 'Mpito', DEAD: 'Imekufa' };
 const LABEL = { BUY: 'UP (BUY) ⬆️', SELL: 'DOWN (SELL) ⬇️', NEUTRAL: 'HAKUNA SIGNAL' };
 
 function formatBacktest(bt) {
@@ -481,6 +517,7 @@ function formatSignal(r, { compact = false } = {}) {
   ];
   if (r.tier === 'fallback') lines.push('🔁 _Fallback — forex majors/minors hazikuwa na signal, hii inatoka jozi nyingine._');
   if (r.rsi != null) lines.push(`📈 RSI: ${r.rsi.toFixed(1)}${r.adx != null ? ` • ADX: ${r.adx.toFixed(1)}` : ''}`);
+  if (REGIME_LABEL[r.regime]) lines.push(`📐 Hali ya soko: *${REGIME_LABEL[r.regime]}*`);
   if (r.htf) lines.push(`🧭 Trend ya 5m: *${HTF_LABEL[r.htf]}*`);
   if (r.weakMarket) lines.push('⚠️ Soko tulivu (ADX ndogo) — nguvu imepunguzwa.');
   lines.push('', '*Sababu:*', ...r.notes.map((n) => `• ${n}`), '', formatBacktest(r.backtest));
