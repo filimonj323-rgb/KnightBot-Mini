@@ -84,6 +84,13 @@ const envOn = (name) => String(process.env[name] ?? 'true').toLowerCase() !== 'f
 const HTF_GATE = envOn('FOREX_HTF_GATE');
 const DAILY_GATE = envOn('FOREX_DAILY_GATE');
 const DAILY_INTERVAL = process.env.FOREX_DAILY_INTERVAL || '1day';
+
+// ── Chanzo cha candles ─────────────────────────────────────────────────
+// FOREX_DATA_SOURCE = 'twelve' (default) au 'deriv'. 'deriv' = candles
+// kutoka Deriv yenyewe (ticks_history) — bei ileile ya trade, hakuna kikomo
+// cha credits. Deriv ikishindwa na TWELVE_DATA_API_KEY ipo, bot inarudi
+// Twelve Data kwa ombi hilo (na kuandika kwenye logs). Jaribu kwanza: .fxcheck
+const DATA_SOURCE = String(process.env.FOREX_DATA_SOURCE || 'twelve').toLowerCase() === 'deriv' ? 'deriv' : 'twelve';
 const DAILY_OUTPUTSIZE = 80; // >= MIN_CANDLES_RECOMMENDED (60); credit 1 TU bila kujali idadi
 // Daily haibadiliki haraka — cache ndefu (default saa 6) ili jozi 7 zisitumie
 // credits 7 kila saa. Candle ya siku inayoendelea (forming) inaondolewa, kwa
@@ -219,7 +226,7 @@ async function td(endpoint, params) {
 // Vuta raw candles (OHLC) kwa interval fulani — credit 1 TU. `order: 'ASC'`
 // ili candles ziwe kongwe→mpya moja kwa moja (rahisi kwa indicators.js
 // bila kuhitaji kugeuza array).
-async function fetchCandles(pairSymbol, interval, outputsize) {
+async function fetchTwelveCandles(pairSymbol, interval, outputsize) {
   if (!API_KEY) {
     throw new Error('TWELVE_DATA_API_KEY haipo kwenye env');
   }
@@ -261,6 +268,31 @@ async function fetchDailyCandles(pairSymbol) {
   return candles;
 }
 
+// Mlango mmoja wa candles kwa kila mtu (live, backtest, daily) — chanzo
+// kinachaguliwa na FOREX_DATA_SOURCE, na Twelve Data ni mbadala wa Deriv.
+async function fetchCandles(pairSymbol, interval, outputsize) {
+  if (DATA_SOURCE === 'deriv') {
+    try {
+      const { getCandles } = require('./derivTrader'); // lazy — epuka mzunguko wa require()
+      const values = await getCandles(pairSymbol, interval, outputsize);
+      if (values.length < MIN_CANDLES_RECOMMENDED) {
+        console.warn(
+          `[forexSignal] ${pairSymbol} (${interval}) [Deriv]: candles ${values.length} ni chache ` +
+          `kuliko zinazopendekezwa (${MIN_CANDLES_RECOMMENDED}).`
+        );
+      }
+      return values;
+    } catch (err) {
+      if (!API_KEY) throw err; // hakuna mbadala
+      console.error(
+        `[forexSignal] Deriv candles zimeshindwa (${pairSymbol} ${interval}): ${err.message} — ` +
+        `natumia Twelve Data kama mbadala.`
+      );
+    }
+  }
+  return fetchTwelveCandles(pairSymbol, interval, outputsize);
+}
+
 function fmtNum(n) {
   return n == null ? 'N/A' : Number(n).toFixed(5);
 }
@@ -294,7 +326,7 @@ function getSessionInfo(baseCcy, quoteCcy) {
 }
 
 async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL, opts = {}) {
-  if (!API_KEY) {
+  if (!API_KEY && DATA_SOURCE !== 'deriv') {
     throw new Error('TWELVE_DATA_API_KEY haipo kwenye env');
   }
 
@@ -565,6 +597,8 @@ module.exports = {
   DAILY_INTERVAL,
   HTF_GATE,
   DAILY_GATE,
+  DATA_SOURCE,
+  fetchTwelveCandles, // Twelve Data moja kwa moja (kwa .fxcheck)
   // ── Kwa ajili ya utils/backtest.js pekee ──────────────────────────────
   fetchCandles,
   getActiveSessions,

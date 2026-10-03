@@ -555,6 +555,60 @@ async function getClosedContractFromHistory(contractId) {
   return rows.find((t) => String(t.contract_id) === String(contractId)) || null;
 }
 
+// ─────────────────────────────────────────────
+// Candles za kihistoria (OHLC) kutoka Deriv — mbadala wa Twelve Data kwa
+// signal ili bei ya signal iwe ileile ya trade. Umbo la matokeo ni LILELILE
+// la Twelve Data (/time_series, ASC): { datetime, open, high, low, close }
+// (datetime ni UTC: "YYYY-MM-DD HH:MM:SS", au "YYYY-MM-DD" kwa daily),
+// ili indicators.js/backtest/forexSignal visibadilike.
+// Candle ya mwisho ni ya muda unaoendelea (haijafungwa) — kama Twelve Data.
+// ─────────────────────────────────────────────
+const GRANULARITY_BY_INTERVAL = {
+  '1min': 60, '2min': 120, '3min': 180, '5min': 300, '10min': 600, '15min': 900,
+  '30min': 1800, '1h': 3600, '2h': 7200, '4h': 14400, '8h': 28800, '1day': 86400,
+};
+const MAX_CANDLES_PER_REQUEST = 5000;
+
+function epochToDatetime(epochSec, granularity) {
+  const iso = new Date(Number(epochSec) * 1000).toISOString(); // 2026-10-04T08:00:00.000Z
+  return granularity >= 86400 ? iso.slice(0, 10) : iso.slice(0, 19).replace('T', ' ');
+}
+
+async function getCandles(pair, interval, count) {
+  const granularity = GRANULARITY_BY_INTERVAL[String(interval).toLowerCase()];
+  if (!granularity) {
+    throw new Error(`Interval "${interval}" haitambuliki kwa Deriv candles (zinazokubalika: ${Object.keys(GRANULARITY_BY_INTERVAL).join(', ')})`);
+  }
+  // "EUR/USD" au "EURUSD" -> "frxEURUSD"
+  const symbol = toDerivSymbol(String(pair).replace(/[^A-Za-z]/g, ''));
+  const n = Math.max(1, Math.min(Number(count) || 100, MAX_CANDLES_PER_REQUEST));
+
+  const res = await send({
+    ticks_history: symbol,
+    adjust_start_time: 1, // soko likiwa limefungwa (weekend) bado rudisha candles za mwisho zilizopo
+    count: n,
+    end: 'latest',
+    granularity,
+    style: 'candles',
+  });
+
+  const raw = res && res.candles;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(
+      `Deriv haikurudisha candles kwa ${symbol} (${interval}). ` +
+        `Jibu lilikuwa na: ${res ? Object.keys(res).join(', ') : '(tupu)'}`
+    );
+  }
+
+  return raw.map((c) => ({
+    datetime: epochToDatetime(c.epoch ?? c.open_time ?? c.time, granularity),
+    open: String(c.open),
+    high: String(c.high),
+    low: String(c.low),
+    close: String(c.close),
+  }));
+}
+
 async function getBalance() {
   const res = await send({ balance: 1 });
   return res.balance; // { balance, currency, ... }
@@ -576,4 +630,5 @@ module.exports = {
   MAX_STAKE_USD,
   MAX_MULTIPLIER,
   toDerivSymbol,
+  getCandles,
 };
