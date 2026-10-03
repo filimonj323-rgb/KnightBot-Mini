@@ -76,6 +76,7 @@ const mainConfig = require('../config');
 const pocketTrader = require('../utils/pocketOptionTrader');
 const pocketStore = require('../utils/pocketStore');
 const pocketSignal = require('../utils/pocketSignal');
+const signalTracker = require('../utils/signalTracker');
 const pocketAuto = require('../utils/pocketAutoTrader');
 const posignalCmd = require('../commands/utility/posignal');
 const signalTargets = require('../utils/signalTargets');
@@ -928,6 +929,12 @@ async function handlePairingRequest(req, res) {
               scanModes: pocketSignal.SCAN_MODES,
               ownerJid: getOwnerJid(),
             });
+          }
+
+          // Takwimu za win rate halisi za signals (kutoka signalTracker): ?days=7|30|90
+          if (req.method === 'GET' && poPath === '/api/admin/po/signal-stats') {
+            const days = Math.max(1, Math.min(parseInt(poQuery.get('days') || '7', 10) || 7, 90));
+            return sendJson(res, 200, { ok: true, ...(await signalTracker.getDashboard(days)) });
           }
 
           // Signals za hivi karibuni zilizotumwa na auto-signal.
