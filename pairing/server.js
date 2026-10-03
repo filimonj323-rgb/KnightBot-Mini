@@ -495,6 +495,36 @@ async function handlePairingRequest(req, res) {
       return sendJson(res, 200, { ok: true, ...data });
     }
 
+    // ── Uchunguzi wa MUDA wa maktaba ya Pocket Option (browser) ─────────────
+    // Fungua: /api/pocket/debug-lib?key=<POCKET_BRIDGE_SECRET>
+    // Inaonyesha toleo + msimbo wa get_candles/history kutoka bridge ya Python.
+    // Zima kwa POCKET_DEBUG_LIB=false (Railway). Inalindwa na secret ya bridge.
+    if (req.method === 'GET' && req.url.split('?')[0] === '/api/pocket/debug-lib') {
+      const textReply = (code, msg) => {
+        res.writeHead(code, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(msg);
+      };
+      if (String(process.env.POCKET_DEBUG_LIB || 'true').toLowerCase() === 'false') {
+        return textReply(404, 'Imezimwa.');
+      }
+      const bridgeSecret = process.env.POCKET_BRIDGE_SECRET || 'badilisha_hii_iwe_secret_ndefu';
+      const key = new URL(req.url, 'http://x').searchParams.get('key') || '';
+      const a = Buffer.from(key);
+      const b = Buffer.from(bridgeSecret);
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        return textReply(403, 'Key si sahihi.');
+      }
+      try {
+        const r = await fetch(`${pocketTrader.BRIDGE_URL}/debug/lib`, {
+          headers: { 'X-Bridge-Secret': bridgeSecret },
+          signal: AbortSignal.timeout(10000),
+        });
+        return textReply(r.status, await r.text());
+      } catch (e) {
+        return textReply(502, `Bridge haipatikani: ${e.message}`);
+      }
+    }
+
     // ── Admin: full backup download (sessions + SQLite db as one .tar.gz) ──
     // Use this before migrating to a new Railway account / host: download
     // this file, then on the new host extract it into pairing/ so it
