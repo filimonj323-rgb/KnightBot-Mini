@@ -33,8 +33,38 @@ const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 const max = (a) => (a.length ? Math.max(...a) : 0);
 const f1 = (n) => Number(n).toFixed(1);
 
-function verdictOf(matched, compared, avgClosePips, maxClosePips) {
-  if (matched === 0) return { icon: '❓', text: 'Hakuna candles zinazolingana kwa wakati (alignment ya timeframe ni tofauti) — haiwezi kulinganishwa moja kwa moja.' };
+const toEpoch = (dt) => Date.parse(`${String(dt).replace(' ', 'T')}${String(dt).length === 10 ? 'T00:00:00' : ''}Z`);
+const fromEpoch = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+
+/**
+ * Tafuta offset ya saa (k) inayofanya candles zilingane: lebo ya Deriv + k saa
+ * = lebo ya Twelve. Ikipatikana k != 0 yenye tofauti ndogo sana, tatizo ni
+ * WAKATI (timezone/alignment ya Twelve), si bei. Deriv = epoch ya UTC (wazi).
+ */
+function findBestOffset(twCandles, dvCandles, pip) {
+  const twMap = new Map(twCandles.map((c) => [c.datetime, c]));
+  const minMatches = Math.max(15, Math.floor(Math.min(twCandles.length, dvCandles.length) * 0.4));
+  const rows = [];
+  for (let k = -12; k <= 12; k++) {
+    const diffs = [];
+    for (const d of dvCandles) {
+      const t = twMap.get(fromEpoch(toEpoch(d.datetime) + k * 3600e3));
+      if (t) diffs.push(Math.abs(Number(t.close) - Number(d.close)) / pip);
+    }
+    if (diffs.length >= minMatches) rows.push({ k, n: diffs.length, mean: mean(diffs) });
+  }
+  if (!rows.length) return { best: null, zero: null };
+  rows.sort((a, b) => a.mean - b.mean);
+  return { best: rows[0], zero: rows.find((r) => r.k === 0) || null };
+}
+
+function verdictOf(matched, compared, avgClosePips, maxClosePips, off) {
+  const offsetFixes = off && off.best && off.best.k !== 0 && off.best.mean <= 1.5 &&
+    (!off.zero || off.best.mean < off.zero.mean * 0.5);
+  if (offsetFixes) {
+    return { icon: '⚠️', text: `Tatizo ni WAKATI, si bei: candles zinalingana (wastani ${f1(off.best.mean)} pips) zikisogezwa saa ${off.best.k >= 0 ? '+' : ''}${off.best.k}. Twelve Data inaonekana kutumia muda wa UTC${off.best.k >= 0 ? '+' : ''}${off.best.k} (au mpangilio tofauti wa candles kwa timeframe hii), si UTC.` };
+  }
+  if (matched === 0) return { icon: '❓', text: 'Hakuna candles zinazolingana kwa wakati, na hakuna offset ya saa inayosaidia — haiwezi kulinganishwa moja kwa moja.' };
   const coverage = matched / compared;
   if (coverage >= 0.9 && avgClosePips <= 0.3 && maxClosePips <= 1.5) {
     return { icon: '✅', text: 'Data zinalingana vizuri — Twelve Data inaweza kuaminika kwa signal.' };
@@ -42,7 +72,10 @@ function verdictOf(matched, compared, avgClosePips, maxClosePips) {
   if (coverage >= 0.8 && avgClosePips <= 1) {
     return { icon: '⚠️', text: 'Tofauti ndogo — inakubalika kwa timeframe za 1h+, lakini angalia SL/TP zisiwe ndogo mno.' };
   }
-  return { icon: '❌', text: 'Tofauti kubwa au candles zinakosekana — data ya Twelve haifai kwa signal ya trade ya Deriv. Tumia FOREX_DATA_SOURCE=deriv.' };
+  return {
+    icon: '❌',
+    text: 'Tofauti halisi ya data (si wakati). Hii peke yake haisemi ipi ni sahihi — lakini Deriv ndiyo bei ya trade yako, kwa hiyo ndiyo kigezo cha kuaminika zaidi kwa signal ya Deriv.',
+  };
 }
 
 module.exports = {
@@ -122,6 +155,30 @@ module.exports = {
       L.push('```');
     }
 
+    // Muda wa data + range ya candle (Deriv ina candles chache/zaidi? range pana zaidi?)
+    const rangePips = (arr) => mean(arr.slice(-MAX_COMPARED).map((c) => (Number(c.high) - Number(c.low)) / pip));
+    L.push('');
+    L.push(`🗓️ *Data:* Twelve ${td[0]?.datetime} → ${td[td.length - 1]?.datetime} (${td.length})`);
+    L.push(`            Deriv  ${dv[0]?.datetime} → ${dv[dv.length - 1]?.datetime} (${dv.length})`);
+    L.push(`📏 *Range ya candle (wastani):* Twelve ${f1(rangePips(td))}p • Deriv ${f1(rangePips(dv))}p`);
+
+    // Offset ya muda (saa) — haina maana kwa daily (lebo ni tarehe tu)
+    let off = null;
+    if (!/day|week|month/.test(interval)) {
+      off = findBestOffset(td, dv, pip);
+      if (off.best) {
+        L.push('');
+        L.push(`🕐 *Offset ya muda (saa):*`);
+        L.push(
+          `   • Bora zaidi: ${off.best.k >= 0 ? '+' : ''}${off.best.k}h → wastani ${f1(off.best.mean)} pips (candles ${off.best.n})` +
+            (off.zero ? ` • bila kusogeza (0h): ${f1(off.zero.mean)} pips` : ' • bila kusogeza (0h): hakuna candles zinazolingana')
+        );
+      } else {
+        L.push('');
+        L.push(`🕐 *Offset ya muda:* hakuna offset ya saa (-12..+12) iliyotoa candles za kutosha zinazolingana.`);
+      }
+    }
+
     // Athari kwenye signal — vigezo vilivyohesabiwa kutoka kila chanzo
     try {
       const iT = computeAllIndicators(tdRes.value);
@@ -136,7 +193,7 @@ module.exports = {
       // indicators zikishindwa, ulinganisho wa candles hapo juu bado unatosha
     }
 
-    const v = verdictOf(pairs.length, compared, mean(closeDiff), max(closeDiff));
+    const v = verdictOf(pairs.length, compared, mean(closeDiff), max(closeDiff), off);
     L.push('');
     L.push(`${v.icon} *Hitimisho:* ${v.text}`);
     L.push('');
