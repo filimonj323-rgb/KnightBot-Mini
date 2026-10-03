@@ -326,6 +326,71 @@ def _candle_secs(ts):
     return float(ts)
 
 
+# ── Historia ya candles kupitia `loadHistoryPeriod` ─────────────────────────────
+# Maktaba (pocketoptionapi_async 2.0.1) hutumia `changeSymbol` tu na inapuuza `count` na
+# `end_time`, hivyo timeframe > 1m zinarudi na data ya zamani. Web ya Pocket Option hutumia
+# `loadHistoryPeriod` {asset, period, time, offset, index}; server inajibu na `index` ile ile
+# + `data: [{time, open, close, high, low, volume}]`. Tunalinganisha jibu kwa `index`, kwa hiyo
+# maombi ya wakati mmoja (scan) hayachanganyiki.
+# POCKET_HISTORY_MODE: "htf" (default: timeframe > 60s tu) | "all" (zote) | "off" (zima).
+_HIST_PENDING = {}  # index -> asyncio.Future
+
+
+def _history_mode():
+    return os.environ.get("POCKET_HISTORY_MODE", "htf").strip().lower()
+
+
+def _history_dispatch(data):
+    """Inaitwa kwa kila ujumbe wa server. Ikiwa ni jibu la loadHistoryPeriod letu, linapeleka
+    candles kwa ombi linalosubiri."""
+    if not isinstance(data, dict):
+        return
+    idx = data.get("index")
+    items = data.get("data")
+    if idx is None or not isinstance(items, list):
+        return
+    fut = _HIST_PENDING.get(idx)
+    if fut is None or fut.done():
+        return
+    by_time = {}
+    for it in items:
+        if isinstance(it, dict) and "time" in it and "open" in it:
+            try:
+                t = int(float(it["time"]))
+                by_time[t] = {"time": t, "open": float(it["open"]), "high": float(it["high"]),
+                              "low": float(it["low"]), "close": float(it["close"])}
+            except (TypeError, ValueError):
+                continue
+    out = [by_time[t] for t in sorted(by_time)]
+    fut.get_loop().call_soon_threadsafe(lambda: None if fut.done() else fut.set_result(out))
+
+
+async def _history_request(client, pair, period, count, end_ts=None):
+    """Omba `count` candles za `period` sekunde zinazoishia `end_ts` (default: sasa)."""
+    count = max(1, min(int(count), 500))
+    offset = count * period
+    end_ts = int(end_ts or time.time())
+    index = int(time.time()) * 100 + random.randint(10, 99)
+    while index in _HIST_PENDING:
+        index += 1
+    fut = asyncio.get_running_loop().create_future()
+    _HIST_PENDING[index] = fut
+    msg = "42" + json.dumps(["loadHistoryPeriod", {
+        "asset": pair, "period": period, "time": end_ts, "index": index, "offset": offset}])
+    try:
+        if getattr(client, "_is_persistent", False) and getattr(client, "_keep_alive_manager", None):
+            await client._keep_alive_manager.send_message(msg)
+        else:
+            await client._websocket.send_message(msg)
+        timeout = float(os.environ.get("POCKET_HISTORY_TIMEOUT", "12"))
+        return await asyncio.wait_for(fut, timeout=timeout)
+    except asyncio.TimeoutError:
+        print(f"⚠️ [pocket_bridge] {pair} {period}s: loadHistoryPeriod haikujibu (timeout)")
+        return []
+    finally:
+        _HIST_PENDING.pop(index, None)
+
+
 # Buffer ya muda ya uchunguzi (/debug/history): inakusanya ujumbe wa server wakati wa dirisha fupi.
 _CAPTURE = {"on": False, "msgs": []}
 
@@ -346,6 +411,11 @@ def _install_server_msg_logger():
     keys = ("fail", "error", "unavailable", "not_available", "reject", "forbidden", "denied")
 
     def _peek(args, kwargs):
+        try:
+            if args:
+                _history_dispatch(args[0])
+        except Exception:
+            pass
         try:
             text = repr(args[0] if args else kwargs)
             low = text.lower()
@@ -437,6 +507,23 @@ def candles():
     count = int(request.args.get("count", "100"))
     try:
         client = get_client()
+
+        # Njia mpya: loadHistoryPeriod (candles halisi za timeframe husika). Ikishindwa au
+        # data ni ya zamani, tunaendelea na njia ya zamani hapa chini kama kawaida.
+        mode = _history_mode()
+        if mode == "all" or (mode == "htf" and timeframe > 60):
+            try:
+                hist = run_async(_history_request(client, pair, timeframe, count), timeout=25)
+            except Exception as e:
+                hist = []
+                print(f"⚠️ [pocket_bridge] {pair} {timeframe}s: history imeshindwa: {type(e).__name__}: {e}")
+            if hist:
+                age = time.time() - hist[-1]["time"]
+                if age <= max(timeframe * 3, 180):
+                    return jsonify({"ok": True, "pair": pair, "timeframe": timeframe,
+                                    "source": "loadHistoryPeriod", "candles": hist[-count:]})
+                print(f"ℹ️  [pocket_bridge] {pair} {timeframe}s: history ni ya zamani (umri {int(age // 60)} dk) — natumia njia ya zamani")
+
         raw_candles = run_async(client.get_candles(asset=pair, timeframe=timeframe))
 
         candles_out = [
