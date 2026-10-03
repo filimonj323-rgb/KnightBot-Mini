@@ -68,7 +68,7 @@ const cfg = require('./pairingConfig');
 const db = require('./db');
 const derivTrader = require('../utils/derivTrader');
 const autoTrader = require('../utils/autoTrader');
-const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('../utils/forexSignal');
+const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = require('../utils/forexSignal');
 const { runBacktest } = require('../utils/backtest');
 const economicCalendar = require('../utils/economicCalendar');
 const fxPredictions = require('../utils/fxPredictions');
@@ -853,13 +853,19 @@ async function handlePairingRequest(req, res) {
         const symbol = FX_SYMBOL_MAP[code];
         if (!symbol) return sendJson(res, 400, { ok: false, error: `Jozi "${code}" haitambuliki.` });
 
-        const snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL);
+        // daily:true => dashboard inaonyesha signal ileile ambayo auto-trader
+        // ingeitumia (gate ya 4h + 1day), ili uamue trade ya mkono kwa data sawa.
+        const snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL, { daily: true });
         const sig = computeSignal(snapshot);
         return sendJson(res, 200, {
           ok: true,
           code,
           direction: sig.direction,
           strength: sig.strength,
+          rawDirection: sig.rawDirection,
+          rawStrength: sig.rawStrength,
+          gated: sig.gated || null,
+          trends: getTrends(snapshot),
           notes: sig.notes,
           price: snapshot.price,
           atr: snapshot.atr,
