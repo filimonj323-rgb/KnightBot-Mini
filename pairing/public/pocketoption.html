@@ -760,7 +760,7 @@
       const g = d.groups || {};
       $('ssGroups').innerHTML =
         ssGroupTable('Kwa timeframe/expiry', g.expiry, be) + ssGroupTable('Kwa hali ya soko', g.regime, be) +
-        ssGroupTable('Kwa nguvu', g.strength, be) + ssGroupTable('Kwa trend ya 5m', g.htf, be) +
+        ssGroupTable('Kwa nguvu', g.strength, be) + ssGroupTable('Kwa trend ya 5m', g.htf, be) + ssGroupTable('Kwa multi-timeframe', g.mtf, be) +
         ssGroupTable('Kwa mwelekeo', g.direction, be) + ssGroupTable('Jozi (n≥5)', g.pairs, be);
       const rec = d.recent || [];
       $('ssRecent').innerHTML = rec.length
