@@ -144,6 +144,52 @@ function staleMinutes(candles, tfSec, nowMs = Date.now()) {
   return ageMs > limitMs ? Math.round(ageMs / 60000) : null;
 }
 
+// ── Uthibitisho wa trend ya 5m ───────────────────────────────────────────────
+// Maktaba ya Pocket Option haitoi candles za 5m zinazoaminika, kwa hiyo tunajenga
+// 5m wenyewe kwa kujumlisha candles za 1m (ambazo ni sahihi). Signal ya 1m
+// inayopingana na trend ya 5m inazuiwa (inakuwa NEUTRAL). Zima kwa
+// POCKET_HTF_FILTER=false.
+const HTF_FILTER = String(process.env.POCKET_HTF_FILTER || 'true').toLowerCase() !== 'false';
+const HTF_SEC = 300;
+const HTF_MIN_BARS = 14; // EMA13 inahitaji bars ~14; chini ya hapo hatuhukumu
+
+function emaLast(values, period) {
+  if (values.length < period) return null;
+  const k = 2 / (period + 1);
+  let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < values.length; i++) ema = values[i] * k + ema * (1 - k);
+  return ema;
+}
+
+// Jumlisha candles za 1m kuwa closes za 5m (bucket ya mwisho inaweza kuwa bado
+// inaundwa — close yake ni bei ya karibuni, ambayo ndiyo tunayotaka).
+function resampleCloses(candles, bucketSec = HTF_SEC) {
+  const closes = [];
+  let curBucket = null;
+  for (const c of candles) {
+    const t = toMs(c.time);
+    const close = Number(c.close);
+    if (t == null || !Number.isFinite(close)) continue;
+    const b = Math.floor(t / (bucketSec * 1000));
+    if (b !== curBucket) { closes.push(close); curBucket = b; }
+    else closes[closes.length - 1] = close;
+  }
+  return closes;
+}
+
+/** 'UP' | 'DOWN' | 'FLAT' | null (data haitoshi kuhukumu) */
+function htfTrend(candles) {
+  const closes = resampleCloses(candles);
+  if (closes.length < HTF_MIN_BARS) return null;
+  const fast = emaLast(closes, 5);
+  const slow = emaLast(closes, 13);
+  const last = closes[closes.length - 1];
+  if (fast == null || slow == null) return null;
+  if (fast > slow && last > slow) return 'UP';
+  if (fast < slow && last < slow) return 'DOWN';
+  return 'FLAT';
+}
+
 /**
  * Kura (votes) kwenye bar `i` ya series. Inatumika na signal ya moja kwa moja
  * na backtest — mantiki moja, kwa hiyo backtest inapima kile kile kinachotumwa.
@@ -270,6 +316,22 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
   const s = computeAllIndicatorSeries(candles);
   const last = candles.length - 1;
   const v = voteAt(s, last);
+
+  // Trend ya 5m (inajengwa kutoka 1m) — inaonyeshwa kwenye kila signal ya 1m.
+  // Signal inayopingana nayo inazuiwa (isipokuwa POCKET_HTF_FILTER=false).
+  let htf = null;
+  let htfBlocked = false;
+  if (timeframeSec === 60) {
+    htf = htfTrend(candles);
+    const against = (htf === 'UP' && v.direction === 'SELL') || (htf === 'DOWN' && v.direction === 'BUY');
+    if (HTF_FILTER && against) {
+      htfBlocked = true;
+      console.log(`[posignal] ${p} 1m: ${v.direction} imezuiwa — trend ya 5m ni ${htf}`);
+      v.direction = 'NEUTRAL';
+      v.strength = 0;
+    }
+  }
+
   console.log(
     `[posignal] ${p} ${tfLabel(timeframeSec)}: ${v.direction} buy=${v.buy} sell=${v.sell} ` +
     `strength=${v.strength}% adx=${v.adx != null ? v.adx.toFixed(1) : '-'} rsi=${v.rsi != null ? v.rsi.toFixed(1) : '-'} candles=${candles.length}`
@@ -286,6 +348,8 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
     adx: v.adx,
     notes: v.notes,
     weakMarket: v.weakMarket,
+    htf,
+    htfBlocked,
     candleTime: candles[last].time,
     backtest: backtest(s, minStrength),
   };
@@ -389,6 +453,7 @@ async function scanPrioritized(timeframeSec = 60, opts = {}) {
 }
 
 const EMOJI = { BUY: '🟢', SELL: '🔴', NEUTRAL: '⚪' };
+const HTF_LABEL = { UP: 'JUU ⬆️', DOWN: 'CHINI ⬇️', FLAT: 'TULIVU ➡️' };
 const LABEL = { BUY: 'UP (BUY) ⬆️', SELL: 'DOWN (SELL) ⬇️', NEUTRAL: 'HAKUNA SIGNAL' };
 
 function formatBacktest(bt) {
@@ -399,10 +464,11 @@ function formatBacktest(bt) {
 
 function formatSignal(r, { compact = false } = {}) {
   if (r.direction === 'NEUTRAL') {
-    return `⚪ *${r.pair}* (${tfLabel(r.timeframeSec)}) — hakuna signal wazi sasa. Subiri.`;
+    const why = r.htfBlocked ? ' (signal ya 1m imezuiwa — inapingana na trend ya 5m)' : '';
+    return `⚪ *${r.pair}* (${tfLabel(r.timeframeSec)}) — hakuna signal wazi sasa. Subiri.${why}`;
   }
   if (compact) {
-    return `${EMOJI[r.direction]} *${r.pair}* ${r.direction} • ${r.grade} ${r.strength}% • expiry ${tfLabel(r.expirySec)}${r.tier === 'fallback' ? ' • fallback' : ''}`;
+    return `${EMOJI[r.direction]} *${r.pair}* ${r.direction} • ${r.grade} ${r.strength}% • expiry ${tfLabel(r.expirySec)}${r.htf ? ` • 5m ${HTF_LABEL[r.htf]}` : ''}${r.tier === 'fallback' ? ' • fallback' : ''}`;
   }
   const lines = [
     `${EMOJI[r.direction]} *SIGNAL — ${r.pair}*`,
@@ -414,6 +480,7 @@ function formatSignal(r, { compact = false } = {}) {
   ];
   if (r.tier === 'fallback') lines.push('🔁 _Fallback — forex majors/minors hazikuwa na signal, hii inatoka jozi nyingine._');
   if (r.rsi != null) lines.push(`📈 RSI: ${r.rsi.toFixed(1)}${r.adx != null ? ` • ADX: ${r.adx.toFixed(1)}` : ''}`);
+  if (r.htf) lines.push(`🧭 Trend ya 5m: *${HTF_LABEL[r.htf]}*`);
   if (r.weakMarket) lines.push('⚠️ Soko tulivu (ADX ndogo) — nguvu imepunguzwa.');
   lines.push('', '*Sababu:*', ...r.notes.map((n) => `• ${n}`), '', formatBacktest(r.backtest));
   lines.push('', '_Hii si ushauri wa kifedha. Break-even ≈ 54% kwa payout 85%. Tumia stake ndogo, anza na DEMO._');
@@ -447,6 +514,8 @@ module.exports = {
   normalizePair,
   staleMinutes,
   voteAt,
+  htfTrend,
+  resampleCloses,
   backtest,
   analyzePair,
   scanPairs,
