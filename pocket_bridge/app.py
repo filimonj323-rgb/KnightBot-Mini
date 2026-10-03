@@ -534,7 +534,64 @@ def active_orders():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _lib_diagnostics():
+    """Uchunguzi wa MUDA: toleo la maktaba ya Pocket Option na msimbo wa kazi zake za
+    candles/history — ili kuona kwa nini timeframe kubwa (5m+) zinarudisha data ya zamani.
+    Inasoma tu msimbo wa maktaba; haibadilishi chochote."""
+    import inspect
+    import importlib.metadata as md
+    out = []
+    ver = None
+    for name in ("pocketoptionapi-async", "pocketoptionapi_async"):
+        try:
+            ver = md.version(name)
+            break
+        except Exception:
+            pass
+    try:
+        src_file = inspect.getsourcefile(AsyncPocketOptionClient)
+    except Exception:
+        src_file = "?"
+    out.append(f"version={ver} file={src_file}")
+
+    names = [n for n in dir(AsyncPocketOptionClient)
+             if any(k in n.lower() for k in ("candle", "history", "period"))]
+    out.append("methods=" + ", ".join(names))
+
+    for n in names:
+        try:
+            fn = getattr(AsyncPocketOptionClient, n)
+            out.append(f"\n--- {n}{inspect.signature(fn)} ---\n" + inspect.getsource(fn))
+        except Exception as e:
+            out.append(f"\n--- {n}: haisomeki ({e}) ---")
+
+    # Mistari ya moduli nzima inayogusa history (ujumbe wa server unaoshughulikiwa wapi)
+    try:
+        mod_src = inspect.getsource(sys.modules[AsyncPocketOptionClient.__module__]).splitlines()
+        hits = [f"{i + 1}: {ln.strip()}" for i, ln in enumerate(mod_src)
+                if any(k in ln.lower() for k in ("loadhistory", "updatehistory", "history_period", "_candles"))]
+        out.append("\n--- mistari ya moduli inayotaja history/candles ---\n" + "\n".join(hits[:120]))
+    except Exception as e:
+        out.append(f"\n(moduli haisomeki: {e})")
+    return "\n".join(out)[:40000]
+
+
+@app.route("/debug/lib", methods=["GET"])
+def debug_lib():
+    try:
+        return app.response_class(_lib_diagnostics(), mimetype="text/plain")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     print(f"🌐 [pocket_bridge] Inaanza kwenye port {PORT} (demo={IS_DEMO})")
+    if os.environ.get("POCKET_DEBUG_LIB", "true").strip().lower() != "false":
+        try:
+            print("===== POCKET_LIB_DIAG BEGIN =====")
+            print(_lib_diagnostics())
+            print("===== POCKET_LIB_DIAG END =====")
+        except Exception as e:
+            print(f"[pocket_bridge] uchunguzi wa maktaba umeshindwa: {e}")
     threading.Thread(target=_eager_connect_loop, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT)
