@@ -35,6 +35,7 @@ const {
   computeSignal,
   DEFAULT_INTERVAL,
   HTF_INTERVAL,
+  DAILY_INTERVAL,
   getActiveSessions,
   CCY_PRIMARY_SESSION,
 } = require('./forexSignal');
@@ -81,8 +82,27 @@ function alignHtfIndex(candles1h, candlesHtf) {
 }
 
 /**
+ * Kwa kila 1h candle, tafuta candle ya daily ya MWISHO ya siku ILIYOTANGULIA
+ * (tarehe < tarehe ya 1h candle) — daily ya siku hiyohiyo bado haijafungwa,
+ * kwa hiyo kuitumia kungekuwa lookahead. Hii ndiyo kanuni ileile ya live
+ * (fetchDailyCandles() inaondoa candle ya siku inayoendelea).
+ */
+function alignDailyIndex(candles1h, candlesDaily) {
+  const out = new Array(candles1h.length).fill(-1);
+  let j = -1;
+  for (let i = 0; i < candles1h.length; i++) {
+    const day = String(candles1h[i].datetime).slice(0, 10);
+    while (j + 1 < candlesDaily.length && String(candlesDaily[j + 1].datetime).slice(0, 10) < day) j++;
+    out[i] = j;
+  }
+  return out;
+}
+
+/**
  * Inaendesha backtest MOJA kwa jozi moja.
- * @param {{code:string, symbol:string, bars?:number, strengthThreshold?:number}} opts
+ * @param {{code:string, symbol:string, bars?:number, strengthThreshold?:number, htfGate?:boolean, dailyGate?:boolean}} opts
+ *   htfGate/dailyGate: `false` kuzima gate husika (kulinganisha); bila hivyo env (FOREX_HTF_GATE/FOREX_DAILY_GATE) inatumika.
+ *   Daily gate inahitaji credit 1 ya ziada (jumla 3) — inatumika TU kama dailyGate haijazimwa.
  */
 async function runBacktest(opts) {
   const { code, symbol } = opts;
@@ -100,9 +120,17 @@ async function runBacktest(opts) {
 
   // Credits 2 TU (kama live) — bila kujali `bars` (outputsize haiathiri
   // gharama ya Twelve Data kwa /time_series).
-  const [candles1h, candlesHtf] = await Promise.all([
+  const gateOpts = {};
+  if (opts.htfGate === false) gateOpts.htfGate = false;
+  if (opts.dailyGate === false) gateOpts.dailyGate = false;
+  const useDaily = opts.dailyGate !== false && require('./forexSignal').DAILY_GATE;
+
+  const [candles1h, candlesHtf, candlesDaily] = await Promise.all([
     fetchCandles(symbol, DEFAULT_INTERVAL, bars),
     fetchCandles(symbol, HTF_INTERVAL, Math.min(MAX_OUTPUTSIZE, Math.ceil(bars / 4) + 60)),
+    useDaily
+      ? fetchCandles(symbol, DAILY_INTERVAL, Math.min(MAX_OUTPUTSIZE, Math.ceil(bars / 24) + 60))
+      : Promise.resolve(null),
   ]);
 
   if (candles1h.length < MIN_CANDLES_RECOMMENDED * 2) {
@@ -114,6 +142,8 @@ async function runBacktest(opts) {
   const series1h = computeAllIndicatorSeries(candles1h);
   const seriesHtf = computeAllIndicatorSeries(candlesHtf);
   const htfIndexFor1h = alignHtfIndex(candles1h, candlesHtf);
+  const seriesDaily = useDaily ? computeAllIndicatorSeries(candlesDaily) : null;
+  const dailyIndexFor1h = useDaily ? alignDailyIndex(candles1h, candlesDaily) : null;
 
   const trades = [];
   let openTrade = null; // { direction, entryIndex, entryPrice, slPrice, tpPrice }
@@ -165,6 +195,14 @@ async function runBacktest(opts) {
       const htf21 = htfIdx >= 0 ? seriesHtf.ema21[htfIdx] : null;
       const htfTrend = htf9 != null && htf21 != null ? (htf9 > htf21 ? 'BUY' : 'SELL') : null;
 
+      let dailyTrend = null;
+      if (useDaily) {
+        const dIdx = dailyIndexFor1h[i];
+        const d9 = dIdx >= 0 ? seriesDaily.ema9[dIdx] : null;
+        const d21 = dIdx >= 0 ? seriesDaily.ema21[dIdx] : null;
+        dailyTrend = d9 != null && d21 != null ? (d9 > d21 ? 'BUY' : 'SELL') : null;
+      }
+
       const snapshot = {
         pair: symbol,
         price: series1h.price[i],
@@ -180,13 +218,16 @@ async function runBacktest(opts) {
         stochK: series1h.stochK[i],
         htfInterval: HTF_INTERVAL,
         htfTrend,
+        dailyRequested: useDaily,
+        dailyInterval: DAILY_INTERVAL,
+        dailyTrend,
         baseCcy,
         quoteCcy,
         calendar: null, // haipatikani kihistoria — angalia kikwazo #1 juu
         session: sessionInfoAtHour(baseCcy, quoteCcy, utcHourOf(candles1h[i].datetime)),
       };
 
-      const sig = computeSignal(snapshot);
+      const sig = computeSignal(snapshot, gateOpts);
       if (sig.direction !== 'NEUTRAL' && sig.strength >= strengthThreshold) {
         const entryPrice = series1h.price[i];
         const risk = computeAtrBasedRisk({ atr: series1h.atr[i], price: entryPrice, stake, multiplier });
@@ -249,6 +290,8 @@ async function runBacktest(opts) {
     stake,
     multiplier,
     strengthThreshold,
+    htfGate: opts.htfGate !== false && require('./forexSignal').HTF_GATE,
+    dailyGate: useDaily,
     totalTrades: trades.length,
     wins: wins.length,
     losses: losses.length,

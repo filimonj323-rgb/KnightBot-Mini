@@ -73,6 +73,23 @@ const DEFAULT_INTERVAL = '1h';
 // kama daily).
 const HTF_INTERVAL = process.env.FOREX_HTF_INTERVAL || '4h';
 
+// ── Gates (vizuizi vya mwelekeo) ───────────────────────────────────────
+// FOREX_HTF_GATE   (default true): signal ya 1h HAIRUHUSIWI kupingana na
+//   mwelekeo wa 4h. 4h ikisema SELL na 1h ikisema BUY => NEUTRAL.
+// FOREX_DAILY_GATE (default true): sawa na hapo juu lakini kwa mwelekeo wa
+//   siku (1day). Inatumika TU pale mwombaji akiomba daily (autoTrader +
+//   backtest) — .forex/dashboard hazivuti daily (kuokoa credits).
+// Weka 'false' kuzima (mfano kulinganisha na .fxbacktest <JOZI> <bars> nogate).
+const envOn = (name) => String(process.env[name] ?? 'true').toLowerCase() !== 'false';
+const HTF_GATE = envOn('FOREX_HTF_GATE');
+const DAILY_GATE = envOn('FOREX_DAILY_GATE');
+const DAILY_INTERVAL = process.env.FOREX_DAILY_INTERVAL || '1day';
+const DAILY_OUTPUTSIZE = 80; // >= MIN_CANDLES_RECOMMENDED (60); credit 1 TU bila kujali idadi
+// Daily haibadiliki haraka — cache ndefu (default saa 6) ili jozi 7 zisitumie
+// credits 7 kila saa. Candle ya siku inayoendelea (forming) inaondolewa, kwa
+// hiyo trend ya daily hubadilika mara moja tu kwa siku (00:00 UTC).
+const DAILY_CACHE_MS = parseInt(process.env.FOREX_DAILY_CACHE_MS || '', 10) || 6 * 60 * 60 * 1000;
+
 // Bars ngapi za kuomba kwa kila interval — zinahitajika za kutosha kwa
 // EMA26/MACD/ADX14/BBands20/StochRSI(14+14+3+3) kutulia (angalia
 // utils/indicators.js: MIN_CANDLES_RECOMMENDED). `/time_series` inagharimu
@@ -225,6 +242,25 @@ async function fetchCandles(pairSymbol, interval, outputsize) {
   return values;
 }
 
+const dailyCache = new Map(); // "PAIR" -> { candles, at }
+
+// Candles za daily (zilizofungwa tu). Candle ya mwisho kutoka Twelve Data
+// ni ya siku inayoendelea (haijafungwa) — tunaiondoa ili trend isibadilike
+// ndani ya siku. Backtest inatumia kanuni ileile (siku iliyotangulia tu).
+async function fetchDailyCandles(pairSymbol) {
+  const hit = dailyCache.get(pairSymbol);
+  if (hit && Date.now() - hit.at < DAILY_CACHE_MS) return hit.candles;
+
+  let candles = await fetchCandles(pairSymbol, DAILY_INTERVAL, DAILY_OUTPUTSIZE);
+  const last = candles[candles.length - 1];
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  if (last && String(last.datetime).slice(0, 10) >= todayUtc) {
+    candles = candles.slice(0, -1);
+  }
+  dailyCache.set(pairSymbol, { candles, at: Date.now() });
+  return candles;
+}
+
 function fmtNum(n) {
   return n == null ? 'N/A' : Number(n).toFixed(5);
 }
@@ -257,12 +293,13 @@ function getSessionInfo(baseCcy, quoteCcy) {
   return { utcHour, active, primary, quiet };
 }
 
-async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
+async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL, opts = {}) {
   if (!API_KEY) {
     throw new Error('TWELVE_DATA_API_KEY haipo kwenye env');
   }
 
-  const key = `${pairSymbol}|${interval}|${HTF_INTERVAL}`;
+  const wantDaily = opts.daily === true;
+  const key = `${pairSymbol}|${interval}|${HTF_INTERVAL}${wantDaily ? `|${DAILY_INTERVAL}` : ''}`;
   const cached = cache.get(key);
   if (cached && Date.now() - cached.at < CACHE_MS) {
     return cached.data;
@@ -281,6 +318,20 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
 
   const ind = computeAllIndicators(candles);
   const htfInd = computeAllIndicators(htfCandles);
+
+  // Daily (hiari — autoTrader pekee). Ikishindwa, dailyTrend = null na
+  // computeSignal() inazuia trade (fail-closed) badala ya kuendelea kimya.
+  let dailyTrend = null;
+  let dailyError = null;
+  if (wantDaily) {
+    try {
+      const dInd = computeAllIndicators(await fetchDailyCandles(pairSymbol));
+      if (dInd.ema9 != null && dInd.ema21 != null) dailyTrend = dInd.ema9 > dInd.ema21 ? 'BUY' : 'SELL';
+    } catch (err) {
+      dailyError = err.message;
+      console.error(`[forexSignal] Daily (${DAILY_INTERVAL}) imeshindwa kwa ${pairSymbol}:`, err.message);
+    }
+  }
 
   const htf9 = htfInd.ema9;
   const htf21 = htfInd.ema21;
@@ -307,6 +358,10 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
     htfEma9: htf9,
     htfEma21: htf21,
     htfTrend,
+    dailyRequested: wantDaily,
+    dailyInterval: DAILY_INTERVAL,
+    dailyTrend,
+    dailyError,
     baseCcy,
     quoteCcy,
     calendar,
@@ -323,7 +378,9 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL) {
 // wazi/dhahiri kwa makusudi ili ijulikane KWA NINI signal fulani imetokea
 // (kila kigezo kina "kura" moja) — si "black box".
 // ─────────────────────────────────────────────
-function computeSignal(s) {
+function computeSignal(s, opts = {}) {
+  const htfGateOn = opts.htfGate ?? HTF_GATE;
+  const dailyGateOn = opts.dailyGate ?? DAILY_GATE;
   const notes = [];
   let bullish = 0;
   let bearish = 0;
@@ -458,14 +515,56 @@ function computeSignal(s) {
 
   strength = Math.min(strength, cap);
 
-  return { direction, strength, bullish, bearish, notes, newsRisk };
+  // ─────────────────────────────────────────────
+  // GATES — mwelekeo wa timeframe kubwa ni MKUU. Signal ya 1h
+  // ikipingana nao => NEUTRAL (si kura iliyozidiwa). Daily ni gate TU
+  // (haina kura), kwa hiyo hesabu ya strength% haibadiliki.
+  // ─────────────────────────────────────────────
+  let gated = null;
+  const rawDirection = direction;
+  const rawStrength = strength;
+  if (direction !== 'NEUTRAL') {
+    if (htfGateOn && s.htfTrend && s.htfTrend !== direction) {
+      gated = 'HTF';
+      notes.push(`⛔ Gate ya ${s.htfInterval || '4h'}: 1h inasema ${direction} lakini ${s.htfInterval || '4h'} inasema ${s.htfTrend} — hakuna trade`);
+    } else if (dailyGateOn && s.dailyRequested) {
+      const dLabel = s.dailyInterval || '1day';
+      if (!s.dailyTrend) {
+        gated = 'DAILY';
+        notes.push(`⛔ Trend ya ${dLabel} haipatikani${s.dailyError ? ` (${s.dailyError})` : ''} — trade imezuiwa kwa usalama`);
+      } else if (s.dailyTrend !== direction) {
+        gated = 'DAILY';
+        notes.push(`⛔ Gate ya ${dLabel}: 1h inasema ${direction} lakini ${dLabel} inasema ${s.dailyTrend} — hakuna trade`);
+      } else {
+        notes.push(`Mwelekeo wa ${dLabel}: ${s.dailyTrend} (unakubaliana — gate imepita)`);
+      }
+    }
+    if (gated) {
+      direction = 'NEUTRAL';
+      strength = 0;
+    }
+  }
+
+  return { direction, strength, bullish, bearish, notes, newsRisk, gated, rawDirection, rawStrength };
+}
+
+// Mwelekeo wa kila timeframe (EMA9 dhidi ya EMA21) — kwa dashboard/.forex
+// ili uone 1h / 4h / 1day kwa pamoja kabla ya kufungua trade kwa mkono.
+// null = haipatikani (au daily haikuombwa).
+function getTrends(s) {
+  const h1 = s.ema9 != null && s.ema21 != null ? (s.ema9 > s.ema21 ? 'BUY' : 'SELL') : null;
+  return { h1, h4: s.htfTrend || null, d1: s.dailyTrend || null };
 }
 
 module.exports = {
   fetchForexSnapshot,
+  getTrends,
   computeSignal,
   DEFAULT_INTERVAL,
   HTF_INTERVAL,
+  DAILY_INTERVAL,
+  HTF_GATE,
+  DAILY_GATE,
   // ── Kwa ajili ya utils/backtest.js pekee ──────────────────────────────
   fetchCandles,
   getActiveSessions,

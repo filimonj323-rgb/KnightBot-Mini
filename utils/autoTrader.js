@@ -85,7 +85,7 @@
  * trade MPYA tu.
  */
 
-const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL } = require('./forexSignal');
+const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL, DAILY_INTERVAL, HTF_GATE, DAILY_GATE, getTrends } = require('./forexSignal');
 const {
   placeMultiplier,
   getOpenPositions,
@@ -883,7 +883,9 @@ async function checkPairAndTradeInner(pairInfo) {
 
   let snapshot, sig;
   try {
-    snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL);
+    // daily:true => pia vuta trend ya 1day (cache saa 6, credit 1 kwa jozi
+    // mara chache kwa siku) ili gate ya daily itumike kwa auto-trade.
+    snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL, { daily: true });
     sig = computeSignal(snapshot);
   } catch (err) {
     console.error(`[autoTrader] Imeshindwa kupata signal ya ${code}:`, err.message);
@@ -897,8 +899,19 @@ async function checkPairAndTradeInner(pairInfo) {
     price: snapshot.price,
     atr: snapshot.atr,
     notes: sig.notes,
+    gated: sig.gated || null,
+    rawDirection: sig.rawDirection,
+    rawStrength: sig.rawStrength,
+    trends: getTrends(snapshot),
     checkedAt: Date.now(),
   });
+
+  if (sig.gated) {
+    console.log(
+      `[autoTrader] ${code}: skip — gate ya ${sig.gated === 'DAILY' ? DAILY_INTERVAL : HTF_INTERVAL} ` +
+        `(1h: ${sig.rawDirection}, 4h: ${snapshot.htfTrend || 'N/A'}, 1day: ${snapshot.dailyTrend || 'N/A'}).`
+    );
+  }
 
   if (sig.direction === 'NEUTRAL' || sig.strength < STRENGTH_THRESHOLD) return;
 
@@ -1278,6 +1291,10 @@ function getStatus() {
     checkIntervalMs: CHECK_INTERVAL_MS,
     pollMs: POLL_CLOSED_MS,
     strengthThreshold: STRENGTH_THRESHOLD,
+    htfInterval: HTF_INTERVAL,
+    htfGate: HTF_GATE,
+    dailyInterval: DAILY_INTERVAL,
+    dailyGate: DAILY_GATE,
     stake: STAKE_USD,
     multiplier: MULTIPLIER,
     slAtrMult: SL_ATR_MULT,

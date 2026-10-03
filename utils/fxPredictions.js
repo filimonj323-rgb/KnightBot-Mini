@@ -75,7 +75,7 @@ async function gatherPairData(pairInfo, existingSignals) {
     atr = cached.atr;
   } else {
     try {
-      const snapshot = await fetchForexSnapshot(pairInfo.symbol, DEFAULT_INTERVAL);
+      const snapshot = await fetchForexSnapshot(pairInfo.symbol, DEFAULT_INTERVAL, { daily: true });
       const sig = computeSignal(snapshot);
       direction = sig.direction;
       strength = sig.strength;
