@@ -16,6 +16,8 @@ Default port: 5055 (badilisha na POCKET_BRIDGE_PORT ukitaka)
 import os
 import re
 import sys
+import json
+import random
 import traceback
 import asyncio
 import threading
@@ -324,6 +326,10 @@ def _candle_secs(ts):
     return float(ts)
 
 
+# Buffer ya muda ya uchunguzi (/debug/history): inakusanya ujumbe wa server wakati wa dirisha fupi.
+_CAPTURE = {"on": False, "msgs": []}
+
+
 def _install_server_msg_logger():
     """Chapisha ujumbe wa server wenye maneno ya kushindwa/kukataliwa (mfano order kukataliwa).
 
@@ -343,6 +349,8 @@ def _install_server_msg_logger():
         try:
             text = repr(args[0] if args else kwargs)
             low = text.lower()
+            if _CAPTURE["on"] and len(_CAPTURE["msgs"]) < 40 and "updatestream" not in low:
+                _CAPTURE["msgs"].append(text[:900])
             if any(k in low for k in keys):
                 print(f"⚠️ [pocket_bridge] ujumbe wa server: {text[:600]}")
         except Exception:
@@ -582,6 +590,45 @@ def debug_lib():
         return app.response_class(_lib_diagnostics(), mimetype="text/plain")
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
+@app.route("/debug/history", methods=["GET"])
+def debug_history():
+    """Uchunguzi wa MUDA: tuma ombi la `loadHistoryPeriod` (kama web ya Pocket Option) na
+    onyesha jibu halisi la server — ili tuone muundo wa data ya timeframe kubwa. Hairekebishi
+    wala kuhifadhi chochote; ni ombi la kusoma tu."""
+    try:
+        pair = request.args.get("pair", "EURUSD_otc")
+        if not re.fullmatch(r"[#A-Za-z0-9_]{3,20}", pair):
+            return jsonify({"ok": False, "error": "pair si sahihi"}), 400
+        period = max(1, min(int(request.args.get("period", "300")), 86400))
+        offset = max(period, min(int(request.args.get("offset", str(period * 100))), 1_000_000))
+        end_ts = int(request.args.get("time", str(int(time.time()))))
+
+        client = get_client()
+        index = int(time.time()) * 100 + random.randint(10, 99)
+        msg = "42" + json.dumps(["loadHistoryPeriod", {
+            "asset": pair, "period": period, "time": end_ts, "index": index, "offset": offset}])
+
+        async def _go():
+            if getattr(client, "_is_persistent", False) and getattr(client, "_keep_alive_manager", None):
+                await client._keep_alive_manager.send_message(msg)
+            else:
+                await client._websocket.send_message(msg)
+            await asyncio.sleep(5)
+
+        _CAPTURE["msgs"] = []
+        _CAPTURE["on"] = True
+        try:
+            run_async(_go(), timeout=20)
+        finally:
+            _CAPTURE["on"] = False
+        out = [f"sent: {msg}", f"captured={len(_CAPTURE['msgs'])}"]
+        out += [f"[{i}] {m}" for i, m in enumerate(_CAPTURE["msgs"])]
+        return app.response_class("\n".join(out), mimetype="text/plain")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
 
 
 if __name__ == "__main__":
