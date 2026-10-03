@@ -15,6 +15,7 @@
 const { isBridgeUp } = require('../../utils/pocketOptionTrader');
 const pocketStore = require('../../utils/pocketStore');
 const signalTargets = require('../../utils/signalTargets');
+const signalTracker = require('../../utils/signalTracker');
 const {
   DEFAULT_PAIRS,
   SCAN_MODES,
@@ -90,6 +91,7 @@ function scheduleAuto(sock, jid, job) {
           job.sent.add(key);
           if (job.sent.size > MAX_SENT_CACHE) job.sent.delete(job.sent.values().next().value);
           pushRecent(r);
+          signalTracker.record(r, 'auto');
           await (global.currentSock || sock).sendMessage(jid, { text: formatSignal(r) });
           signalTargets.sendSignal('po', formatSignal(r)).catch(() => {});
           sentNow++;
@@ -240,12 +242,14 @@ module.exports = {
         const slow = pairs.length > 20 || mode === 'smart' ? ' — inaweza kuchukua hadi dakika 1-2 mara ya kwanza' : '';
         await reply(`🔎 Nachanganua jozi ${pairs.length} (${mode}, ${tfLabel(tf)})${slow}...`);
         const scan = mode === 'smart' ? await scanPrioritized(tf) : await scanPairs(pairs, tf);
+        signalTracker.recordMany((scan.results || []).filter((r) => r.direction !== 'NEUTRAL' && r.strength >= 50).slice(0, 10), 'scan');
         return reply(formatScan(scan, tf));
       }
 
       const tf = parseTimeframe(args[1], 60);
       if (!tf) return reply('❌ Timeframe si sahihi. Mfano: 1m, 5m, 30s.');
       const result = await analyzePair(args[0], tf);
+      signalTracker.record(result, 'manual');
       return reply(formatSignal(result));
     } catch (err) {
       console.error('posignal error:', err.message);
