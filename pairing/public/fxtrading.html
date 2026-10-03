@@ -518,7 +518,7 @@
       const blocked = s.correlationBlocked ? ' <span class="muted" title="Correlation guard imezuia trade mpya">🔗 blocked</span>' : '';
       return `<div class="signal-row">
         <span>${s.code}</span>
-        <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}${blocked}</span>
+        <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}${blocked}${s.gated ? ` <span class="muted" title="1h ilisema ${s.rawDirection}, timeframe kubwa inapinga">⛔ gate ${s.gated === 'DAILY' ? '1d' : '4h'}</span>` : ''}</span>
       </div>`;
     }).join('');
 
@@ -562,20 +562,43 @@
     return '<span class="muted">—</span>';
   }
 
+  // Mwelekeo wa kila timeframe (EMA9 vs EMA21) — kwa uamuzi wa trade ya mkono.
+  function tfArrow(t) {
+    if (t === 'BUY') return '<span class="dir-buy">▲</span>';
+    if (t === 'SELL') return '<span class="dir-sell">▼</span>';
+    return '<span class="muted">–</span>';
+  }
+  function tfCell(s) {
+    const t = s && s.trends;
+    if (!t) return '<td class="muted">—</td>';
+    const gate = s.gated
+      ? ` <span class="muted" title="Gate imezuia trade: timeframe kubwa inapinga 1h">⛔${s.gated === 'DAILY' ? '1d' : '4h'}</span>`
+      : '';
+    return `<td style="font-size:12px; white-space:nowrap;">1h ${tfArrow(t.h1)} · 4h ${tfArrow(t.h4)} · 1d ${tfArrow(t.d1)}${gate}</td>`;
+  }
+  function notesTitle(s) {
+    const txt = (s && s.notes ? s.notes : []).join('\n').replace(/"/g, '&quot;');
+    return txt ? ` title="${txt}"` : '';
+  }
+
   function renderSignals() {
     const rows = FX_PAIRS.map((code) => {
       const s = signalState[code];
       let mid;
       if (!s) {
-        mid = `<td colspan="3" class="muted">Bado hujaangaliwa</td>`;
+        mid = `<td colspan="4" class="muted">Bado hujaangaliwa</td>`;
       } else if (s.loading) {
-        mid = `<td colspan="3" class="muted">⏳ Inaangalia...</td>`;
+        mid = `<td colspan="4" class="muted">⏳ Inaangalia...</td>`;
       } else if (s.error) {
-        mid = `<td colspan="3" class="muted">❌ ${s.error}</td>`;
+        mid = `<td colspan="4" class="muted">❌ ${s.error}</td>`;
       } else {
+        const rawNote = s.gated && s.rawDirection
+          ? ` <span class="muted" style="font-size:11px;">(1h: ${s.rawDirection})</span>`
+          : '';
         mid = `
-          <td>${directionBadge(s.direction)}</td>
+          <td${notesTitle(s)}>${directionBadge(s.direction)}${rawNote}</td>
           <td>${s.strength}%</td>
+          ${tfCell(s)}
           <td class="muted" style="font-size:11px;">${timeAgo(s.checkedAt)}</td>
         `;
       }
@@ -588,12 +611,13 @@
 
     document.getElementById('signalsBox').innerHTML = `
       <table>
-        <thead><tr><th>Jozi</th><th>Signal</th><th>Strength</th><th>Ilipoangaliwa</th><th></th></tr></thead>
+        <thead><tr><th>Jozi</th><th>Signal</th><th>Strength</th><th>1h · 4h · 1d</th><th>Ilipoangaliwa</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="muted" style="margin-top:8px; font-size:11px;">
         EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY zinaangaliwa kiotomatiki na Auto-Trader kila saa (bure).
-        Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.
+        Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.<br>
+        ▲/▼ = mwelekeo wa kila timeframe. ⛔ = gate imezuia (1h inapingana na 4h/1d). Weka kidole/mouse juu ya Signal kuona sababu.
       </div>
     `;
   }
@@ -605,6 +629,8 @@
       const data = await api('/api/admin/fx/signal?pair=' + encodeURIComponent(code));
       signalState[code] = {
         direction: data.direction, strength: data.strength, notes: data.notes,
+        rawDirection: data.rawDirection, rawStrength: data.rawStrength,
+        gated: data.gated, trends: data.trends,
         checkedAt: data.checkedAt, loading: false,
       };
     } catch (e) {
@@ -872,7 +898,9 @@
       (data.autoTrade.signals || []).forEach((s) => {
         if (s.checkedAt || s.error) {
           signalState[s.code] = {
-            direction: s.direction, strength: s.strength,
+            direction: s.direction, strength: s.strength, notes: s.notes,
+            rawDirection: s.rawDirection, rawStrength: s.rawStrength,
+            gated: s.gated, trends: s.trends,
             checkedAt: s.checkedAt, error: s.error, loading: false,
           };
         }
