@@ -52,6 +52,7 @@ function ensureTable() {
            entryTs     INTEGER NOT NULL,
            exitTs      INTEGER NOT NULL,
            source      TEXT,
+           mtf         TEXT,
            status      TEXT    NOT NULL DEFAULT 'pending',
            exitPrice   REAL,
            resolvedAt  INTEGER,
@@ -60,6 +61,8 @@ function ensureTable() {
          )`
       );
       await db.query('CREATE INDEX IF NOT EXISTS idx_po_signals_pending ON po_signals(status, exitTs)');
+      // Jedwali la zamani halina safu ya `mtf` — iongeze (kosa la "duplicate column" linapuuzwa).
+      try { await db.query('ALTER TABLE po_signals ADD COLUMN mtf TEXT'); } catch (_) { /* tayari ipo */ }
     })().catch((e) => { tableReady = null; throw e; });
   }
   return tableReady;
@@ -101,8 +104,8 @@ async function record(r, source = 'manual') {
     await ensureTable();
     const res = await db.query(
       `INSERT INTO po_signals
-         (pair, tf, expirySec, direction, strength, regime, htf, adx, rsi, entryPrice, entryTs, exitTs, source, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (pair, tf, expirySec, direction, strength, regime, htf, adx, rsi, entryPrice, entryTs, exitTs, source, createdAt, mtf)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(pair, tf, entryTs) DO NOTHING`,
       [
         r.pair, tf, expirySec, r.direction, Math.round(Number(r.strength)),
@@ -110,6 +113,7 @@ async function record(r, source = 'manual') {
         Number.isFinite(Number(r.adx)) ? Number(r.adx) : null,
         Number.isFinite(Number(r.rsi)) ? Number(r.rsi) : null,
         entryPrice, entryTs, entryTs + expirySec * 1000, source, now,
+        r.mtf && r.mtf.level ? r.mtf.level : null,
       ]
     );
     const inserted = (res.rowsAffected || 0) > 0;
@@ -230,6 +234,12 @@ function htfBucket(r) {
   return aligned ? '5m inaunga mkono' : '5m inapinga';
 }
 
+function mtfBucket(r) {
+  if (r.mtf === 'both') return 'MTF: 5m+15m (expiry 5m)';
+  if (r.mtf === 'm5only') return 'MTF: 5m tu (expiry 3m)';
+  return 'bila MTF';
+}
+
 function strengthBucket(r) {
   return r.strength >= 85 ? '85%+' : r.strength >= 67 ? '67–84%' : '50–66%';
 }
@@ -281,6 +291,7 @@ function formatStats(st) {
   out += section('Kwa hali ya soko', tally(rows, (r) => r.regime || 'haijulikani'), ['TREND', 'RANGE', 'MIXED', 'UNKNOWN', 'haijulikani']);
   out += section('Kwa nguvu ya signal', tally(rows, strengthBucket), ['50–66%', '67–84%', '85%+']);
   out += section('Kwa trend ya 5m', tally(rows, htfBucket), ['5m inaunga mkono', '5m tulivu', '5m inapinga', 'bila 5m']);
+  out += section('Kwa multi-timeframe', tally(rows, mtfBucket), ['MTF: 5m+15m (expiry 5m)', 'MTF: 5m tu (expiry 3m)', 'bila MTF']);
   out += section('Kwa mwelekeo', tally(rows, (r) => (r.direction === 'BUY' ? 'BUY (UP)' : 'SELL (DOWN)')), ['BUY (UP)', 'SELL (DOWN)']);
 
   const pairs = [...tally(rows, (r) => r.pair).entries()]
@@ -333,6 +344,7 @@ async function getDashboard(days = 7, recentLimit = 25) {
       regime: groupList(tally(rows, (r) => r.regime || 'haijulikani'), ['TREND', 'RANGE', 'MIXED', 'UNKNOWN', 'haijulikani']),
       strength: groupList(tally(rows, strengthBucket), ['50–66%', '67–84%', '85%+']),
       htf: groupList(tally(rows, htfBucket), ['5m inaunga mkono', '5m tulivu', '5m inapinga', 'bila 5m']),
+      mtf: groupList(tally(rows, mtfBucket), ['MTF: 5m+15m (expiry 5m)', 'MTF: 5m tu (expiry 3m)', 'bila MTF']),
       direction: groupList(tally(rows, (r) => (r.direction === 'BUY' ? 'BUY (UP)' : 'SELL (DOWN)')), ['BUY (UP)', 'SELL (DOWN)']),
       pairs: pairs.length > 8 ? [...pairs.slice(0, 4), ...pairs.slice(-4)] : pairs,
     },
