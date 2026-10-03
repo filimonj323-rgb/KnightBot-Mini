@@ -119,6 +119,17 @@
         <h3><span>📻 Live Feed (Auto-Signal)</span><span class="po-muted" id="feedCount"></span></h3>
         <div id="feedBox"><div class="po-empty">Inapakia...</div></div>
       </div>
+
+      <div class="po-card">
+        <h3><span>📊 Takwimu za Signals (Win Rate Halisi)</span><button class="po-btn small" onclick="loadSigStats()">🔄 Sasisha</button></h3>
+        <div class="po-filters" id="ssDays"></div>
+        <div class="po-sum" id="ssSum"></div>
+        <div class="po-note" id="ssVerdict" style="margin:0 0 12px;"></div>
+        <div class="po-grid2" id="ssGroups"></div>
+        <div style="margin-top:14px;font-weight:700;font-size:13px;">🕒 Signals za hivi karibuni</div>
+        <div id="ssRecent" style="margin-top:8px;"><div class="po-empty">Inapakia...</div></div>
+        <div class="po-note">Kila signal ya nguvu ≥50% inayotumwa inapimwa baada ya expiry kwa bei ya candle ya 1m. ⚠️ = sampuli ndogo (n&lt;20). Subiri n≥100 kabla ya kuamini namba.</div>
+      </div>
     </div>
 
     <!-- AUTO-TRADE -->
@@ -227,7 +238,7 @@
   let state = { bridge: null, balance: null, trades: [], auto: [], pairs: [], modes: [], at: null, atStats: null };
   let atDirty = false;
   let hResult = 'all', hPair = 'all';
-  let pollTimer = null, tickTimer = null;
+  let pollTimer = null, tickTimer = null, ssTimer = null;
 
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -714,9 +725,59 @@
     } catch (e) { toast('tgToast', e.message, false); }
   }
 
+  // ── Takwimu za signals (win rate halisi) ───────────────────────────
+  let ssDays = 7, ssLoading = false;
+  const pct = (x, d = 1) => (x == null ? '—' : (x * 100).toFixed(d) + '%');
+  const ST_ICON = { win: '✅ Win', loss: '🔴 Loss', draw: '➖ Sare', pending: '⏳ Inasubiri', void: '🚫 Batili' };
+
+  function ssGroupTable(title, list, be) {
+    if (!list || !list.length) return '';
+    const rows = list.map((g) => {
+      const cls = g.rate == null ? '' : g.rate >= be ? 'po-up' : 'po-down';
+      return `<tr><td>${esc(g.label)}</td><td>${g.w}W-${g.l}L</td><td class="${cls}">${pct(g.rate)}</td><td class="po-muted">${g.n}${g.n < 20 ? ' ⚠️' : ''}</td></tr>`;
+    }).join('');
+    return `<div><div style="font-weight:700;font-size:12px;margin:4px 0;">${esc(title)}</div><table class="po-table"><thead><tr><th>Kundi</th><th>W-L</th><th>Win%</th><th>n</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  async function loadSigStats() {
+    if (ssLoading) return;
+    ssLoading = true;
+    $('ssDays').innerHTML = [7, 30, 90].map((d) => `<button class="po-btn small ${ssDays === d ? 'active' : ''}" onclick="ssDays=${d};loadSigStats()">Siku ${d}</button>`).join('');
+    try {
+      const d = await api('/api/admin/po/signal-stats?days=' + ssDays);
+      const o = d.overall, be = o.breakEven;
+      const rateCls = o.rate == null ? '' : o.verdict === 'above' ? 'po-up' : o.verdict === 'below' ? 'po-down' : '';
+      $('ssSum').innerHTML =
+        `<div><b class="${rateCls}">${pct(o.rate)}</b><span>Win rate</span></div>` +
+        `<div><b>${o.n}</b><span>Zilizopimwa</span></div>` +
+        `<div><b><span class="po-up" style="font-size:inherit;text-transform:none;letter-spacing:0;">${o.w}</span> / <span class="po-down" style="font-size:inherit;text-transform:none;letter-spacing:0;">${o.l}</span></b><span>Win / Loss${o.d ? ' (+' + o.d + ' sare)' : ''}</span></div>` +
+        `<div><b>${pct(be)}</b><span>Kuvunja sawa (${o.payout}%)</span></div>` +
+        `<div><b>${d.pending}</b><span>Zinasubiri</span></div>`;
+      const ci = o.ci ? `95%: ${(o.ci[0] * 100).toFixed(0)}–${(o.ci[1] * 100).toFixed(0)}%` : '';
+      $('ssVerdict').innerHTML = !o.n
+        ? 'Bado hakuna matokeo ya kutosha. Subiri signals zipimwe baada ya expiry yake.'
+        : (o.verdict === 'above' ? '✅ Juu ya kuvunja sawa kitakwimu.' : o.verdict === 'below' ? '🔴 Chini ya kuvunja sawa kitakwimu — mantiki inapoteza.' : '🟡 Bado haijulikani' + (o.small ? ' (sampuli ndogo — subiri n≥100)' : '.')) + ` <span class="po-muted">${ci}</span>`;
+      const g = d.groups || {};
+      $('ssGroups').innerHTML =
+        ssGroupTable('Kwa timeframe/expiry', g.expiry, be) + ssGroupTable('Kwa hali ya soko', g.regime, be) +
+        ssGroupTable('Kwa nguvu', g.strength, be) + ssGroupTable('Kwa trend ya 5m', g.htf, be) +
+        ssGroupTable('Kwa mwelekeo', g.direction, be) + ssGroupTable('Jozi (n≥5)', g.pairs, be);
+      const rec = d.recent || [];
+      $('ssRecent').innerHTML = rec.length
+        ? `<div class="po-scroll" style="max-height:340px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Muda</th><th>Jozi</th><th>Dir</th><th>%</th><th>Expiry</th><th>Hali</th><th>Matokeo</th></tr></thead><tbody>${rec.map((r) =>
+            `<tr><td class="po-muted">${fmtDate(r.createdAt)}</td><td>${esc(r.pair)}</td><td>${dirBadge(r.direction)}</td><td>${r.strength}%</td><td>${tfLabel(r.expirySec)}</td><td class="po-muted">${esc(r.regime || '—')}</td><td class="${r.status === 'win' ? 'po-up' : r.status === 'loss' ? 'po-down' : 'po-muted'}">${ST_ICON[r.status] || esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`
+        : '<div class="po-empty">Hakuna signal iliyorekodiwa bado. Zinarekodiwa zinapotumwa (auto-signal, scan, auto-trade).</div>';
+    } catch (e) {
+      $('ssSum').innerHTML = '';
+      $('ssRecent').innerHTML = `<div class="po-empty">❌ ${esc(e.message)}</div>`;
+    }
+    ssLoading = false;
+  }
+
   function showApp() {
     $('poLogin').style.display = 'none'; $('poApp').style.display = 'block';
-    renderBar(); refresh(); loadTargets();
+    renderBar(); refresh(); loadTargets(); loadSigStats();
+    clearInterval(ssTimer); ssTimer = setInterval(() => { if ($('pane-signals').classList.contains('active')) loadSigStats(); }, 60000);
     clearInterval(pollTimer); pollTimer = setInterval(refresh, 10000);
     clearInterval(tickTimer); tickTimer = setInterval(tick, 1000);
   }
