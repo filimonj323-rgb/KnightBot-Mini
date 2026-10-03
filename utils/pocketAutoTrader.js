@@ -35,6 +35,7 @@
 const pocketTrader = require('./pocketOptionTrader');
 const pocketStore = require('./pocketStore');
 const pocketSignal = require('./pocketSignal');
+const signalTracker = require('./signalTracker');
 const signalTargets = require('./signalTargets');
 
 const CONFIG_KEY = 'autotrade:config';
@@ -442,6 +443,7 @@ async function considerSignal(r) {
   const pos = { pair: r.pair, key, direction: r.direction, stake: cfg.stake, strength: r.strength, openedAt: Date.now() };
   positions.set(resKey, pos);
   tradesToday++;
+  signalTracker.record(r, cfg.dryRun ? 'dry' : 'autotrade');
 
   const arrow = r.direction === 'BUY' ? '🟢 UP (BUY) ⬆️' : '🔴 DOWN (SELL) ⬇️';
   const reasons = (r.notes || []).slice(0, 4).map((n) => `• ${n}`).join('\n');
