@@ -515,9 +515,17 @@ async function handlePairingRequest(req, res) {
         return textReply(403, 'Key si sahihi.');
       }
       try {
-        const r = await fetch(`${pocketTrader.BRIDGE_URL}/debug/lib`, {
+        // what=history -> ombi la loadHistoryPeriod (pair, period, offset, time hiari)
+        const q = new URL(req.url, 'http://x').searchParams;
+        let target = `${pocketTrader.BRIDGE_URL}/debug/lib`;
+        if (q.get('what') === 'history') {
+          const fwd = new URLSearchParams();
+          for (const k of ['pair', 'period', 'offset', 'time']) if (q.get(k)) fwd.set(k, q.get(k));
+          target = `${pocketTrader.BRIDGE_URL}/debug/history?${fwd.toString()}`;
+        }
+        const r = await fetch(target, {
           headers: { 'X-Bridge-Secret': bridgeSecret },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(30000),
         });
         return textReply(r.status, await r.text());
       } catch (e) {
