@@ -582,11 +582,15 @@ async function getCandles(pair, interval, count) {
   // "EUR/USD" au "EURUSD" -> "frxEURUSD"
   const symbol = toDerivSymbol(String(pair).replace(/[^A-Za-z]/g, ''));
   const n = Math.max(1, Math.min(Number(count) || 100, MAX_CANDLES_PER_REQUEST));
+  // Deriv `count` hufanya kazi kama dirisha la muda: weekend haina candles, kwa
+  // hiyo tunaomba mara 2 (bila gharama) kisha tunakata n za mwisho — idadi kamili
+  // inapatikana hata baada ya weekend/likizo.
+  const reqCount = Math.min(n * 2, MAX_CANDLES_PER_REQUEST);
 
   const res = await send({
     ticks_history: symbol,
     adjust_start_time: 1, // soko likiwa limefungwa (weekend) bado rudisha candles za mwisho zilizopo
-    count: n,
+    count: reqCount,
     end: 'latest',
     granularity,
     style: 'candles',
@@ -600,7 +604,7 @@ async function getCandles(pair, interval, count) {
     );
   }
 
-  return raw.map((c) => ({
+  return raw.slice(-n).map((c) => ({
     datetime: epochToDatetime(c.epoch ?? c.open_time ?? c.time, granularity),
     open: String(c.open),
     high: String(c.high),
