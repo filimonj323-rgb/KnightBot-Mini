@@ -226,6 +226,16 @@ async function td(endpoint, params) {
 // Vuta raw candles (OHLC) kwa interval fulani — credit 1 TU. `order: 'ASC'`
 // ili candles ziwe kongwe→mpya moja kwa moja (rahisi kwa indicators.js
 // bila kuhitaji kugeuza array).
+// US DST (Jumapili ya 2 ya Machi → Jumapili ya 1 ya Novemba) — huamua saa ya kufunga FX.
+function usDst(ms) {
+  const y = new Date(ms).getUTCFullYear();
+  const nthSunday = (month, n) => {
+    const firstDow = new Date(Date.UTC(y, month, 1)).getUTCDay();
+    return Date.UTC(y, month, 1 + ((7 - firstDow) % 7) + (n - 1) * 7);
+  };
+  return ms >= nthSunday(2, 2) && ms < nthSunday(10, 1);
+}
+
 async function fetchTwelveCandles(pairSymbol, interval, outputsize) {
   if (!API_KEY) {
     throw new Error('TWELVE_DATA_API_KEY haipo kwenye env');
@@ -255,7 +265,15 @@ async function fetchTwelveCandles(pairSymbol, interval, outputsize) {
     const dow = Number.isFinite(ms) ? new Date(ms).getUTCDay() : -1;
     const o = Number(c.open), h = Number(c.high), l = Number(c.low), cl = Number(c.close);
     const dailySunday = dt.length === 10 && dow === 0;
-    return dow === 6 || dailySunday || (o === h && h === l && l === cl);
+    // Intraday: soko la FX hufungwa Ijumaa na kufunguliwa Jumapili saa 21:00 UTC
+    // (majira ya joto ya US) au 22:00 UTC (baridi). Twelve hutoa candles ndogo baada ya kufunga.
+    let afterClose = false;
+    if (dt.length > 10 && Number.isFinite(ms)) {
+      const hour = new Date(ms).getUTCHours();
+      const boundary = usDst(ms) ? 21 : 22;
+      afterClose = (dow === 5 && hour >= boundary) || (dow === 0 && hour < boundary);
+    }
+    return dow === 6 || dailySunday || afterClose || (o === h && h === l && l === cl);
   };
   const openCandles = rawValues.filter((c) => !isClosedMarket(c));
   const dropped = rawValues.length - openCandles.length;
