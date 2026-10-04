@@ -230,18 +230,38 @@ async function fetchTwelveCandles(pairSymbol, interval, outputsize) {
   if (!API_KEY) {
     throw new Error('TWELVE_DATA_API_KEY haipo kwenye env');
   }
+  // Tunaomba zaidi (credit ni 1 bila kujali) kwa sababu candles za soko-limefungwa
+  // zinaondolewa hapa chini; kisha tunakata `outputsize` za mwisho.
+  const reqSize = Math.min(Math.ceil(Number(outputsize) * 1.5), 5000);
   const res = await td('time_series', {
     symbol: pairSymbol,
     interval,
-    outputsize,
+    outputsize: reqSize,
     order: 'ASC',
     // Lazimisha UTC — bila hii Twelve hutumia timezone yake ya default na
     // datetime hazilingani na Deriv (epoch ya UTC). Angalia: .fxcheck <JOZI> 1h
     timezone: 'UTC',
   });
-  const values = res?.values;
-  if (!Array.isArray(values) || values.length === 0) {
+  const rawValues = res?.values;
+  if (!Array.isArray(rawValues) || rawValues.length === 0) {
     throw new Error(`Hakuna candles zilizorudi kwa ${pairSymbol} (${interval})`);
+  }
+  // Ondoa candles za soko lililofungwa: Jumamosi (UTC) na candles "tambarare"
+  // (open=high=low=close) — Twelve huzijaza weekend, Deriv haina. Zinapunguza
+  // ATR/range na kupotosha RSI/EMA.
+  const isClosedMarket = (c) => {
+    const dt = String(c.datetime);
+    const ms = Date.parse(dt.length === 10 ? `${dt}T00:00:00Z` : `${dt.replace(' ', 'T')}Z`);
+    const saturday = Number.isFinite(ms) && new Date(ms).getUTCDay() === 6;
+    const o = Number(c.open), h = Number(c.high), l = Number(c.low), cl = Number(c.close);
+    return saturday || (o === h && h === l && l === cl);
+  };
+  const open = rawValues.filter((c) => !isClosedMarket(c));
+  const dropped = rawValues.length - open.length;
+  const values = open.slice(-Number(outputsize));
+  values.droppedClosed = dropped; // kwa .fxcheck
+  if (values.length === 0) {
+    throw new Error(`Candles zote za ${pairSymbol} (${interval}) ni za soko lililofungwa`);
   }
   if (values.length < MIN_CANDLES_RECOMMENDED) {
     console.warn(
