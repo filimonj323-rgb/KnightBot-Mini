@@ -54,7 +54,7 @@
  *     mfululizo kufika kikomo (default: saa 4)
  *   AUTO_TRADE_MAX_CONCURRENT        — trades wazi kiwango cha juu wakati
  *     mmoja (jumla ya jozi zote) — inazuia exposure kubwa mno ikiwa jozi
- *     nyingi zinatoa signal wakati mmoja (default: idadi ya PAIRS, yaani 7)
+ *     nyingi zinatoa signal wakati mmoja (default: 3; badilisha kwa env hii)
  *   AUTO_TRADE_MAX_CURRENCY_EXPOSURE — kikomo cha net exposure (units, si
  *     $) kwa currency MOJA (mfano USD) kutoka jozi zote zilizo wazi kwa
  *     pamoja (default: 1). Angalia "Correlation guard" chini — hii ndiyo
@@ -124,7 +124,13 @@ const MULTIPLIER = ALLOWED_MULTIPLIERS.includes(rawMultiplier) ? rawMultiplier :
 // (price+rsi+macd+ema9+ema21+atr) — kuangalia jozi zote mara moja
 // kunavuka kikomo (18 credits > 8/dakika) na kusababisha "429". Kwa hiyo
 // tunasubiri kidogo kati ya jozi moja na nyingine (stagger).
-const PAIR_STAGGER_MS = Number(process.env.AUTO_TRADE_PAIR_STAGGER_MS || 70 * 1000); // sekunde 70
+// Deriv haina kikomo cha 8 credits/dakika cha Twelve — sekunde 3 zinatosha. Twelve ikiwa
+// chanzo kikuu, tumia sekunde 70 (au weka AUTO_TRADE_PAIR_STAGGER_MS mwenyewe).
+const PAIR_STAGGER_MS = (() => {
+  const v = Number(process.env.AUTO_TRADE_PAIR_STAGGER_MS);
+  if (Number.isFinite(v) && v >= 0 && process.env.AUTO_TRADE_PAIR_STAGGER_MS !== undefined && process.env.AUTO_TRADE_PAIR_STAGGER_MS !== '') return v;
+  return DATA_SOURCE === 'deriv' ? 3 * 1000 : 70 * 1000;
+})();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -231,13 +237,27 @@ const PAIRS = [
   { code: 'EURJPY', symbol: 'EUR/JPY' },
   { code: 'GBPJPY', symbol: 'GBP/JPY' },
   { code: 'AUDJPY', symbol: 'AUD/JPY' },
+  // Majors za ziada (zina USD — correlation guard inazuia kufungua nyingi
+  // zinazoelekea upande mmoja wa Dola).
+  { code: 'AUDUSD', symbol: 'AUD/USD' },
+  { code: 'USDCHF', symbol: 'USD/CHF' },
+  { code: 'USDCAD', symbol: 'USD/CAD' },
+  { code: 'NZDUSD', symbol: 'NZD/USD' },
 ];
 
 // ── Circuit breakers — hulinda dhidi ya hasara za mfululizo/kubwa mno ──
 const MAX_DAILY_LOSS_USD = Number(process.env.AUTO_TRADE_MAX_DAILY_LOSS_USD || 15);
 const MAX_CONSECUTIVE_LOSSES = Number(process.env.AUTO_TRADE_MAX_CONSECUTIVE_LOSSES || 3);
 const COOLDOWN_MS = Number(process.env.AUTO_TRADE_COOLDOWN_MS || 4 * 60 * 60 * 1000); // saa 4
-const MAX_CONCURRENT_TRADES = Number(process.env.AUTO_TRADE_MAX_CONCURRENT || PAIRS.length);
+// Max trades wazi kwa wakati mmoja — default 3. Badilisha kwa env:
+//   AUTO_TRADE_MAX_CONCURRENT=5
+// (thamani batili/0 → inarudi default 3). Hasara: AUTO_TRADE_MAX_CONSECUTIVE_LOSSES,
+// AUTO_TRADE_MAX_DAILY_LOSS_USD (angalia juu).
+const DEFAULT_MAX_CONCURRENT = 3;
+const MAX_CONCURRENT_TRADES = (() => {
+  const v = parseInt(process.env.AUTO_TRADE_MAX_CONCURRENT || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : DEFAULT_MAX_CONCURRENT;
+})();
 
 // Kikomo cha net exposure (units, si $) kwa currency MOJA kabla ya
 // kuzuia trade mpya — angalia computeCurrencyExposure()/
@@ -800,42 +820,74 @@ function wouldExceedCorrelationLimit(exposure, code, direction) {
   return Math.abs(newBase) > MAX_CURRENCY_EXPOSURE || Math.abs(newQuote) > MAX_CURRENCY_EXPOSURE;
 }
 
-// In-flight lock kwa pair — inazuia checkPairAndTrade() MBILI kuendesha kwa
-// WAKATI MMOJA kwa jozi ile ile (mfano runCycle mbili zikiingiliana kwa
-// bahati mbaya). Bila hii, zote mbili zingeweza kuona "bado haijafunguliwa"
-// (alreadyOpen=false) KABLA hata moja haijamaliza kuandika kwenye Map/DB —
-// na jozi ile ile ikafunguliwa MARA MBILI kwa kweli. Hii ni kando kabisa na
-// correlation guard (computeCurrencyExposure/wouldExceedCorrelationLimit)
-// iliyopo tayari, ambayo inashughulikia JOZI TOFAUTI zenye currency moja.
+// In-flight lock kwa pair — inazuia ukaguzi/kufungua MBILI kwa wakati mmoja kwa
+// jozi ile ile (vinginevyo jozi ile ile ingeweza kufunguliwa MARA MBILI). Ni kando
+// na correlation guard (jozi TOFAUTI zenye currency moja).
 const inFlightPairs = new Set();
 
-async function checkPairAndTrade(pairInfo) {
+// Hatua 1: hesabu signal + vizuizi, rudisha mgombea au null (HAIFUNGUI trade).
+async function evaluatePair(pairInfo) {
   const { code } = pairInfo;
   if (inFlightPairs.has(code)) {
     console.log(`[autoTrader] ${code}: ukaguzi mwingine bado unaendelea (in-flight) — naruka huu kuzuia trade mbili.`);
-    return;
+    return null;
   }
   inFlightPairs.add(code);
   try {
-    await checkPairAndTradeInner(pairInfo);
+    return await evaluatePairInner(pairInfo);
   } finally {
     inFlightPairs.delete(code);
   }
 }
 
-async function checkPairAndTradeInner(pairInfo) {
+async function evaluatePairInner(pairInfo) {
   const { code, symbol } = pairInfo;
 
+  // HATUA 1 — signal ya KILA jozi huhesabiwa kila mzunguko (hata ikiwa pause/
+  // trades zimejaa) ili dashboard/.fxautostatus ziwe na signal mpya za jozi zote.
+  let snapshot, sig;
+  try {
+    // daily:true => pia vuta trend ya 1day (cache saa 6, credit 1 kwa jozi
+    // mara chache kwa siku) ili gate ya daily itumike kwa auto-trade.
+    snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL, { daily: true });
+    sig = computeSignal(snapshot);
+  } catch (err) {
+    console.error(`[autoTrader] Imeshindwa kupata signal ya ${code}:`, err.message);
+    lastSignals.set(code, { error: err.message, checkedAt: Date.now() });
+    return null;
+  }
+
+  lastSignals.set(code, {
+    direction: sig.direction,
+    strength: sig.strength,
+    price: snapshot.price,
+    atr: snapshot.atr,
+    notes: sig.notes,
+    gated: sig.gated || null,
+    rawDirection: sig.rawDirection,
+    rawStrength: sig.rawStrength,
+    trends: getTrends(snapshot),
+    checkedAt: Date.now(),
+  });
+
+  if (sig.gated) {
+    console.log(
+      `[autoTrader] ${code}: skip — gate ya ${sig.gated === 'DAILY' ? DAILY_INTERVAL : HTF_INTERVAL} ` +
+        `(1h: ${sig.rawDirection}, 4h: ${snapshot.htfTrend || 'N/A'}, 1day: ${snapshot.dailyTrend || 'N/A'}).`
+    );
+  }
+
+  // HATUA 2 — vizuizi vya kufungua trade mpya.
   // Circuit breaker: hasara ya siku au mfululizo imefika kikomo — usifungue
   // trade mpya (trades zilizo wazi tayari haziguswi, zinaendelea Deriv).
-  if (isPaused()) return;
+  if (isPaused()) return null;
 
   // Zuia trades wazi nyingi mno kwa wakati mmoja (exposure kubwa).
-  if (openAutoTrades.size >= MAX_CONCURRENT_TRADES) return;
+  if (openAutoTrades.size >= MAX_CONCURRENT_TRADES) return null;
 
   // Zuia kufungua trade nyingine kwa jozi ile ile wakati moja tayari iko wazi.
   const alreadyOpen = [...openAutoTrades.values()].some((t) => t.code === code);
-  if (alreadyOpen) return;
+  if (alreadyOpen) return null;
 
   // Ukaguzi wa ZIADA moja kwa moja Deriv (si Map/DB yetu pekee) — inazuia
   // auto-trader kufungua trade NYINGINE kwa jozi ambayo tayari ina trade
@@ -878,42 +930,10 @@ async function checkPairAndTradeInner(pairInfo) {
       `[autoTrader] ${code}: trade wazi tayari ipo kwenye Deriv (imefunguliwa kwa mkono/chanzo kingine) — ` +
         `imeandikishwa (adopted) 🆔 ${livePosition.contract_id}, auto-trader haitafungua nyingine mzunguko huu.`
     );
-    return;
+    return null;
   }
 
-  let snapshot, sig;
-  try {
-    // daily:true => pia vuta trend ya 1day (cache saa 6, credit 1 kwa jozi
-    // mara chache kwa siku) ili gate ya daily itumike kwa auto-trade.
-    snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL, { daily: true });
-    sig = computeSignal(snapshot);
-  } catch (err) {
-    console.error(`[autoTrader] Imeshindwa kupata signal ya ${code}:`, err.message);
-    lastSignals.set(code, { error: err.message, checkedAt: Date.now() });
-    return;
-  }
-
-  lastSignals.set(code, {
-    direction: sig.direction,
-    strength: sig.strength,
-    price: snapshot.price,
-    atr: snapshot.atr,
-    notes: sig.notes,
-    gated: sig.gated || null,
-    rawDirection: sig.rawDirection,
-    rawStrength: sig.rawStrength,
-    trends: getTrends(snapshot),
-    checkedAt: Date.now(),
-  });
-
-  if (sig.gated) {
-    console.log(
-      `[autoTrader] ${code}: skip — gate ya ${sig.gated === 'DAILY' ? DAILY_INTERVAL : HTF_INTERVAL} ` +
-        `(1h: ${sig.rawDirection}, 4h: ${snapshot.htfTrend || 'N/A'}, 1day: ${snapshot.dailyTrend || 'N/A'}).`
-    );
-  }
-
-  if (sig.direction === 'NEUTRAL' || sig.strength < STRENGTH_THRESHOLD) return;
+  if (sig.direction === 'NEUTRAL' || sig.strength < STRENGTH_THRESHOLD) return null;
 
   // Habari kubwa (High impact) iko karibu (dakika NEWS_RISK_WINDOW_MIN
   // kabla/baada — angalia utils/economicCalendar.js) — spread/slippage
@@ -922,7 +942,7 @@ async function checkPairAndTradeInner(pairInfo) {
   // haziguswi (SL/TP zake zinaendelea Deriv) — hii inazuia trade MPYA tu.
   if (sig.newsRisk) {
     console.log(`[autoTrader] ${code}: skip — habari kubwa (High impact) iko karibu.`);
-    return;
+    return null;
   }
 
   // ── Correlation guard ──────────────────────────────────────────────
@@ -942,7 +962,7 @@ async function checkPairAndTradeInner(pairInfo) {
         `hii ni "dau moja" lililojigawanya kwenye jozi mbili, si diversification ya kweli).`
     );
     lastSignals.set(code, { ...lastSignals.get(code), correlationBlocked: true });
-    return;
+    return null;
   }
 
   // Regime filter (walk-forward validation) — angalia kama mkakati bado
@@ -955,7 +975,7 @@ async function checkPairAndTradeInner(pairInfo) {
       `[autoTrader] ${code}: skip — regime filter (profit factor ya hivi karibuni ${regime.profitFactor} ` +
         `< kiwango ${REGIME_MIN_PROFIT_FACTOR}, kutoka trades ${regime.totalTrades} za backtest fupi).`
     );
-    return;
+    return null;
   }
 
   // Hesabu SL/TP kulingana na ATR (volatility halisi ya jozi wakati huo).
@@ -977,6 +997,52 @@ async function checkPairAndTradeInner(pairInfo) {
     tpUsd = FALLBACK_TP_USD;
     riskSource = 'dola fasta (ATR haikupatikana)';
   }
+
+  // Mgombea (candidate) — hatafunguliwa hapa; runCycle() inapanga wote kwa strength.
+  return { code, symbol, sig, snapshot, slUsd, tpUsd, riskSource };
+}
+
+// Hatua 2: fungua trade ya mgombea mmoja — baada ya kuthibitisha tena vizuizi,
+// kwa sababu trades zilizofunguliwa mapema KWENYE MZUNGUKO HUU zinabadilisha
+// nafasi (max concurrent) na exposure ya currency.
+async function executeCandidate(c) {
+  const { code, symbol, sig, slUsd, tpUsd, riskSource } = c;
+  if (inFlightPairs.has(code)) return;
+  inFlightPairs.add(code);
+  try {
+    if (isPaused()) {
+      console.log(`[autoTrader] ${code}: skip — circuit breaker imewashwa katikati ya mzunguko.`);
+      return;
+    }
+    if (openAutoTrades.size >= MAX_CONCURRENT_TRADES) {
+      console.log(
+        `[autoTrader] ${code}: skip — nafasi zimejaa (${openAutoTrades.size}/${MAX_CONCURRENT_TRADES}); ` +
+          `jozi zenye strength kubwa zaidi zimepewa kipaumbele.`
+      );
+      return;
+    }
+    if ([...openAutoTrades.values()].some((t) => t.code === code)) return;
+
+    // Exposure mpya kabisa (positions halisi za Deriv; kama imeshindwa, tumia trades zetu).
+    let openForExposure;
+    try {
+      const live = await getOpenPositions();
+      openForExposure = live.map((p) => ({
+        code: String(p.symbol || '').replace(/^frx/i, '').toUpperCase(),
+        direction: /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL',
+      }));
+    } catch (_) {
+      openForExposure = [...openAutoTrades.values()].map((t) => ({ code: t.code, direction: t.direction }));
+    }
+    const exposureNow = computeCurrencyExposure(openForExposure);
+    if (wouldExceedCorrelationLimit(exposureNow, code, sig.direction)) {
+      console.log(
+        `[autoTrader] ${code}: skip — correlation guard (exposure ya sasa: ${JSON.stringify(exposureNow)}, ` +
+          `${sig.direction} ${code} ingezidisha kikomo cha ±${MAX_CURRENCY_EXPOSURE}).`
+      );
+      lastSignals.set(code, { ...lastSignals.get(code), correlationBlocked: true });
+      return;
+    }
 
   try {
     const result = await placeMultiplier({
@@ -1049,26 +1115,65 @@ async function checkPairAndTradeInner(pairInfo) {
     console.error(`[autoTrader] Imeshindwa kufungua trade ${code}:`, err.message);
     await notify(`❌ Bot imeshindwa kufungua auto-trade ya ${code}: ${err.message}`);
   }
+  } finally {
+    inFlightPairs.delete(code);
+  }
 }
 
+let cycleRunning = false;
+let cycleStartedAt = 0;
+
 async function runCycle() {
-  for (let i = 0; i < PAIRS.length; i++) {
-    if (i > 0) await sleep(PAIR_STAGGER_MS); // epuka 429 (kikomo cha Twelve Data)
-    try {
-      await checkPairAndTrade(PAIRS[i]);
-    } catch (err) {
-      // MUHIMU: jozi MOJA ikitupa error isiyoshikwa (mfano Deriv "zombie"
-      // connection — inaonekana bado open lakini haijibu, hivyo kila ombi
-      // linangoja sekunde 15 kisha ku-timeout), HATUACHI mzunguko mzima
-      // usimame hapo — vinginevyo jozi zilizobaki hazikaguliwi kabisa
-      // ("bot imelala"), na lastCycleAt haisasishwi kamwe ikiwa tatizo
-      // lilelile linajirudia kila mzunguko (watchdog haisaidii kama huu
-      // ndio unaotupa error kila wakati badala ya ku-hang kimya kimya).
-      console.error(`[autoTrader] runCycle: ${PAIRS[i].code} imeshindwa, inaendelea na jozi zingine:`, err.message);
-    }
+  // Zuia mizunguko miwili kuingiliana (ingeweza kupanga/kufungua mara mbili).
+  // Mzunguko uliokwama kwa muda mrefu hauzuii mpya (ulinzi dhidi ya hang).
+  const maxHoldMs = Math.max(CHECK_INTERVAL_MS * 2, 10 * 60 * 1000);
+  if (cycleRunning && Date.now() - cycleStartedAt < maxHoldMs) {
+    console.log('[autoTrader] runCycle iliyotangulia bado inaendelea — naruka mzunguko huu.');
+    return;
   }
-  lastCycleAt = Date.now();
-  lastWatchdogAlertAt = null; // cycle imefanikiwa — rudisha "kimya" kwa tatizo lijalo
+  cycleRunning = true;
+  cycleStartedAt = Date.now();
+  try {
+    // HATUA 1: pitia jozi ZOTE — kila moja inapata signal mpya (inahifadhiwa kwenye lastSignals).
+    const candidates = [];
+    for (let i = 0; i < PAIRS.length; i++) {
+      if (i > 0 && PAIR_STAGGER_MS > 0) await sleep(PAIR_STAGGER_MS);
+      try {
+        const c = await evaluatePair(PAIRS[i]);
+        if (c) candidates.push(c);
+      } catch (err) {
+        // Jozi MOJA ikitupa error (mfano Deriv "zombie" connection), usisimamishe mzunguko mzima.
+        console.error(`[autoTrader] runCycle: ${PAIRS[i].code} imeshindwa, inaendelea na jozi zingine:`, err.message);
+      }
+    }
+
+    // HATUA 2: panga kwa strength (kubwa kwanza) na ufungue hadi nafasi zijae.
+    // Sare ya strength: jozi iliyotangulia kwenye PAIRS (sort ni stable).
+    candidates.sort((a, b) => b.sig.strength - a.sig.strength);
+    if (candidates.length) {
+      console.log(
+        `[autoTrader] Wagombea (strength): ` +
+          candidates.map((c) => `${c.code} ${c.sig.direction} ${c.sig.strength}%`).join(' > ') +
+          ` | nafasi: ${openAutoTrades.size}/${MAX_CONCURRENT_TRADES}`
+      );
+    }
+    for (const c of candidates) {
+      if (openAutoTrades.size >= MAX_CONCURRENT_TRADES) {
+        console.log(`[autoTrader] Nafasi zimejaa (${MAX_CONCURRENT_TRADES}) — wagombea waliobaki hawafunguliwi.`);
+        break;
+      }
+      try {
+        await executeCandidate(c);
+      } catch (err) {
+        console.error(`[autoTrader] executeCandidate ${c.code} imeshindwa:`, err.message);
+      }
+    }
+
+    lastCycleAt = Date.now();
+    lastWatchdogAlertAt = null; // cycle imefanikiwa — rudisha "kimya" kwa tatizo lijalo
+  } finally {
+    cycleRunning = false;
+  }
 }
 
 // Watchdog/heartbeat: pollInterval (POLL_CLOSED_MS, dakika chache) inaendelea
