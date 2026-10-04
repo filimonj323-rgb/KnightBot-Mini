@@ -85,7 +85,7 @@
  * trade MPYA tu.
  */
 
-const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL, DAILY_INTERVAL, HTF_GATE, DAILY_GATE, getTrends } = require('./forexSignal');
+const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL, DAILY_INTERVAL, HTF_GATE, DAILY_GATE, getTrends, DATA_SOURCE } = require('./forexSignal');
 const {
   placeMultiplier,
   getOpenPositions,
@@ -1289,6 +1289,8 @@ function getStatus() {
     startedAt,
     lastCycleAt,
     checkIntervalMs: CHECK_INTERVAL_MS,
+    dataSource: DATA_SOURCE, // 'deriv' | 'twelve' (kwa dashboard)
+    twelveFallback: Boolean(process.env.TWELVE_DATA_API_KEY), // Twelve ipo kama mbadala wa Deriv?
     pollMs: POLL_CLOSED_MS,
     strengthThreshold: STRENGTH_THRESHOLD,
     htfInterval: HTF_INTERVAL,
