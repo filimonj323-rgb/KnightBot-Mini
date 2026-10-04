@@ -503,7 +503,7 @@
   }
 
   // Chanzo cha data + muda wa ukaguzi, kutoka hali ya auto-trader (server).
-  let fxInfo = { source: null, fallback: false, intervalMin: null };
+  let fxInfo = { source: null, fallback: false, intervalMin: null, pairs: null };
   function dataSourceLabel() {
     if (fxInfo.source === 'deriv') return 'Deriv' + (fxInfo.fallback ? ' (mbadala: Twelve Data)' : '');
     if (fxInfo.source === 'twelve') return 'Twelve Data';
@@ -514,6 +514,7 @@
       source: a.dataSource || null,
       fallback: !!a.twelveFallback,
       intervalMin: a.checkIntervalMs ? Math.round(a.checkIntervalMs / 60000) : null,
+      pairs: Array.isArray(a.pairs) ? a.pairs : null,
     };
     const bt = document.getElementById('btSource');
     if (bt) bt.textContent = fxInfo.source === 'deriv' ? 'Deriv' : fxInfo.source === 'twelve' ? 'Twelve Data' : 'chanzo cha data';
@@ -552,6 +553,11 @@
         Data: ${dataSourceLabel() || '—'} · Ukaguzi: kila dakika ${Math.round(a.checkIntervalMs / 60000)} · Threshold: ≥${a.strengthThreshold}% ·
         Stake: $${a.stake} · Multiplier: x${a.multiplier} · SL/TP: ATR×${a.slAtrMult}/ATR×${a.tpAtrMult}
       </span>
+      <div class="muted" style="margin-top:6px; font-size:11px;">
+        Trades wazi: ${(a.openTrades || []).length}/${a.maxConcurrentTrades} ·
+        Hasara mfululizo (juu): ${a.maxConsecutiveLosses} · Hasara ya siku (juu): $${a.maxDailyLossUsd} ·
+        Jozi zote zinakaguliwa kila mzunguko; trade zinafunguliwa kwa strength kubwa kwanza.
+      </div>
       <div style="margin-top:12px;">${signalsHtml}</div>
       <div class="section-label" style="margin-top:12px; margin-bottom:6px;">Currency Exposure (correlation guard, kikomo ±${a.maxCurrencyExposure})</div>
       <div style="font-size:11px;">${exposureHtml}</div>
@@ -633,7 +639,7 @@
         <tbody>${rows}</tbody>
       </table>
       <div class="muted" style="margin-top:8px; font-size:11px;">
-        EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY zinaangaliwa kiotomatiki na Auto-Trader ${fxInfo.intervalMin ? `kila dakika ${fxInfo.intervalMin}` : 'mara kwa mara'}${dataSourceLabel() ? ` (chanzo: ${dataSourceLabel()})` : ''}.
+        ${(fxInfo.pairs && fxInfo.pairs.length ? fxInfo.pairs : FX_PAIRS).join('/')} zinaangaliwa kiotomatiki na Auto-Trader ${fxInfo.intervalMin ? `kila dakika ${fxInfo.intervalMin}` : 'mara kwa mara'}${dataSourceLabel() ? ` (chanzo: ${dataSourceLabel()})` : ''}.
         Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.<br>
         ▲/▼ = mwelekeo wa kila timeframe. ⛔ = gate imezuia (1h inapingana na 4h/1d). Weka kidole/mouse juu ya Signal kuona sababu.
       </div>
