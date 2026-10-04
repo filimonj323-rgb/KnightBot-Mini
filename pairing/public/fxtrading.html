@@ -332,7 +332,7 @@
 
     <div class="page-section" id="section-backtest">
       <div class="card">
-        <div class="section-label">🧪 Backtest ya Mkakati (Historia — Twelve Data)</div>
+        <div class="section-label">🧪 Backtest ya Mkakati (Historia — <span id="btSource">chanzo cha data</span>)</div>
         <div class="grid3">
           <div>
             <label>Jozi</label>
@@ -502,7 +502,25 @@
     `;
   }
 
+  // Chanzo cha data + muda wa ukaguzi, kutoka hali ya auto-trader (server).
+  let fxInfo = { source: null, fallback: false, intervalMin: null };
+  function dataSourceLabel() {
+    if (fxInfo.source === 'deriv') return 'Deriv' + (fxInfo.fallback ? ' (mbadala: Twelve Data)' : '');
+    if (fxInfo.source === 'twelve') return 'Twelve Data';
+    return '';
+  }
+  function updateFxInfo(a) {
+    fxInfo = {
+      source: a.dataSource || null,
+      fallback: !!a.twelveFallback,
+      intervalMin: a.checkIntervalMs ? Math.round(a.checkIntervalMs / 60000) : null,
+    };
+    const bt = document.getElementById('btSource');
+    if (bt) bt.textContent = fxInfo.source === 'deriv' ? 'Deriv' : fxInfo.source === 'twelve' ? 'Twelve Data' : 'chanzo cha data';
+  }
+
   function renderAutoTrader(a) {
+    updateFxInfo(a);
     if (!a.enabled) {
       document.getElementById('autoTraderBox').innerHTML = `
         <span class="badge off">OFF</span>
@@ -531,7 +549,7 @@
     document.getElementById('autoTraderBox').innerHTML = `
       <span class="badge on">ON</span>
       <span class="muted" style="margin-left:10px;">
-        Interval: dakika ${Math.round(a.checkIntervalMs / 60000)} · Threshold: ≥${a.strengthThreshold}% ·
+        Data: ${dataSourceLabel() || '—'} · Ukaguzi: kila dakika ${Math.round(a.checkIntervalMs / 60000)} · Threshold: ≥${a.strengthThreshold}% ·
         Stake: $${a.stake} · Multiplier: x${a.multiplier} · SL/TP: ATR×${a.slAtrMult}/ATR×${a.tpAtrMult}
       </span>
       <div style="margin-top:12px;">${signalsHtml}</div>
@@ -615,7 +633,7 @@
         <tbody>${rows}</tbody>
       </table>
       <div class="muted" style="margin-top:8px; font-size:11px;">
-        EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY zinaangaliwa kiotomatiki na Auto-Trader kila saa (bure).
+        EURUSD/GBPUSD/USDJPY/EURGBP/EURJPY/GBPJPY/AUDJPY zinaangaliwa kiotomatiki na Auto-Trader ${fxInfo.intervalMin ? `kila dakika ${fxInfo.intervalMin}` : 'mara kwa mara'}${dataSourceLabel() ? ` (chanzo: ${dataSourceLabel()})` : ''}.
         Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.<br>
         ▲/▼ = mwelekeo wa kila timeframe. ⛔ = gate imezuia (1h inapingana na 4h/1d). Weka kidole/mouse juu ya Signal kuona sababu.
       </div>
