@@ -246,19 +246,20 @@ async function fetchTwelveCandles(pairSymbol, interval, outputsize) {
   if (!Array.isArray(rawValues) || rawValues.length === 0) {
     throw new Error(`Hakuna candles zilizorudi kwa ${pairSymbol} (${interval})`);
   }
-  // Ondoa candles za soko lililofungwa: Jumamosi (UTC) na candles "tambarare"
-  // (open=high=low=close) — Twelve huzijaza weekend, Deriv haina. Zinapunguza
-  // ATR/range na kupotosha RSI/EMA.
+  // Ondoa candles za soko lililofungwa: Jumamosi (UTC), candles "tambarare"
+  // (open=high=low=close) na (daily tu) Jumapili — Twelve huzijaza weekend, Deriv
+  // haina. Zinapunguza ATR/range na kupotosha RSI/EMA.
   const isClosedMarket = (c) => {
     const dt = String(c.datetime);
     const ms = Date.parse(dt.length === 10 ? `${dt}T00:00:00Z` : `${dt.replace(' ', 'T')}Z`);
-    const saturday = Number.isFinite(ms) && new Date(ms).getUTCDay() === 6;
+    const dow = Number.isFinite(ms) ? new Date(ms).getUTCDay() : -1;
     const o = Number(c.open), h = Number(c.high), l = Number(c.low), cl = Number(c.close);
-    return saturday || (o === h && h === l && l === cl);
+    const dailySunday = dt.length === 10 && dow === 0;
+    return dow === 6 || dailySunday || (o === h && h === l && l === cl);
   };
-  const open = rawValues.filter((c) => !isClosedMarket(c));
-  const dropped = rawValues.length - open.length;
-  const values = open.slice(-Number(outputsize));
+  const openCandles = rawValues.filter((c) => !isClosedMarket(c));
+  const dropped = rawValues.length - openCandles.length;
+  const values = openCandles.slice(-Number(outputsize));
   values.droppedClosed = dropped; // kwa .fxcheck
   if (values.length === 0) {
     throw new Error(`Candles zote za ${pairSymbol} (${interval}) ni za soko lililofungwa`);
