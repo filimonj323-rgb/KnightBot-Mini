@@ -235,6 +235,9 @@ async function fetchTwelveCandles(pairSymbol, interval, outputsize) {
     interval,
     outputsize,
     order: 'ASC',
+    // Lazimisha UTC — bila hii Twelve hutumia timezone yake ya default na
+    // datetime hazilingani na Deriv (epoch ya UTC). Angalia: .fxcheck <JOZI> 1h
+    timezone: 'UTC',
   });
   const values = res?.values;
   if (!Array.isArray(values) || values.length === 0) {
