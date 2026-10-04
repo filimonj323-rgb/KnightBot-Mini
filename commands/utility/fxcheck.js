@@ -128,8 +128,11 @@ module.exports = {
     const dvMap = new Map(dv.map((c) => [c.datetime, c]));
     const pip = pipSizeOf(code);
 
-    const pairs = td.filter((c) => dvMap.has(c.datetime)).slice(-MAX_COMPARED).map((c) => ({ t: c, d: dvMap.get(c.datetime) }));
-    const compared = Math.min(td.length, MAX_COMPARED);
+    // Chukua candles 50 za mwisho za Twelve KWANZA, kisha hesabu zinazolingana —
+    // ili "x/50" iwe ya kweli (hapo awali ilichuja kwanza na ikaonyesha 50/50 kila mara).
+    const tdWindow = td.slice(-MAX_COMPARED);
+    const pairs = tdWindow.filter((c) => dvMap.has(c.datetime)).map((c) => ({ t: c, d: dvMap.get(c.datetime) }));
+    const compared = tdWindow.length;
 
     const closeDiff = pairs.map((p) => Math.abs(Number(p.t.close) - Number(p.d.close)) / pip);
     const highDiff = pairs.map((p) => Math.abs(Number(p.t.high) - Number(p.d.high)) / pip);
@@ -160,6 +163,7 @@ module.exports = {
     L.push('');
     L.push(`🗓️ *Data:* Twelve ${td[0]?.datetime} → ${td[td.length - 1]?.datetime} (${td.length})`);
     L.push(`            Deriv  ${dv[0]?.datetime} → ${dv[dv.length - 1]?.datetime} (${dv.length})`);
+    L.push(`🧹 Candles za soko-limefungwa zilizoondolewa (Twelve): ${tdRes.value.droppedClosed ?? 0}`);
     L.push(`📏 *Range ya candle (wastani):* Twelve ${f1(rangePips(td))}p • Deriv ${f1(rangePips(dv))}p`);
 
     // Offset ya muda (saa) — haina maana kwa daily (lebo ni tarehe tu)
