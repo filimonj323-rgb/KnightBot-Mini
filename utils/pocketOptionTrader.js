@@ -119,10 +119,11 @@ async function getCandles(pair, timeframeSeconds = 60, count = 100) {
 
 /**
  * Fungua order ya Binary/Turbo Option.
- * @param {{pair:string, direction:'BUY'|'SELL', amount:number, expirySeconds:number, source?:string}} opts
+ * @param {{pair:string, direction:'BUY'|'SELL', amount:number, expirySeconds:number, source?:string, strength?:number}} opts
+ * strength = nguvu ya signal (%) iliyosababisha trade — inahifadhiwa kwa uchambuzi wa History.
  * source = 'auto' kwa trades za pocketAutoTrader (zinahesabiwa kwenye circuit breakers).
  */
-async function placeOrder({ pair, direction, amount, expirySeconds, source = null }) {
+async function placeOrder({ pair, direction, amount, expirySeconds, source = null, strength = null }) {
   if (!pair) throw new Error('pair inahitajika');
   pair = await resolveAsset(pair);
   if (!(amount > 0)) throw new Error('amount lazima iwe zaidi ya 0');
@@ -141,7 +142,7 @@ async function placeOrder({ pair, direction, amount, expirySeconds, source = nul
   // Hifadhi trade kwenye database (Turso) ili restart isiipoteze, kisha
   // anzisha ufuatiliaji wa matokeo yake itakapofika expiry.
   const direct = direction === 'SELL' ? 'SELL' : 'BUY';
-  await pocketStore.recordOpenTrade({ orderId: data.order_id, pair, direction: direct, stake: amount, expirySeconds, source });
+  await pocketStore.recordOpenTrade({ orderId: data.order_id, pair, direction: direct, stake: amount, expirySeconds, source, strength });
   scheduleSettle(String(data.order_id), Date.now() + expirySeconds * 1000);
 
   return { orderId: data.order_id, raw: data.raw };

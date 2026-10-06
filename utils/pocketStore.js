@@ -14,15 +14,16 @@ async function ready() {
 
 // ── Trades ──────────────────────────────────────────────────────────────
 
-async function recordOpenTrade({ orderId, pair, direction, stake, expirySeconds, source = null }) {
+async function recordOpenTrade({ orderId, pair, direction, stake, expirySeconds, source = null, strength = null }) {
   try {
     await ready();
     const now = Date.now();
+    const str = strength != null && Number.isFinite(Number(strength)) ? Math.round(Number(strength)) : null;
     await db.query(
-      `INSERT INTO po_trades (orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO po_trades (orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt, source, signalStrength)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(orderId) DO NOTHING`,
-      [String(orderId), pair, direction, stake, expirySeconds, now, now + expirySeconds * 1000, source]
+      [String(orderId), pair, direction, stake, expirySeconds, now, now + expirySeconds * 1000, source, str]
     );
   } catch (err) {
     console.error('[pocketStore] Imeshindwa kuhifadhi trade iliyofunguliwa:', err.message);
@@ -81,13 +82,33 @@ async function getClosedResult(orderId) {
 }
 
 // Historia ya trades (zilizofungwa + zilizo wazi), mpya kwanza — kwa dashboard.
+// Jaza strength ya trades za auto za ZAMANI (kabla ya column kuwepo) kutoka po_signals
+// (signalTracker iliandika signal sekunde chache kabla ya order). Best-effort: ikikosa
+// mechi (au jedwali halipo) trade inabaki NULL. Inaendeshwa mara moja kwa kila process.
+let backfilled = false;
+async function backfillStrength() {
+  if (backfilled) return;
+  backfilled = true;
+  try {
+    await db.query(
+      `UPDATE po_trades SET signalStrength = (
+         SELECT s.strength FROM po_signals s
+          WHERE s.pair = po_trades.pair AND s.direction = po_trades.direction AND s.source = 'autotrade'
+            AND ABS(s.createdAt - po_trades.openedAt) < 120000
+          ORDER BY ABS(s.createdAt - po_trades.openedAt) ASC LIMIT 1)
+       WHERE source = 'auto' AND signalStrength IS NULL`
+    );
+  } catch (_) { /* po_signals haipo bado au muundo tofauti — sawa */ }
+}
+
 async function getTradeHistory(limit = 200) {
   try {
     await ready();
+    await backfillStrength();
     const n = Math.min(1000, Math.max(1, parseInt(limit, 10) || 200));
     const r = await db.query(
       `SELECT orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt,
-              closedAt, win, profit, status, source
+              closedAt, win, profit, status, source, signalStrength
          FROM po_trades ORDER BY openedAt DESC LIMIT ?`,
       [n]
     );

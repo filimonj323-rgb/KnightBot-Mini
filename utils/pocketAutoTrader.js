@@ -466,6 +466,7 @@ async function considerSignal(r) {
       amount: cfg.stake,
       expirySeconds: r.expirySec,
       source: 'auto',
+      strength: r.strength,
     });
     positions.delete(resKey);
     positions.set(String(res.orderId), pos);
