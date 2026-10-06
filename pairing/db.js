@@ -132,7 +132,8 @@ async function initSchema() {
       profit        REAL,
       status        TEXT,
       resultJson    TEXT,
-      source        TEXT
+      source        TEXT,
+      signalStrength INTEGER
     )`,
     // Key/value ya settings za Pocket Option (mfano auto-signal kwa kila chat).
     `CREATE TABLE IF NOT EXISTS po_settings (
@@ -150,6 +151,14 @@ async function initSchema() {
   // kutoka CREATE TABLE IF NOT EXISTS — swallow "duplicate column" kama zile za juu.
   try {
     await client.execute('ALTER TABLE po_trades ADD COLUMN source TEXT');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
+  }
+
+  // Migration: po_trades.signalStrength (nguvu ya signal % wakati trade ilipofunguliwa;
+  // NULL = trade ya mkono au ya zamani isiyo na rekodi).
+  try {
+    await client.execute('ALTER TABLE po_trades ADD COLUMN signalStrength INTEGER');
   } catch (e) {
     // Column already exists — expected on every run after the first.
   }

@@ -72,6 +72,7 @@ const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = requi
 const { runBacktest } = require('../utils/backtest');
 const economicCalendar = require('../utils/economicCalendar');
 const fxPredictions = require('../utils/fxPredictions');
+const tradeAnalysis = require('../utils/tradeAnalysis');
 const mainConfig = require('../config');
 const pocketTrader = require('../utils/pocketOptionTrader');
 const pocketStore = require('../utils/pocketStore');
@@ -752,6 +753,17 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, trades });
       }
 
+      // Uchambuzi wa AI (Groq) wa historia ya trades: jozi imara + strength bora.
+      // ?force=1 inapita cache ya dakika 10. Takwimu zinahesabiwa server — AI inaeleza tu.
+      if (req.method === 'GET' && req.url.split('?')[0] === '/api/admin/fx/analyze') {
+        try {
+          const force = new URL(req.url, 'http://x').searchParams.get('force') === '1';
+          return sendJson(res, 200, await tradeAnalysis.analyze('fx', { force }));
+        } catch (err) {
+          return sendJson(res, 500, { ok: false, error: err.message });
+        }
+      }
+
       // Washa/zima trailing stop (breakeven-lock + profit-lock) — sawa na
       // command ya WhatsApp .fxtrailing (commands/owner/fxtrailing.js).
       if (req.method === 'POST' && req.url === '/api/admin/fx/trailing') {
@@ -935,6 +947,11 @@ async function handlePairingRequest(req, res) {
               scanModes: pocketSignal.SCAN_MODES,
               ownerJid: getOwnerJid(),
             });
+          }
+
+          // Uchambuzi wa AI (Groq) wa historia ya Pocket Option: ?force=1 inapita cache.
+          if (req.method === 'GET' && poPath === '/api/admin/po/analyze') {
+            return sendJson(res, 200, await tradeAnalysis.analyze('po', { force: poQuery.get('force') === '1' }));
           }
 
           // Takwimu za win rate halisi za signals (kutoka signalTracker): ?days=7|30|90
