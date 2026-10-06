@@ -222,6 +222,12 @@
       <div class="po-card">
         <h3><span>🕘 Historia ya Trades</span><button class="po-btn small" onclick="refresh()">🔄 Sasisha</button></h3>
         <div class="po-filters" id="hFilters"></div>
+        <div class="po-filters" style="margin-bottom:10px;">
+          <button class="po-btn small" onclick="exportHistory('xlsx', this)">📗 Excel</button>
+          <button class="po-btn small" onclick="exportHistory('pdf', this)">📕 PDF</button>
+          <button class="po-btn small" onclick="exportHistory('csv', this)">📄 CSV</button>
+          <span class="po-muted" style="font-size:12px;align-self:center;">Ina-export trades zinazoonekana (kulingana na filter)</span>
+        </div>
         <div class="po-sum" id="hSummary"></div>
         <div id="hBox"><div class="po-empty">Inapakia...</div></div>
       </div>
@@ -231,6 +237,7 @@
 
 <div id="poSnack" style="display:none;position:fixed;left:12px;right:12px;bottom:18px;z-index:9999;padding:12px 14px;border-radius:12px;font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.5);"></div>
 
+<script src="trade-export.js"></script>
 <script>
   // Lazima ilingane na API_BASE ya admin.html / fxtrading.html
   const API_BASE = 'https://botkuusite.up.railway.app';
@@ -654,6 +661,44 @@
   }
 
   // ── History ────────────────────────────────────────────────────────
+  function historyRows() {
+    return state.trades.filter((t) => (hResult === 'all' || (hResult === 'auto' ? t.source === 'auto' : outcome(t) === hResult)) && (hPair === 'all' || t.pair === hPair));
+  }
+
+  // Export ya historia (Excel / PDF / CSV) — tazama trade-export.js
+  async function exportHistory(kind, btn) {
+    const rows = historyRows().map((t) => {
+      const o = outcome(t);
+      return {
+        orderId: t.orderId, pair: t.pair, direction: t.direction === 'BUY' ? 'UP' : t.direction === 'SELL' ? 'DOWN' : '',
+        stake: t.stake, expiry: t.expirySeconds ? tfLabel(t.expirySeconds) : '', expirySec: t.expirySeconds,
+        opened: TradeExport.tz(t.openedAt), closed: TradeExport.tz(t.closedAt),
+        result: o === 'win' ? 'WIN' : o === 'loss' ? 'LOSS' : o === 'open' ? 'OPEN' : 'UNKNOWN',
+        profit: t.profit != null ? t.profit : '', source: t.source === 'auto' ? 'auto' : 'manual', status: t.status || '',
+      };
+    });
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+    try {
+      const used = await TradeExport.run(kind, {
+        title: 'Pocket Option — Trading History', filename: 'pocketoption-history', rows,
+        notes: 'Matokeo: ' + hResult + ' | Jozi: ' + hPair,
+        pairKey: 'pair', resultKey: 'result', profitKey: 'profit', stakeKey: 'stake',
+        columns: [
+          { key: 'orderId', label: 'Order ID' }, { key: 'opened', label: 'Imefunguliwa (EAT)' }, { key: 'closed', label: 'Imefungwa (EAT)' },
+          { key: 'pair', label: 'Jozi' }, { key: 'direction', label: 'Mwelekeo' }, { key: 'stake', label: 'Stake ($)', num: true },
+          { key: 'expiry', label: 'Expiry' }, { key: 'expirySec', label: 'Expiry (sec)', num: true }, { key: 'result', label: 'Matokeo' },
+          { key: 'profit', label: 'P/L ($)', num: true }, { key: 'source', label: 'Chanzo' }, { key: 'status', label: 'Status' },
+        ],
+      });
+      snack(used === 'csv' && kind === 'xlsx' ? 'Excel library haijapakia (offline?) — CSV imetolewa badala yake.' : used === 'print' ? 'Chagua "Save as PDF" kwenye dirisha la print.' : '✅ Export imekamilika (' + rows.length + ' trades).', true);
+    } catch (e) {
+      snack('❌ ' + e.message, false);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+  }
+
   function setHResult(k) { hResult = k; renderHistory(); }
   function setHPair(v) { hPair = v; renderHistory(); }
   function renderHistory() {
@@ -664,7 +709,7 @@
     $('hFilters').innerHTML = rBtn('all', 'Zote') + rBtn('win', '✅ Win') + rBtn('loss', '🔴 Loss') + rBtn('open', '⏳ Wazi') + rBtn('auto', '🤖 Auto') +
       `<select class="po-select" onchange="setHPair(this.value)"><option value="all">Jozi zote</option>${pairs.map((p) => `<option ${p === hPair ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`;
 
-    const rows = all.filter((t) => (hResult === 'all' || (hResult === 'auto' ? t.source === 'auto' : outcome(t) === hResult)) && (hPair === 'all' || t.pair === hPair));
+    const rows = historyRows();
     const closed = rows.filter((t) => t.closedAt);
     const wins = closed.filter((t) => t.win === 1).length, losses = closed.filter((t) => t.win === 0).length;
     const net = closed.reduce((s, t) => s + Number(t.profit || 0), 0);
