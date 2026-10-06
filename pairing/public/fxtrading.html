@@ -393,8 +393,10 @@
           <button class="ghost" onclick="exportHistory('xlsx', this)">📗 Excel</button>
           <button class="ghost" onclick="exportHistory('pdf', this)">📕 PDF</button>
           <button class="ghost" onclick="exportHistory('csv', this)">📄 CSV</button>
+          <button class="ghost" onclick="analyzeHistory(false, this)">🧠 AI Uchambuzi</button>
           <span class="muted" id="histExportMsg" style="font-size:11px;">Ina-export trades zinazoonekana (kulingana na filter) — hadi 1000 za mwisho</span>
         </div>
+        <div id="aiBox"></div>
         <div id="histSummary" class="hist-summary"></div>
         <div id="historyBox"><div class="empty">Inapakia...</div></div>
       </div>
@@ -1161,6 +1163,23 @@
       msg.textContent = used === 'csv' && kind === 'xlsx' ? 'Excel library haijapakia (offline?) — CSV imetolewa badala yake.' : used === 'print' ? 'Chagua "Save as PDF" kwenye dirisha la print.' : '✅ Export imekamilika (' + rows.length + ' trades).';
     } catch (e) {
       msg.textContent = '❌ ' + e.message;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+  }
+
+  // Uchambuzi wa AI (Groq): jozi imara + strength bora. Takwimu zinahesabiwa server.
+  async function analyzeHistory(force, btn) {
+    const box = document.getElementById('aiBox');
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Inachambua...'; }
+    box.innerHTML = '<div class="empty">🧠 Inachambua historia yako...</div>';
+    try {
+      const d = await api('/api/admin/fx/analyze' + (force ? '?force=1' : ''));
+      box.innerHTML = TradeExport.renderAnalysis(d) +
+        '<div style="margin:8px 0 14px;"><button class="ghost" onclick="analyzeHistory(true, this)">🔄 Chambua upya</button> <button class="ghost" onclick="document.getElementById(\'aiBox\').innerHTML=\'\'">✖ Funga</button></div>';
+    } catch (e) {
+      box.innerHTML = '<div class="empty">❌ ' + e.message + '</div>';
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = label; }
     }

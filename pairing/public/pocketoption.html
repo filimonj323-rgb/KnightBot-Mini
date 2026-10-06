@@ -226,8 +226,10 @@
           <button class="po-btn small" onclick="exportHistory('xlsx', this)">📗 Excel</button>
           <button class="po-btn small" onclick="exportHistory('pdf', this)">📕 PDF</button>
           <button class="po-btn small" onclick="exportHistory('csv', this)">📄 CSV</button>
-          <span class="po-muted" style="font-size:12px;align-self:center;">Ina-export trades zinazoonekana (kulingana na filter)</span>
+          <button class="po-btn small" onclick="analyzeHistory(false, this)">🧠 AI Uchambuzi</button>
+          <span class="po-muted" style="font-size:12px;align-self:center;">Export: trades zinazoonekana (kulingana na filter)</span>
         </div>
+        <div id="aiBox"></div>
         <div class="po-sum" id="hSummary"></div>
         <div id="hBox"><div class="po-empty">Inapakia...</div></div>
       </div>
@@ -636,8 +638,8 @@
   function renderOpen() {
     const open = state.trades.filter((t) => !t.closedAt);
     $('openBox').innerHTML = open.length
-      ? `<div class="po-scroll"><table class="po-table"><thead><tr><th>Jozi</th><th>Dir</th><th>Stake</th><th>Inaisha</th><th>ID</th></tr></thead><tbody>${
-          open.map((t) => `<tr><td><b>${esc(t.pair)}</b>${t.source === 'auto' ? ' 🤖' : ''}</td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td>
+      ? `<div class="po-scroll"><table class="po-table"><thead><tr><th>Jozi</th><th>Dir</th><th>Stake</th><th>Nguvu</th><th>Inaisha</th><th>ID</th></tr></thead><tbody>${
+          open.map((t) => `<tr><td><b>${esc(t.pair)}</b>${t.source === 'auto' ? ' 🤖' : ''}</td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td><td>${strBadge(t)}</td>
             <td data-exp="${Number(t.expiresAt)}" data-oid="${esc(t.orderId)}">—</td><td class="po-muted" style="font-size:11px;">${esc(t.orderId)}</td></tr>`).join('')
         }</tbody></table></div>`
       : '<div class="po-empty">Hakuna order iliyo wazi.</div>';
@@ -661,6 +663,14 @@
   }
 
   // ── History ────────────────────────────────────────────────────────
+  // Nguvu ya signal (%) wakati trade ilipofunguliwa. NULL = trade ya mkono au ya zamani.
+  const strBadge = (t) => {
+    if (t.signalStrength == null) return '<span class="po-muted" title="Trade ya mkono au ya zamani isiyo na rekodi ya strength">—</span>';
+    const v = Number(t.signalStrength);
+    const cls = v >= 85 ? 'po-up' : v >= 67 ? 'po-warn' : 'po-muted';
+    return `<span class="${cls}"><b>${v}%</b></span>`;
+  };
+
   function historyRows() {
     return state.trades.filter((t) => (hResult === 'all' || (hResult === 'auto' ? t.source === 'auto' : outcome(t) === hResult)) && (hPair === 'all' || t.pair === hPair));
   }
@@ -674,7 +684,8 @@
         stake: t.stake, expiry: t.expirySeconds ? tfLabel(t.expirySeconds) : '', expirySec: t.expirySeconds,
         opened: TradeExport.tz(t.openedAt), closed: TradeExport.tz(t.closedAt),
         result: o === 'win' ? 'WIN' : o === 'loss' ? 'LOSS' : o === 'open' ? 'OPEN' : 'UNKNOWN',
-        profit: t.profit != null ? t.profit : '', source: t.source === 'auto' ? 'auto' : 'manual', status: t.status || '',
+        strength: t.signalStrength != null ? t.signalStrength : '',
+        profit: o === 'open' ? '' : (t.profit != null ? t.profit : ''), source: t.source === 'auto' ? 'auto' : 'manual', status: t.status || '',
       };
     });
     const label = btn ? btn.textContent : '';
@@ -687,13 +698,30 @@
         columns: [
           { key: 'orderId', label: 'Order ID' }, { key: 'opened', label: 'Imefunguliwa (EAT)' }, { key: 'closed', label: 'Imefungwa (EAT)' },
           { key: 'pair', label: 'Jozi' }, { key: 'direction', label: 'Mwelekeo' }, { key: 'stake', label: 'Stake ($)', num: true },
-          { key: 'expiry', label: 'Expiry' }, { key: 'expirySec', label: 'Expiry (sec)', num: true }, { key: 'result', label: 'Matokeo' },
+          { key: 'expiry', label: 'Expiry' }, { key: 'expirySec', label: 'Expiry (sec)', num: true }, { key: 'strength', label: 'Strength %', num: true }, { key: 'result', label: 'Matokeo' },
           { key: 'profit', label: 'P/L ($)', num: true }, { key: 'source', label: 'Chanzo' }, { key: 'status', label: 'Status' },
         ],
       });
       snack(used === 'csv' && kind === 'xlsx' ? 'Excel library haijapakia (offline?) — CSV imetolewa badala yake.' : used === 'print' ? 'Chagua "Save as PDF" kwenye dirisha la print.' : '✅ Export imekamilika (' + rows.length + ' trades).', true);
     } catch (e) {
       snack('❌ ' + e.message, false);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
+  }
+
+  // Uchambuzi wa AI (Groq): jozi imara + strength bora. Takwimu zinahesabiwa server.
+  async function analyzeHistory(force, btn) {
+    const box = $('aiBox');
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Inachambua...'; }
+    box.innerHTML = '<div class="po-empty">🧠 Inachambua historia yako...</div>';
+    try {
+      const d = await api('/api/admin/po/analyze' + (force ? '?force=1' : ''));
+      box.innerHTML = TradeExport.renderAnalysis(d) +
+        '<div style="margin-top:8px;"><button class="po-btn small" onclick="analyzeHistory(true, this)">🔄 Chambua upya</button> <button class="po-btn small" onclick="$(\'aiBox\').innerHTML=\'\'">✖ Funga</button></div>';
+    } catch (e) {
+      box.innerHTML = '<div class="po-toast err" style="display:block;">❌ ' + esc(e.message) + '</div>';
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = label; }
     }
@@ -719,12 +747,12 @@
       `<div><b>${wr == null ? '—' : wr + '%'}</b><span>Win rate</span></div><div><b class="${net >= 0 ? 'po-up' : 'po-down'}">${signed(net)}</b><span>Net P/L</span></div>`;
 
     $('hBox').innerHTML = rows.length
-      ? `<div class="po-scroll" style="max-height:520px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Muda</th><th>Jozi</th><th>Dir</th><th>Stake</th><th>Expiry</th><th>Matokeo</th><th>P/L</th></tr></thead><tbody>${
+      ? `<div class="po-scroll" style="max-height:520px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Muda</th><th>Jozi</th><th>Dir</th><th>Stake</th><th>Expiry</th><th>Nguvu</th><th>Matokeo</th><th>P/L</th></tr></thead><tbody>${
           rows.map((t) => {
             const o = outcome(t);
-            const res = o === 'win' ? '<span class="po-up">✅ WIN</span>' : o === 'loss' ? '<span class="po-down">🔴 LOSS</span>' : o === 'open' ? '<span class="po-warn">⏳ wazi</span>' : '<span class="po-muted">? haijulikani</span>';
+            const res = o === 'win' ? '<span class="po-up">✅ WIN</span>' : o === 'loss' ? '<span class="po-down">🔴 LOSS</span>' : o === 'open' ? '<span class="po-warn">⏳ WAZI (open)</span>' : '<span class="po-muted">? haijulikani</span>';
             const p = t.profit != null ? `<span class="${t.profit >= 0 ? 'po-up' : 'po-down'}">${signed(Number(t.profit))}</span>` : '—';
-            return `<tr><td class="po-muted" style="white-space:nowrap;">${fmtDate(t.openedAt)}</td><td><b>${esc(t.pair)}</b>${t.source === 'auto' ? ' <span title="Auto-trade">🤖</span>' : ''}</td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td><td>${tfLabel(t.expirySeconds)}</td><td>${res}</td><td>${p}</td></tr>`;
+            return `<tr><td class="po-muted" style="white-space:nowrap;">${fmtDate(t.openedAt)}</td><td><b>${esc(t.pair)}</b>${t.source === 'auto' ? ' <span title="Auto-trade">🤖</span>' : ''}</td><td>${dirBadge(t.direction)}</td><td>$${fmt(t.stake)}</td><td>${tfLabel(t.expirySeconds)}</td><td>${strBadge(t)}</td><td>${res}</td><td>${p}</td></tr>`;
           }).join('')
         }</tbody></table></div>`
       : '<div class="po-empty">Hakuna trades zinazolingana.</div>';

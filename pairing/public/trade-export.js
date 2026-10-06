@@ -220,5 +220,44 @@
     return csv(opts);
   }
 
-  window.TradeExport = { run, tz };
+  // ── Uchambuzi wa AI: HTML ya matokeo ya /analyze (pocketoption + fxtrading) ──
+  function renderAnalysis(d) {
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const ai = d.ai || {}, st = d.stats || {};
+    const box = 'border:1px solid rgba(128,128,128,.35);border-radius:8px;padding:10px 12px;margin:8px 0;';
+    const good = 'border-left:4px solid #22c55e;', bad = 'border-left:4px solid #ef4444;', info = 'border-left:4px solid #3b82f6;', warn = 'border-left:4px solid #f59e0b;';
+    const pairItem = (x, st_) => `<div style="${box}${st_}"><b>${esc(x.pair)}</b><div style="font-size:12px;opacity:.85;margin-top:2px;">${esc(x.reason)}</div></div>`;
+    const pc = (v, suf = '%') => (v == null ? '—' : v + suf);
+    const sgn = (v) => (v == null ? '—' : (v >= 0 ? '+' : '-') + '$' + Math.abs(v).toFixed(2));
+
+    let h = `<div style="${box}${info}"><div style="font-size:11px;opacity:.7;">🧠 ${ai.source === 'ai' ? 'Groq AI' : 'Takwimu tu (bila AI)'} · trades ${st.sampleSize ?? 0}${d.cached ? ' · cache' : ''}</div>`;
+    h += `<div style="margin-top:4px;line-height:1.45;">${esc(ai.summary || 'Hakuna muhtasari.')}</div></div>`;
+    if (ai.note) h += `<div style="${box}${warn}font-size:12px;">ℹ️ ${esc(ai.note)}</div>`;
+    (ai.warnings || []).forEach((w) => { h += `<div style="${box}${warn}font-size:12px;">⚠️ ${esc(w)}</div>`; });
+
+    if ((ai.strongPairs || []).length) h += `<div style="font-weight:700;margin-top:10px;">💪 Jozi imara</div>` + ai.strongPairs.map((x) => pairItem(x, good)).join('');
+    if ((ai.weakPairs || []).length) h += `<div style="font-weight:700;margin-top:10px;">⚠️ Jozi dhaifu</div>` + ai.weakPairs.map((x) => pairItem(x, bad)).join('');
+    if (ai.bestStrength && ai.bestStrength.recommendation) {
+      h += `<div style="font-weight:700;margin-top:10px;">🎯 Strength bora</div><div style="${box}${good}"><b>${esc(ai.bestStrength.recommendation)}</b><div style="font-size:12px;opacity:.85;margin-top:2px;">${esc(ai.bestStrength.reason)}</div></div>`;
+    }
+    if ((ai.recommendations || []).length) h += `<div style="font-weight:700;margin-top:10px;">✅ Mapendekezo</div><ul style="margin:4px 0 0 18px;padding:0;font-size:13px;line-height:1.5;">${ai.recommendations.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>`;
+
+    const tbl = (title, head, rows) => rows.length
+      ? `<div style="font-weight:700;margin-top:12px;">${title}</div><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px;"><thead><tr>${head.map((x) => `<th style="text-align:left;padding:4px 6px;border-bottom:1px solid rgba(128,128,128,.4);white-space:nowrap;">${x}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td style="padding:4px 6px;border-bottom:1px solid rgba(128,128,128,.2);white-space:nowrap;">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+    const row = (g) => [`<b>${esc(g.label)}</b>`, g.n + (g.confidence !== 'ok' ? ' ⚠️' : ''), pc(g.winRate), pc(g.winRateLow95), pc(g.roiPct), sgn(g.net)];
+    const H = ['', 'Trades', 'Win%', 'Win% (chini 95%)', 'ROI', 'Net'];
+    h += tbl('📊 Jozi (zimepangwa kwa ubora)', ['Jozi', ...H.slice(1)], (st.pairs || []).map(row));
+    if (st.strength && st.strength.thresholds) {
+      h += tbl('🎚️ Ukitumia strength ≥ X tu', ['Kizingiti', ...H.slice(1)], st.strength.thresholds.map(row));
+      h += tbl('🧱 Kwa kundi la strength', ['Kundi', ...H.slice(1)], st.strength.buckets.map(row));
+    }
+    if (st.signalTracker && st.signalTracker.strength && st.signalTracker.strength.length) {
+      h += tbl('📡 Strength ya signals (siku 30)', ['Kundi', 'Signals', 'Win%'], st.signalTracker.strength.map((g) => [`<b>${esc(g.label)}</b>`, g.n, pc(g.winRatePct)]));
+    }
+    if (st.expiry && st.expiry.length) h += tbl('⏱️ Expiry', ['Expiry', ...H.slice(1)], st.expiry.map(row));
+    h += `<div style="font-size:11px;opacity:.65;margin-top:10px;">⚠️ Takwimu zinaonyesha yaliyopita, si ahadi ya siku zijazo. ⚠️ = sampuli ndogo. Si ushauri wa kifedha.</div>`;
+    return h;
+  }
+
+  window.TradeExport = { run, tz, renderAnalysis };
 })();
