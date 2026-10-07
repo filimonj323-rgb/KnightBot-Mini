@@ -3,6 +3,7 @@
  * Stop Loss na Take Profit ni LAZIMA — haziwezi kuachwa.
  */
 
+const { placeManualTrade } = require('../../utils/autoTrader');
 const { placeMultiplier, MAX_STAKE_USD, MAX_MULTIPLIER, MIN_STAKE_USD, ALLOWED_MULTIPLIERS } = require('../../utils/derivTrader');
 
 module.exports = {
@@ -36,7 +37,7 @@ module.exports = {
     const pair = pairRaw.toUpperCase().replace(/[^A-Z]/g, '');
 
     try {
-      const result = await placeMultiplier({
+      const result = await placeManualTrade({
         pair,
         direction: 'SELL',
         stake: parseFloat(stakeRaw),
