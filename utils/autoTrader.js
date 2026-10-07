@@ -377,6 +377,20 @@ async function dbSaveOpenTrade({ contractId, code, symbol, direction, stake, buy
   }
 }
 
+// Trade ambayo Deriv inasema BADO WAZI lakini DB iliiweka imefungwa (kimakosa) → irudishe wazi
+// ili restoreOpenTradesFromDb() ione tena baada ya redeploy ijayo.
+async function dbReopenTrade(contractId) {
+  try {
+    await fxTradesDb.initSchema();
+    await fxTradesDb.query(
+      `UPDATE fx_auto_trades SET closedAt = NULL, sellPrice = NULL, profit = NULL WHERE contractId = ? AND closedAt IS NOT NULL`,
+      [contractId]
+    );
+  } catch (err) {
+    console.error('[autoTrader] DB: imeshindwa kurudisha trade kuwa wazi:', err.message);
+  }
+}
+
 async function dbMarkTradeClosed(contractId, { closedAt, sellPrice, profit }) {
   try {
     await fxTradesDb.initSchema();
@@ -603,7 +617,7 @@ async function checkTrailingStops() {
       await updateContractLimits(contractId, { stopLoss: desiredSl });
       const previousSl = info.slUsd;
       info.slUsd = desiredSl;
-      openAutoTrades.set(contractId, info);
+      openAutoTrades.set(String(contractId), info);
       await dbSaveOpenTrade({
         contractId: String(contractId),
         code: info.code,
@@ -906,9 +920,10 @@ async function evaluatePairInner(pairInfo) {
     livePosition = livePositions.find((p) => p.symbol === derivSymbol);
   } catch (err) {
     console.error(
-      `[autoTrader] ${code}: imeshindwa kuangalia positions za Deriv moja kwa moja (inaendelea na ukaguzi wa ndani pekee):`,
+      `[autoTrader] ${code}: imeshindwa kuangalia positions za Deriv — SIFUNGUI trade mpya mzunguko huu (kuzuia marudio):`,
       err.message
     );
+    return null; // fail-closed: bila uthibitisho wa Deriv, usihatarishe kufungua trade ya pili kwa jozi ile ile
   }
 
   if (livePosition) {
@@ -926,6 +941,7 @@ async function evaluatePairInner(pairInfo) {
     };
     openAutoTrades.set(String(livePosition.contract_id), adopted);
     await dbSaveOpenTrade({ contractId: String(livePosition.contract_id), ...adopted, slUsd: null, tpUsd: null });
+    await dbReopenTrade(String(livePosition.contract_id));
     console.log(
       `[autoTrader] ${code}: trade wazi tayari ipo kwenye Deriv (imefunguliwa kwa mkono/chanzo kingine) — ` +
         `imeandikishwa (adopted) 🆔 ${livePosition.contract_id}, auto-trader haitafungua nyingine mzunguko huu.`
@@ -1064,7 +1080,7 @@ async function executeCandidate(c) {
       : '';
 
     const openedAt = Date.now();
-    openAutoTrades.set(result.contract_id, {
+    openAutoTrades.set(String(result.contract_id), {
       code,
       symbol,
       direction: sig.direction,
@@ -1202,20 +1218,51 @@ function checkWatchdog() {
   ).catch((err) => console.error('[autoTrader] Imeshindwa kutuma watchdog alert:', err.message));
 }
 
+// Mara ngapi (poll) trade iliyokosekana kwenye portfolio bila ushahidi wa kuuzwa ndipo ichukuliwe imefungwa.
+const CLOSE_CONFIRM_POLLS = 3;
+const closeMisses = new Map(); // contractId -> idadi ya polls zilizokosa
+
 async function pollClosedTrades() {
   if (openAutoTrades.size === 0) return;
 
   let openIds;
   try {
     const positions = await getOpenPositions();
-    openIds = new Set(positions.map((p) => p.contract_id));
+    // String(): Deriv inarudisha contract_id kama NAMBA, wakati keys za openAutoTrades zilizorejeshwa
+    // kutoka DB ni STRING — bila kusawazisha, trades zote zilizorejeshwa baada ya redeploy zilionekana
+    // "zimefungwa" kimakosa na auto-trader ikafungua mpya kwa jozi ile ile.
+    openIds = new Set(positions.map((p) => String(p.contract_id)));
   } catch (err) {
     console.error('[autoTrader] Imeshindwa kuangalia positions:', err.message);
     return;
   }
 
   for (const [contractId, info] of [...openAutoTrades.entries()]) {
-    if (openIds.has(contractId)) continue; // bado wazi
+    if (openIds.has(String(contractId))) { closeMisses.delete(contractId); continue; } // bado wazi
+
+    // Kutokuwepo kwenye portfolio PEKEE hakutoshi (portfolio inaweza kurudi tupu/pungufu
+    // muda mfupi baada ya redeploy au WebSocket kuunganishwa upya). Thibitisha na Deriv
+    // kwamba contract IMEUZWA kweli kabla ya kuifunga kwenye DB.
+    let verify = null;
+    try { verify = await getContractDetails(contractId); } catch (_) { /* hakuna ushahidi */ }
+    if (verify && Number(verify.is_sold) === 0 && verify.status !== 'sold') {
+      closeMisses.delete(contractId);
+      console.log(`[autoTrader] ${info.code} (${contractId}): haipo kwenye portfolio lakini Deriv inasema BADO WAZI — inaendelea kufuatiliwa.`);
+      continue;
+    }
+    let soldProof = !!(verify && Number(verify.is_sold) === 1);
+    if (!soldProof) {
+      try { soldProof = !!(await getClosedContractFromHistory(contractId)); } catch (_) { /* hakuna ushahidi */ }
+    }
+    if (!soldProof) {
+      const misses = (closeMisses.get(contractId) || 0) + 1;
+      closeMisses.set(contractId, misses);
+      if (misses < CLOSE_CONFIRM_POLLS) {
+        console.log(`[autoTrader] ${info.code} (${contractId}): haipo kwenye portfolio lakini kufungwa hakujathibitishwa (${misses}/${CLOSE_CONFIRM_POLLS}) — naendelea kuifuatilia.`);
+        continue;
+      }
+    }
+    closeMisses.delete(contractId);
 
     openAutoTrades.delete(contractId);
     peakProfitPct.delete(contractId); // trade imefungwa — futa historia ya peak ya profit-lock
@@ -1358,6 +1405,7 @@ function start({ sock, notifyJid }) {
     await loadTrailingOverrideFromDb();
     await restoreOpenTradesFromDb();
     await pollClosedTrades();
+    await adoptAllLivePositions();
   })()
     .catch((err) => console.error('[autoTrader] Imeshindwa kurejesha/kusasisha trades kutoka DB:', err.message))
     .finally(() => {
@@ -1438,12 +1486,105 @@ function getStatus() {
   };
 }
 
+// Inaitwa mara moja kwenye start(): ingiza kwenye ufuatiliaji trades ZOTE za jozi zetu zilizo wazi
+// Deriv (zilizofunguliwa kwa mkono, au zilizofungwa kimakosa kwenye DB) KABLA ya cycle ya kwanza,
+// ili auto-trader isifungue nyingine kwa jozi hizo.
+async function adoptAllLivePositions() {
+  let live;
+  try {
+    live = await getOpenPositions();
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kusoma positions za Deriv wakati wa kuanza:', err.message);
+    return 0;
+  }
+  let n = 0;
+  for (const p of live) {
+    const id = String(p.contract_id);
+    if (openAutoTrades.has(id)) continue;
+    const code = String(p.symbol || '').replace(/^frx/i, '').toUpperCase();
+    if (!PAIRS.some((x) => x.code === code)) continue; // si jozi ya FX yetu
+    const info = {
+      code,
+      symbol: p.symbol,
+      direction: /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL',
+      stake: Number(p.buy_price) || 0,
+      buyPrice: Number(p.buy_price),
+      openedAt: Number(p.purchase_time) ? Number(p.purchase_time) * 1000 : Date.now(),
+      slUsd: null, // haijulikani — trailing itaipuuza
+      tpUsd: null,
+    };
+    openAutoTrades.set(id, info);
+    await dbSaveOpenTrade({ contractId: id, ...info });
+    await dbReopenTrade(id);
+    n++;
+  }
+  if (n) console.log(`[autoTrader] ✅ Trades ${n} zilizo wazi Deriv zimeingizwa kwenye ufuatiliaji wakati wa kuanza (hazitafunguliwa upya).`);
+  return n;
+}
+
+// ── Kufungua trade KWA MKONO (dashboard / .fxbuy / .fxsell) ─────────────────
+// Njia moja salama: inazuia trade ya pili kwa jozi ambayo bado ina trade wazi (kwa kuangalia Deriv
+// moja kwa moja), inazuia kubonyeza mara mbili, na inaandikisha trade kwenye ufuatiliaji + database
+// ili ipone redeploy na auto-trader isiifungue upya.
+const manualLock = { busy: false, recent: new Map() };
+const dupError = (msg) => Object.assign(new Error(msg), { code: 'DUPLICATE_OPEN' });
+
+async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier, allowDuplicate = false }) {
+  const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (!code) throw new Error('Jozi (pair) inahitajika.');
+  const dir = direction === 'SELL' ? 'SELL' : 'BUY';
+  const key = `${code}|${dir}`;
+
+  if (manualLock.busy) throw dupError('Order nyingine ya mkono inashughulikiwa — subiri sekunde chache.');
+  if (Date.now() - (manualLock.recent.get(key) || 0) < 8000) {
+    throw dupError('Order inayofanana ilifunguliwa sekunde chache zilizopita — imezuiwa kuzuia marudio.');
+  }
+  manualLock.busy = true;
+  try {
+    if (!allowDuplicate) {
+      let live;
+      try {
+        live = await getOpenPositions();
+      } catch (err) {
+        throw new Error(`Imeshindwa kuthibitisha trades wazi za Deriv (${err.message}) — jaribu tena.`);
+      }
+      const derivSymbol = toDerivSymbol(code);
+      if (live.some((p) => p.symbol === derivSymbol)) {
+        throw dupError(`${code} tayari ina trade WAZI kwenye Deriv — haifunguliwi nyingine hadi ifungwe.`);
+      }
+    }
+    manualLock.recent.set(key, Date.now());
+    const result = await placeMultiplier({ pair: code, direction: dir, stake, stopLoss, takeProfit, multiplier });
+
+    try {
+      const info = {
+        code,
+        symbol: toDerivSymbol(code),
+        direction: dir,
+        stake: Number(stake) || Number(result.buy_price) || 0,
+        buyPrice: Number(result.buy_price),
+        openedAt: Date.now(),
+        slUsd: null, // trade ya mkono — trailing haigusi SL/TP ulizoweka
+        tpUsd: null,
+      };
+      openAutoTrades.set(String(result.contract_id), info);
+      await dbSaveOpenTrade({ contractId: String(result.contract_id), ...info });
+    } catch (err) {
+      console.error('[autoTrader] Imeshindwa kuandikisha trade ya mkono (trade yenyewe imefunguliwa):', err.message);
+    }
+    return result;
+  } finally {
+    manualLock.busy = false;
+  }
+}
+
 module.exports = {
   start,
   stop,
   getStatus,
   setStakeUsd,
   setTrailingEnabled,
+  placeManualTrade,
   getWinRateStats,
   getTradeHistory,
   PAIRS,
