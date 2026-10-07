@@ -79,7 +79,44 @@
           <button class="po-btn" onclick="testTarget()">📨 Tuma Test</button>
         </div>
         <div class="po-toast" id="tgToast"></div>
-        <div class="po-note">Signals (auto-signal na auto-trade) na matokeo ya WIN/LOSS yatatumwa kwenye group hili, pamoja na DM yako ya kawaida. Bot kuu lazima iwe member wa group.</div>
+        <div class="po-note">Signals (auto-signal na auto-trade) na matokeo ya WIN/LOSS yatatumwa kwenye group hili, pamoja na DM yako ya kawaida (DM inadhibitiwa na kadi ya Notifications hapa chini). Bot kuu lazima iwe member wa group.</div>
+      </div>
+      <div class="po-card">
+        <h3><span>🔔 Notifications za DM (Pocket Option)</span><button class="po-btn small" id="npMaster" onclick="npToggleMaster()">…</button></h3>
+        <div class="po-note" style="margin:0 0 10px;">Chagua ni notifications zipi zifike DM yako. Zinahifadhiwa mara moja ukibonyeza.</div>
+        <div id="npList">
+          <label class="np-row"><input type="checkbox" data-np="signals" /> 📡 Signals za auto-signal</label>
+          <label class="np-row"><input type="checkbox" data-np="opened" /> 🤖 Auto-trade imefunguliwa</label>
+          <label class="np-row"><input type="checkbox" data-np="results" /> ✅🔴 Matokeo (WIN / LOSS)</label>
+          <label class="np-row"><input type="checkbox" data-np="dryRun" /> 🧪 Dry-run (majaribio)</label>
+          <label class="np-row"><input type="checkbox" data-np="warnings" /> ⚠️ Makosa / order haikuthibitishwa</label>
+          <label class="np-row"><input type="checkbox" data-np="breakers" /> 🛑 Auto-trade imesimama (hasara/cooldown)</label>
+          <label class="np-row"><input type="checkbox" data-np="dashboard" /> 🖥️ Uthibitisho wa vitendo vya dashboard</label>
+        </div>
+        <div class="po-grid2" style="margin:10px 0;">
+          <button class="po-btn" onclick="npPreset('none')">🔕 Zima zote</button>
+          <button class="po-btn" onclick="npPreset('important')">⭐ Muhimu tu</button>
+          <button class="po-btn" onclick="npPreset('all')">🔔 Washa zote</button>
+          <button class="po-btn" onclick="npPreset('results')">📊 Matokeo + muhimu</button>
+        </div>
+        <div class="po-grid2">
+          <div>
+            <label class="po-label">Pengo kati ya ujumbe</label>
+            <select class="po-select" id="npGap" onchange="npSave()">
+              <option value="0">Hakuna</option><option value="2">Sekunde 2</option><option value="4">Sekunde 4</option>
+              <option value="8">Sekunde 8</option><option value="15">Sekunde 15</option>
+            </select>
+          </div>
+          <div>
+            <label class="po-label">Muhtasari (badala ya kila moja)</label>
+            <select class="po-select" id="npDigest" onchange="npSave()">
+              <option value="0">Zima — tuma papo hapo</option><option value="5">Kila dakika 5</option>
+              <option value="10">Kila dakika 10</option><option value="15">Kila dakika 15</option><option value="30">Kila dakika 30</option>
+            </select>
+          </div>
+        </div>
+        <div class="po-toast" id="npToast"></div>
+        <div class="po-note">Bot ikituma ujumbe mwingi mfululizo, WhatsApp inaweza kuvunja session (logout). <b>Pengo</b> linaweka muda kati ya kila ujumbe (DM na group); <b>Muhtasari</b> unakusanya trade zilizofunguliwa/matokeo kuwa ujumbe mmoja. Makosa na kusimama kwa auto-trade (⚠️🛑) hutumwa papo hapo kila wakati. Signals na matokeo kwenye <i>group</i> zinadhibitiwa na kadi ya group hapo juu.</div>
       </div>
     </div>
 
@@ -239,6 +276,11 @@
 
 <div id="poSnack" style="display:none;position:fixed;left:12px;right:12px;bottom:18px;z-index:9999;padding:12px 14px;border-radius:12px;font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.5);"></div>
 
+<style>
+  .np-row{display:flex;align-items:center;gap:8px;margin:0 0 9px;cursor:pointer;font-size:14px;}
+  .np-row input{width:auto;margin:0;}
+  .np-off{opacity:.45;}
+</style>
 <script src="trade-export.js"></script>
 <script>
   // Lazima ilingane na API_BASE ya admin.html / fxtrading.html
@@ -798,6 +840,46 @@
     } catch (e) { toast('tgToast', e.message, false); }
   }
 
+  // ── Notifications za DM (swichi + anti-flood) ────────────────────────
+  let npState = null, npTimer = null;
+  const NP_PRESETS = {
+    none: { dmEnabled: false },
+    all: { dmEnabled: true, signals: true, opened: true, results: true, dryRun: true, warnings: true, breakers: true, dashboard: true },
+    important: { dmEnabled: true, signals: false, opened: false, results: false, dryRun: false, warnings: true, breakers: true, dashboard: false },
+    results: { dmEnabled: true, signals: false, opened: false, results: true, dryRun: false, warnings: true, breakers: true, dashboard: false },
+  };
+  function npRender() {
+    if (!npState) return;
+    $('npMaster').textContent = npState.dmEnabled ? '🔔 Zimewashwa' : '🔕 Zimezimwa';
+    $('npMaster').className = 'po-btn small ' + (npState.dmEnabled ? 'up' : 'down');
+    document.querySelectorAll('[data-np]').forEach((el) => { el.checked = npState[el.dataset.np] !== false; });
+    $('npList').classList.toggle('np-off', !npState.dmEnabled);
+    $('npGap').value = String(npState.minGapSec);
+    $('npDigest').value = String(npState.digestMin);
+  }
+  async function npLoad() {
+    try { npState = (await api('/api/admin/po/notify-prefs')).prefs; npRender(); }
+    catch (e) { toast('npToast', e.message, false); }
+  }
+  function npCollect() {
+    const out = { dmEnabled: npState ? npState.dmEnabled : true, minGapSec: Number($('npGap').value), digestMin: Number($('npDigest').value) };
+    document.querySelectorAll('[data-np]').forEach((el) => { out[el.dataset.np] = el.checked; });
+    return out;
+  }
+  async function npSave(patch) {
+    const body = { ...npCollect(), ...(patch || {}) };
+    try {
+      npState = (await api('/api/admin/po/notify-prefs', { method: 'POST', body: JSON.stringify(body) })).prefs;
+      npRender();
+      toast('npToast', npState.dmEnabled ? '✅ Imehifadhiwa' : '🔕 Notifications za DM zimezimwa', true);
+    } catch (e) { toast('npToast', e.message, false); npLoad(); }
+  }
+  function npToggleMaster() { npSave({ dmEnabled: !(npState && npState.dmEnabled) }); }
+  function npPreset(name) { npSave(NP_PRESETS[name]); }
+  document.addEventListener('change', (e) => {
+    if (e.target && e.target.dataset && e.target.dataset.np) { clearTimeout(npTimer); npTimer = setTimeout(() => npSave(), 250); }
+  });
+
   // ── Takwimu za signals (win rate halisi) ───────────────────────────
   let ssDays = 7, ssLoading = false;
   const pct = (x, d = 1) => (x == null ? '—' : (x * 100).toFixed(d) + '%');
@@ -849,7 +931,7 @@
 
   function showApp() {
     $('poLogin').style.display = 'none'; $('poApp').style.display = 'block';
-    renderBar(); refresh(); loadTargets(); loadSigStats();
+    renderBar(); refresh(); loadTargets(); npLoad(); loadSigStats();
     clearInterval(ssTimer); ssTimer = setInterval(() => { if ($('pane-signals').classList.contains('active')) loadSigStats(); }, 60000);
     clearInterval(pollTimer); pollTimer = setInterval(refresh, 10000);
     clearInterval(tickTimer); tickTimer = setInterval(tick, 1000);
