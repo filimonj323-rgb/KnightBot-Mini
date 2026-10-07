@@ -423,7 +423,19 @@ async function getWaVersion() {
 let pairingCodeRequested = false;
 
 // Main connection function
+let starting = false;
 async function startBot() {
+  // Kinga: usiunde socket mbili kwa wakati mmoja (creds zilezile = conflict)
+  if (starting) return;
+  starting = true;
+  try {
+    return await _startBot();
+  } finally {
+    starting = false;
+  }
+}
+
+async function _startBot() {
   // fetchLatestWaWebVersion() ni HTTP request halisi kwenda
   // web.whatsapp.com — mara nyingi ndiyo sehemu ya POLE ZAIDI ya mchakato
   // mzima wa kuanza. Tunaianzisha HAPA MARA MOJA (bila await) ili
@@ -618,7 +630,8 @@ async function startBot() {
       console.log('⚠️ No activity detected. Forcing reconnect...');
       await sock.end(undefined, undefined, { reason: 'inactive' });
       clearInterval(watchdogInterval);
-      setTimeout(() => startBot(), 5000); // Slightly longer delay
+      // startBot() itaitwa na handler ya 'close' hapa chini — usiiite mara ya pili
+      // hapa, vinginevyo sockets mbili zenye creds zilezile zinagongana (conflict).
     }
   }, 5 * 60 * 1000); // Every 5 min check
 
@@ -664,43 +677,55 @@ async function startBot() {
     }
 
     if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      const errorMessage = lastDisconnect?.error?.message || 'Unknown error';
+      // Socket chakavu (si mainSock ya sasa) — puuza, isianzishe restart ya ziada
+      if (sock !== mainSock) return;
 
-      // Suppress verbose error output for common stream errors (515, etc.)
+      const err = lastDisconnect?.error;
+      const statusCode = err?.output?.statusCode;
+      const errorMessage = err?.message || 'Unknown error';
+      const isConflict = /conflict/i.test(errorMessage);
+
       if (statusCode === 515 || statusCode === 503 || statusCode === 408) {
         console.log(`⚠️ Connection closed (${statusCode}). Reconnecting...`);
       } else {
-        console.log('Connection closed due to:', errorMessage, '\nReconnecting:', shouldReconnect);
+        let detail = '';
+        try { detail = JSON.stringify(err?.data?.content?.map?.((c) => c.attrs) || err?.data?.attrs || null); } catch {}
+        console.log('Connection closed due to:', errorMessage, '| status:', statusCode, '| detail:', detail);
       }
 
-      if (shouldReconnect) {
+      // Process inazima (deploy mpya) — usianzishe socket mpya wala usifute session
+      if (shuttingDown) return;
+
+      if (statusCode !== DisconnectReason.loggedOut) {
         setTimeout(() => startBot(), 3000);
-      } else {
-        // loggedOut: mtumiaji ame-unlink kifaa kwenye WhatsApp yake (Linked
-        // Devices > ondoa) — WhatsApp imeshaifuta session hii upande wao
-        // KABISA. Creds zilizopo Turso bado zinasema "registered: true"
-        // ingawa si za kweli tena — zikiachwa hivyo, jaribio LOLOTE
-        // lijalo la kuungana (restart, redeploy, crash-recovery)
-        // lingesoma creds hizo hizo chakavu: haliwezi kuungana (WhatsApp
-        // inakataa) WALA haliwezi kuomba pairing code mpya (kwa sababu
-        // state.creds.registered bado ingeonekana true kimakosa) — bot
-        // inakwama kabisa milele mpaka mtu afute Turso kwa mkono. Kufuta
-        // session hapa mara moja kunahakikisha jaribio lijalo linaanza na
-        // session TUPU — pairing code mpya itaombwa kama kawaida, bila
-        // mgongano wowote.
-        console.log('🔌 Kifaa kime-unlink (logged out) — nafuta session chakavu ya Turso na kuanza upya na session tupu...');
-        pairingCodeRequested = false; // session mpya kabisa inakuja — ruhusu kuomba pairing code MOJA mpya kwa hiyo session
-        global.currentSock = null;
-        global.mainQR = null; // itajazwa upya na QR mpya mara startBot() ijaribu tena hapa chini
-        deleteSession(sessionId)
-          .then(() => console.log(`[session] Session "${sessionId}" imefutwa Turso baada ya unlink.`))
-          .catch((e) => console.error('❌ Imeshindwa kufuta Turso session baada ya unlink:', e.message))
-          .finally(() => setTimeout(() => startBot(), 3000));
+        return;
       }
+
+      // 401/loggedOut: HAIFUTI session mara moja. 'conflict' (container nyingine
+      // inatumia creds zilezile) au hitilafu ya muda ingefuta session ya container
+      // mpya na kulazimisha QR/pairing upya. Jaribu tena mara chache kwanza;
+      // futa TU kama imeshindwa mfululizo bila kuwahi kufunguka ('open').
+      global.__loggedOutCount = (global.__loggedOutCount || 0) + 1;
+      const MAX_LOGGEDOUT_RETRIES = Number(process.env.LOGGEDOUT_RETRIES || 4);
+      if (global.__loggedOutCount < MAX_LOGGEDOUT_RETRIES) {
+        const wait = isConflict ? 30000 : 10000;
+        console.log(`⚠️ loggedOut (${statusCode}${isConflict ? ', conflict' : ''}) jaribio ${global.__loggedOutCount}/${MAX_LOGGEDOUT_RETRIES - 1} — sifuti session, nasubiri ${wait / 1000}s kisha najaribu tena...`);
+        setTimeout(() => startBot(), wait);
+        return;
+      }
+
+      global.__loggedOutCount = 0;
+      console.log('🔌 Kifaa kime-unlink kweli (loggedOut mfululizo) — nafuta session ya Turso na kuanza upya na session tupu...');
+      pairingCodeRequested = false;
+      global.currentSock = null;
+      global.mainQR = null;
+      deleteSession(sessionId)
+        .then(() => console.log(`[session] Session "${sessionId}" imefutwa Turso baada ya unlink.`))
+        .catch((e) => console.error('❌ Imeshindwa kufuta Turso session baada ya unlink:', e.message))
+        .finally(() => setTimeout(() => startBot(), 3000));
     } else if (connection === 'open') {
       console.log('\n✅ Bot connected successfully!');
+      global.__loggedOutCount = 0; // imefunguka — weka upya hesabu ya loggedOut
       global.currentSock = sock; // ruhusu functions nyingine (mfano auto-backup) kutumia sock hii
       global.mainQR = null; // imelinki — QR ya zamani isionekane tena kwenye dashboard
       console.log(`📱 Bot Number: ${sock.user.id.split(':')[0]}`);
