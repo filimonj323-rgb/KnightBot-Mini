@@ -963,6 +963,13 @@ async function handlePairingRequest(req, res) {
             });
           }
 
+          // Historia KAMILI ya trades (kwa export): ?limit=N (default 20000, max 20000). Overview inabaki ndogo (300).
+          if (req.method === 'GET' && poPath === '/api/admin/po/history') {
+            const limit = Math.max(1, Math.min(parseInt(poQuery.get('limit') || '20000', 10) || 20000, 20000));
+            const trades = await pocketStore.getTradeHistory(limit, { full: true });
+            return sendJson(res, 200, { ok: true, count: trades.length, trades });
+          }
+
           // Notifications za Pocket Option: swichi za DM kwa kila aina + anti-flood. GET = hali, POST = hifadhi.
           if (poPath === '/api/admin/po/notify-prefs') {
             if (req.method === 'GET') return sendJson(res, 200, { ok: true, prefs: await notifyPrefs.get(), categories: notifyPrefs.CATEGORIES });
