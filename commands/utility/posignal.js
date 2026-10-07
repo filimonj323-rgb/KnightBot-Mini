@@ -15,6 +15,7 @@
 const { isBridgeUp } = require('../../utils/pocketOptionTrader');
 const pocketStore = require('../../utils/pocketStore');
 const signalTargets = require('../../utils/signalTargets');
+const notifyPrefs = require('../../utils/notifyPrefs');
 const signalTracker = require('../../utils/signalTracker');
 const {
   DEFAULT_PAIRS,
@@ -92,7 +93,9 @@ function scheduleAuto(sock, jid, job) {
           if (job.sent.size > MAX_SENT_CACHE) job.sent.delete(job.sent.values().next().value);
           pushRecent(r);
           signalTracker.record(r, 'auto');
-          await (global.currentSock || sock).sendMessage(jid, { text: formatSignal(r) });
+          // DM ya signal inaheshimu swichi ya 'signals' + foleni ya anti-flood (notifyPrefs).
+          // Group (signalTargets) ina swichi yake na haiathiriwi na swichi ya DM.
+          await notifyPrefs.dm('signals', formatSignal(r), { sock, jid });
           signalTargets.sendSignal('po', formatSignal(r)).catch(() => {});
           sentNow++;
         }
