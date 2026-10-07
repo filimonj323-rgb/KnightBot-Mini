@@ -73,6 +73,7 @@ const { runBacktest } = require('../utils/backtest');
 const economicCalendar = require('../utils/economicCalendar');
 const fxPredictions = require('../utils/fxPredictions');
 const tradeAnalysis = require('../utils/tradeAnalysis');
+const notifyPrefs = require('../utils/notifyPrefs');
 const mainConfig = require('../config');
 const pocketTrader = require('../utils/pocketOptionTrader');
 const pocketStore = require('../utils/pocketStore');
@@ -109,8 +110,14 @@ function getOwnerJid() {
   return raw?.includes('@') ? raw : `${raw}@s.whatsapp.net`;
 }
 
-async function notifyOwnerWA(text) {
+async function notifyOwnerWA(text, category) {
   try {
+    // Ikipewa category (Pocket Option) → heshimu swichi/foleni za notifyPrefs.
+    if (category) {
+      if (!global.currentSock) return;
+      await notifyPrefs.dm(category, text, { sock: global.currentSock, jid: getOwnerJid() });
+      return;
+    }
     if (!global.currentSock) {
       console.error('[fx dashboard] Bot kuu haijaunganishwa na WhatsApp - notification imepotea.');
       return;
@@ -949,6 +956,15 @@ async function handlePairingRequest(req, res) {
             });
           }
 
+          // Notifications za Pocket Option: swichi za DM kwa kila aina + anti-flood. GET = hali, POST = hifadhi.
+          if (poPath === '/api/admin/po/notify-prefs') {
+            if (req.method === 'GET') return sendJson(res, 200, { ok: true, prefs: await notifyPrefs.get(), categories: notifyPrefs.CATEGORIES });
+            if (req.method === 'POST') {
+              const body = await readJsonBody(req);
+              return sendJson(res, 200, { ok: true, prefs: await notifyPrefs.set(body) });
+            }
+          }
+
           // Uchambuzi wa AI (Groq) wa historia ya Pocket Option: ?force=1 inapita cache.
           if (req.method === 'GET' && poPath === '/api/admin/po/analyze') {
             return sendJson(res, 200, await tradeAnalysis.analyze('po', { force: poQuery.get('force') === '1' }));
@@ -1024,7 +1040,8 @@ async function handlePairingRequest(req, res) {
                 `Mwelekeo: ${direction === 'BUY' ? '🟢 UP (BUY)' : '🔴 DOWN (SELL)'}\n` +
                 `Stake: $${stake}  |  Expiry: ${expiry}s\n` +
                 `🆔 Order ID: ${result.orderId}\n\n` +
-                `⚠️ Order hii ilifunguliwa KWA MKONO kupitia admin dashboard.`
+                `⚠️ Order hii ilifunguliwa KWA MKONO kupitia admin dashboard.`,
+              'dashboard'
             );
             return sendJson(res, 200, { ok: true, orderId: result.orderId });
           }
@@ -1087,7 +1104,7 @@ async function handlePairingRequest(req, res) {
               } else {
                 return sendJson(res, 400, { ok: false, error: 'action lazima iwe on, off, resume au set.' });
               }
-              if (note) notifyOwnerWA(note);
+              if (note) notifyOwnerWA(note, 'dashboard');
               return sendJson(res, 200, { ok: true, autotrade: pocketAuto.getStatus(), stats: await pocketAuto.getStats() });
             }
           }
