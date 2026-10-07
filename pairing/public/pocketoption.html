@@ -713,13 +713,23 @@
     return `<span class="${cls}"><b>${v}%</b></span>`;
   };
 
-  function historyRows() {
-    return state.trades.filter((t) => (hResult === 'all' || (hResult === 'auto' ? t.source === 'auto' : outcome(t) === hResult)) && (hPair === 'all' || t.pair === hPair));
+  function historyRows(src = state.trades) {
+    return src.filter((t) => (hResult === 'all' || (hResult === 'auto' ? t.source === 'auto' : outcome(t) === hResult)) && (hPair === 'all' || t.pair === hPair));
   }
 
   // Export ya historia (Excel / PDF / CSV) — tazama trade-export.js
   async function exportHistory(kind, btn) {
-    const rows = historyRows().map((t) => {
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+    // Dashboard inaonyesha trades chache tu (overview); export inachukua historia KAMILI kutoka server.
+    let src = state.trades;
+    try {
+      const h = await api('/api/admin/po/history');
+      if (Array.isArray(h.trades) && h.trades.length >= src.length) src = h.trades;
+    } catch (e) {
+      snack('⚠️ Historia kamili imeshindwa (' + e.message + ') — nimetumia trades ' + src.length + ' zilizopo.', false);
+    }
+    const rows = historyRows(src).map((t) => {
       const o = outcome(t);
       return {
         orderId: t.orderId, pair: t.pair, direction: t.direction === 'BUY' ? 'UP' : t.direction === 'SELL' ? 'DOWN' : '',
@@ -727,11 +737,11 @@
         opened: TradeExport.tz(t.openedAt), closed: TradeExport.tz(t.closedAt),
         result: o === 'win' ? 'WIN' : o === 'loss' ? 'LOSS' : o === 'open' ? 'OPEN' : 'UNKNOWN',
         strength: t.signalStrength != null ? t.signalStrength : '',
-        profit: o === 'open' ? '' : (t.profit != null ? t.profit : ''), source: t.source === 'auto' ? 'auto' : 'manual', status: t.status || '',
+        profit: o === 'open' ? '' : (t.profit != null ? t.profit : ''),
+        payout: o === 'win' && Number(t.stake) > 0 && t.profit != null ? Math.round((Number(t.profit) / Number(t.stake)) * 1000) / 10 : '',
+        source: t.source === 'auto' ? 'auto' : 'manual', status: t.status || '',
       };
     });
-    const label = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
     try {
       const used = await TradeExport.run(kind, {
         title: 'Pocket Option — Trading History', filename: 'pocketoption-history', rows,
@@ -741,7 +751,7 @@
           { key: 'orderId', label: 'Order ID' }, { key: 'opened', label: 'Imefunguliwa (EAT)' }, { key: 'closed', label: 'Imefungwa (EAT)' },
           { key: 'pair', label: 'Jozi' }, { key: 'direction', label: 'Mwelekeo' }, { key: 'stake', label: 'Stake ($)', num: true },
           { key: 'expiry', label: 'Expiry' }, { key: 'expirySec', label: 'Expiry (sec)', num: true }, { key: 'strength', label: 'Strength %', num: true }, { key: 'result', label: 'Matokeo' },
-          { key: 'profit', label: 'P/L ($)', num: true }, { key: 'source', label: 'Chanzo' }, { key: 'status', label: 'Status' },
+          { key: 'profit', label: 'P/L ($)', num: true }, { key: 'payout', label: 'Payout %', num: true }, { key: 'source', label: 'Chanzo' }, { key: 'status', label: 'Status' },
         ],
       });
       snack(used === 'csv' && kind === 'xlsx' ? 'Excel library haijapakia (offline?) — CSV imetolewa badala yake.' : used === 'print' ? 'Chagua "Save as PDF" kwenye dirisha la print.' : '✅ Export imekamilika (' + rows.length + ' trades).', true);
