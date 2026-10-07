@@ -786,14 +786,21 @@ async function handlePairingRequest(req, res) {
         if (!pair) return sendJson(res, 400, { ok: false, error: 'Jozi (pair) inahitajika.' });
 
         const direction = body.direction === 'SELL' ? 'SELL' : 'BUY';
-        const result = await derivTrader.placeMultiplier({
-          pair,
-          direction,
-          stake: Number(body.stake),
-          stopLoss: Number(body.stopLoss),
-          takeProfit: Number(body.takeProfit),
-          multiplier: body.multiplier ? Number(body.multiplier) : undefined,
-        });
+        let result;
+        try {
+          // Njia salama: inazuia trade ya pili kwa jozi iliyo wazi + inaandikisha kwenye DB (autoTrader.placeManualTrade).
+          result = await autoTrader.placeManualTrade({
+            pair,
+            direction,
+            stake: Number(body.stake),
+            stopLoss: Number(body.stopLoss),
+            takeProfit: Number(body.takeProfit),
+            multiplier: body.multiplier ? Number(body.multiplier) : undefined,
+          });
+        } catch (err) {
+          if (err.code === 'DUPLICATE_OPEN') return sendJson(res, 409, { ok: false, duplicate: true, error: err.message });
+          throw err;
+        }
 
         notifyOwnerWA(
           `🖥️ *TRADE IMEFUNGULIWA (Dashboard)*\n\n` +
