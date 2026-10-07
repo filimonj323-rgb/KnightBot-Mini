@@ -11,6 +11,7 @@
  */
 
 const pocketStore = require('./pocketStore');
+const notifyPrefs = require('./notifyPrefs');
 
 const PLATFORMS = ['deriv', 'po'];
 const KEY_PREFIX = 'targets:';
@@ -75,7 +76,7 @@ async function sendToGroup(platform, text) {
   const sock = global.currentSock;
   if (!t || !t.groupJid || !sock) return false;
   try {
-    await sock.sendMessage(t.groupJid, { text });
+    await notifyPrefs.enqueue(() => sock.sendMessage(t.groupJid, { text })); // foleni = pengo kati ya ujumbe
     return true;
   } catch (err) {
     console.error(`[signalTargets] Imeshindwa kutuma kwenye group (${platform}):`, err.message);

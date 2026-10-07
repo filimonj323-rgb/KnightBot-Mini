@@ -37,6 +37,7 @@ const pocketStore = require('./pocketStore');
 const pocketSignal = require('./pocketSignal');
 const signalTracker = require('./signalTracker');
 const signalTargets = require('./signalTargets');
+const notifyPrefs = require('./notifyPrefs');
 
 const CONFIG_KEY = 'autotrade:config';
 const CURRENCIES = new Set(['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD']);
@@ -138,15 +139,17 @@ function accountLabel() {
   return lastBridge.demo ? '🧪 DEMO' : '💰 REAL';
 }
 
-async function notify(text) {
+// DM ya notification yenye aina — inaheshimu swichi/foleni/muhtasari za notifyPrefs.
+async function notifyAs(category, text) {
   const sock = global.currentSock || waSock;
   if (!sock || !notifyJid) return;
   try {
-    await sock.sendMessage(notifyJid, { text });
+    await notifyPrefs.dm(category, text, { sock, jid: notifyJid });
   } catch (err) {
     console.error('[pocketAuto] Imeshindwa kutuma notification:', err.message);
   }
 }
+const notify = (text) => notifyAs('warnings', text);
 
 // ── Config (inahifadhiwa Turso) ─────────────────────────────────────────
 async function saveConfig() {
@@ -310,7 +313,7 @@ function evaluateBreakers() {
     pausedUntil = endOfUtcDay(Date.now());
     pauseReason = 'daily_loss_limit';
     logEvent('pause', `Hasara ya siku ${money(dailyPnl)} — imesimama hadi kesho`);
-    notify(
+    notifyAs('breakers',
       `🛑 *Pocket Auto-Trade imesimama kwa leo*\n\n` +
         `Hasara ya siku imefika ${money(dailyPnl)} (kikomo: $${cfg.maxDailyLoss}).\n` +
         `Itaendelea kiotomatiki kesho (00:00 UTC). Trades zilizo wazi zinaendelea kufuatiliwa.`
@@ -319,7 +322,7 @@ function evaluateBreakers() {
     pausedUntil = Date.now() + cfg.cooldownMin * 60000;
     pauseReason = 'consecutive_losses';
     logEvent('pause', `Hasara ${consecutiveLosses} mfululizo — cooldown ${fmtDuration(cfg.cooldownMin * 60000)}`);
-    notify(
+    notifyAs('breakers',
       `⏸️ *Pocket Auto-Trade: cooldown*\n\n` +
         `Hasara ${consecutiveLosses} mfululizo. Nasimama ${fmtDuration(cfg.cooldownMin * 60000)} kabla ya kufungua trade mpya.`
     );
@@ -454,7 +457,7 @@ async function considerSignal(r) {
     stats.dry++;
     console.log(`[pocketAuto] DRY ${r.pair} ${r.direction} ${r.strength}%`);
     logEvent('dry', `${r.pair} ${r.direction} ${r.strength}% (dry-run)`);
-    return notify(
+    return notifyAs('dryRun',
       `🧪 *DRY-RUN — ingefungua trade*\n\n${arrow} *${r.pair}*\n💪 ${r.grade} ${r.strength}% • ⏱️ ${pocketSignal.tfLabel(r.expirySec)} • 💵 $${cfg.stake}\n\n${reasons}\n\n_Hakuna trade iliyofunguliwa. Zima dry-run: .poauto dry off_`
     );
   }
@@ -466,7 +469,6 @@ async function considerSignal(r) {
       amount: cfg.stake,
       expirySeconds: r.expirySec,
       source: 'auto',
-      strength: r.strength,
     });
     positions.delete(resKey);
     positions.set(String(res.orderId), pos);
@@ -474,7 +476,7 @@ async function considerSignal(r) {
     stats.opened++;
     console.log(`[pocketAuto] ✅ ${r.pair} ${r.direction} ${r.strength}% stake=$${cfg.stake} order=${res.orderId}`);
     logEvent('open', `${r.pair} ${r.direction === 'BUY' ? 'UP' : 'DOWN'} ${r.strength}% • $${cfg.stake} • ${pocketSignal.tfLabel(r.expirySec)}`);
-    await notify(
+    await notifyAs('opened',
       `🤖 *AUTO-TRADE imefunguliwa* ${accountLabel()}\n\n` +
         `${arrow} *${r.pair}*\n` +
         `💪 ${r.grade} ${r.strength}%${r.adx != null ? ` • ADX ${r.adx.toFixed(0)}` : ''}\n` +
@@ -499,12 +501,12 @@ async function considerSignal(r) {
     console.error(`[pocketAuto] ❌ Imeshindwa kufungua ${r.pair}:`, err.message);
     logEvent('fail', `${r.pair} ${r.direction}: ${err.message}`);
     if (orderFailStreak === 1 || orderFailStreak % 5 === 0) {
-      await notify(`⚠️ *Auto-trade: order imeshindwa* — ${r.pair} ${r.direction}\n${err.message}`);
+      await notifyAs('warnings', `⚠️ *Auto-trade: order imeshindwa* — ${r.pair} ${r.direction}\n${err.message}`);
     }
     if (orderFailStreak >= 3 && !isPaused()) {
       pausedUntil = Date.now() + 10 * 60000;
       pauseReason = 'order_failures';
-      await notify('⏸️ Orders 3 zimeshindwa mfululizo — nasimama dakika 10 (angalia bridge/SSID/market).');
+      await notifyAs('breakers', '⏸️ Orders 3 zimeshindwa mfululizo — nasimama dakika 10 (angalia bridge/SSID/market).');
     }
   }
 }
@@ -524,7 +526,7 @@ async function handleSettled({ orderId, status, result }) {
     dailyPnl += gain;
     consecutiveLosses = 0;
     logEvent('win', `${label} ${gain > 0 ? '+' + money(gain) : ''}`.trim());
-    await notify(
+    await notifyAs('results',
       `✅ *WIN* — ${label}\n💵 ${gain > 0 ? `+${money(gain)}` : 'faida haijulikani'} • 🆔 ${id}\n📊 Leo: ${money(dailyPnl)} (trades ${tradesToday})`
     );
     signalTargets.sendResult('po', `✅ *WIN* — ${label}\n💵 ${gain > 0 ? `+${money(gain)}` : 'faida haijulikani'}`).catch(() => {});
@@ -532,7 +534,7 @@ async function handleSettled({ orderId, status, result }) {
     dailyPnl -= pos.stake;
     consecutiveLosses++;
     logEvent('loss', `${label} -${money(pos.stake)}`);
-    await notify(
+    await notifyAs('results',
       `🔴 *LOSS* — ${label}\n💵 -${money(pos.stake)} • 🆔 ${id}\n📊 Leo: ${money(dailyPnl)} • hasara mfululizo: ${consecutiveLosses}/${cfg.maxConsecLosses}`
     );
     signalTargets.sendResult('po', `🔴 *LOSS* — ${label}\n💵 -${money(pos.stake)}`).catch(() => {});
@@ -588,7 +590,7 @@ async function runCycle() {
       cfg.enabled = false;
       await saveConfig();
       lastSkipReason = 'akaunti imekuwa REAL — auto imezimwa';
-      await notify(
+      await notifyAs('breakers',
         `🛑 *Pocket Auto-Trade imezimwa*\n\nUliiwasha kwenye akaunti DEMO, lakini bridge sasa inatumia akaunti *REAL*.\n` +
           `Ukitaka kuendelea kwenye REAL: *.poauto on confirm*`
       );
