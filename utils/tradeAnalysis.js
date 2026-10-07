@@ -97,7 +97,7 @@ async function loadTrades(platform) {
       strength: r.signalStrength, openedAt: r.openedAt, closedAt: r.closedAt, expirySec: null,
     }));
   }
-  const rows = await pocketStore.getTradeHistory(1000);
+  const rows = await pocketStore.getTradeHistory(20000, { full: true });
   return rows.filter((r) => r.closedAt && (r.win === 1 || r.win === 0)).map((r) => {
     const win = r.win === 1;
     const stake = Number(r.stake) || 0;

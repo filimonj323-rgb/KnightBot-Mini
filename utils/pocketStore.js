@@ -31,13 +31,14 @@ async function recordOpenTrade({ orderId, pair, direction, stake, expirySeconds,
 }
 
 // Inaandika matokeo mara moja tu (closedAt IS NULL) — salama kuitwa mara mbili.
+// Trade ya 'unknown' inaweza kusahihishwa baadaye matokeo halisi yakipatikana (mfano kitufe cha "Angalia").
 async function recordClosedTrade(orderId, { win, profit, status, result } = {}) {
   try {
     await ready();
     await db.query(
       `UPDATE po_trades
           SET closedAt = ?, win = ?, profit = ?, status = ?, resultJson = ?
-        WHERE orderId = ? AND closedAt IS NULL`,
+        WHERE orderId = ? AND (closedAt IS NULL OR status = 'unknown')`,
       [
         Date.now(),
         win === true ? 1 : win === false ? 0 : null,
@@ -101,11 +102,14 @@ async function backfillStrength() {
   } catch (_) { /* po_signals haipo bado au muundo tofauti — sawa */ }
 }
 
-async function getTradeHistory(limit = 200) {
+// full:true = kwa export/uchambuzi (hadi trades 20000); vinginevyo cap ni 1000 kama zamani.
+const HISTORY_CAP = 1000;
+const HISTORY_FULL_CAP = 20000;
+async function getTradeHistory(limit = 200, { full = false } = {}) {
   try {
     await ready();
     await backfillStrength();
-    const n = Math.min(1000, Math.max(1, parseInt(limit, 10) || 200));
+    const n = Math.min(full ? HISTORY_FULL_CAP : HISTORY_CAP, Math.max(1, parseInt(limit, 10) || 200));
     const r = await db.query(
       `SELECT orderId, pair, direction, stake, expirySeconds, openedAt, expiresAt,
               closedAt, win, profit, status, source, signalStrength
