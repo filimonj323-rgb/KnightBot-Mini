@@ -18,6 +18,10 @@
  *   .poauto news on|off      -> kichujio cha habari kubwa
  *   .poauto backtest 55      -> backtest ya chini (%) — 0 = zima
  *   .poauto dry on|off       -> dry-run: ujumbe tu, hakuna trade
+ *   .poauto blocked          -> orodha ya jozi zisizotradiwa
+ *   .poauto block EURUSD_otc  -> ongeza jozi kwenye blacklist (zaidi ya moja: tenganisha kwa nafasi/koma)
+ *   .poauto unblock EURUSD_otc -> ondoa kwenye blacklist
+ *   .poauto block reset|clear -> rudisha orodha ya default | futa orodha yote
  */
 
 const auto = require('../../utils/pocketAutoTrader');
@@ -54,6 +58,9 @@ function helpText() {
     `• maxloss <USD/siku> • losses <n> • cooldown <dk>\n` +
     `• perday <n> • exposure <1-5> • news <on|off>\n` +
     `• backtest <%> • dry <on|off>\n\n` +
+    `*Jozi zisizotradiwa:*\n` +
+    `• *.poauto blocked* • *.poauto block <jozi>* • *.poauto unblock <jozi>*\n` +
+    `• *.poauto block reset* (default) • *.poauto block clear* (futa zote)\n\n` +
     `Mfano: *.poauto stake 2*\n_Anza na DEMO + *.poauto dry on* kuona signals bila kufungua trade._`
   );
 }
@@ -72,6 +79,7 @@ function statusText(s) {
   lines.push(`   • Timeframe/expiry: ${tfLabel(s.tf)} • Mode: ${s.mode}`);
   lines.push(`   • Nguvu ya chini: ≥${s.minStrength}% • Stake: $${s.stake}`);
   lines.push(`   • Backtest gate: ${s.minBacktest > 0 ? `≥${s.minBacktest}%` : 'OFF'} • News filter: ${s.newsFilter ? 'ON' : 'OFF'}`);
+  lines.push(`   • Jozi zilizoondolewa: ${(s.blockedPairs || []).length} (zilizozuiwa: ${s.stats.pairBlocked || 0}) — *.poauto blocked*`);
   lines.push('');
   lines.push(`🧯 *Circuit Breaker*`);
   lines.push(`   • P/L ya leo (UTC): ${s.dailyPnl >= 0 ? '✅ ' : '🔴 '}${money(s.dailyPnl)} (kikomo hasara: $${s.maxDailyLoss})`);
@@ -151,6 +159,23 @@ module.exports = {
           `💵 P/L: ${money(st.pnl)}\n\n` +
           `_Sampuli ndogo (chini ya trades ~100) haithibitishi chochote — usitegemee win rate ya trades chache._`
       );
+    }
+
+    if (action === 'blocked') {
+      const b = auto.getStatus().blockedPairs || [];
+      return reply(b.length ? `🚫 *Jozi zisizotradiwa (${b.length})*\n\n${b.join(', ')}\n\n_Ondoa: .poauto unblock <jozi> • Rudisha default: .poauto block reset_` : 'ℹ️ Hakuna jozi iliyoondolewa — jozi zote zinatradiwa.');
+    }
+
+    if (action === 'block' || action === 'unblock') {
+      const sub = String(args[1] || '').toLowerCase();
+      const op = action === 'unblock' ? 'remove' : sub === 'clear' || sub === 'reset' ? sub : 'add';
+      const r = await auto.editBlocked(op, args.slice(1));
+      if (!r.ok) return reply(`❌ ${r.error}`);
+      const parts = [];
+      if (r.added.length) parts.push(`➕ Imeongezwa: ${r.added.join(', ')}`);
+      if (r.removed.length) parts.push(`➖ Imeondolewa: ${r.removed.join(', ')}`);
+      if (!parts.length) parts.push(op === 'add' ? 'ℹ️ Jozi hizo tayari zipo kwenye orodha.' : 'ℹ️ Jozi hizo hazikuwa kwenye orodha.');
+      return reply(`${parts.join('\n')}\n\n🚫 Jumla zilizoondolewa: *${r.blocked.length}*\n_Inatumika kwa signals mpya; imehifadhiwa kwenye database._`);
     }
 
     // Setting: ".poauto stake 2" au ".poauto set stake 2"
