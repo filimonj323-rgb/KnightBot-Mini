@@ -8,6 +8,7 @@ const { loadCommands } = require('./utils/commandLoader');
 const { addMessage } = require('./utils/groupstats');
 const { tryAutoLevelUp, formatLevelUpMessage } = require('./utils/economy');
 const autoForwardDb = require('./utils/autoforward');
+const forexAccess = require('./utils/forexAccess');
 const { jidDecode, jidEncode, downloadMediaMessage, downloadContentFromMessage } = global.__baileys;
 const fs = require('fs');
 const path = require('path');
@@ -1324,6 +1325,17 @@ const handleMessageImpl = async (sock, msg) => {
     // Get command
     const command = commands.get(commandName);
     if (!command) return;
+
+    // Commands za FOREX/TRADING: pairing bots zimefungwa hadi admin atoe ruhusa
+    // (dashboard au .fxaccess kwenye bot kuu — tazama utils/forexAccess.js). Bot kuu haiguswi,
+    // na global owner (config.ownerNumber) haizuiwi hata akitumia pairing bot.
+    if (sock?.pairingOwnerId && forexAccess.isForexCommand(command)) {
+      const senderNum = normalizeJid(normalizeJidWithLid(sender));
+      const isGlobalOwner = config.ownerNumber.some((o) => normalizeJid(normalizeJidWithLid(o.includes('@') ? o : `${o}@s.whatsapp.net`)) === senderNum);
+      if (!isGlobalOwner && !(await forexAccess.isAllowed(sock.pairingOwnerId))) {
+        return sock.sendMessage(from, { text: forexAccess.LOCKED_TEXT });
+      }
+    }
     
     // Check self mode (private mode) - only owner can use commands
     if (config.selfMode && !isOwner(sender, sock)) {
