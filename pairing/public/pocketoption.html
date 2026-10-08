@@ -272,6 +272,36 @@
         <div class="po-sum" id="hSummary"></div>
         <div id="hBox"><div class="po-empty">Inapakia...</div></div>
       </div>
+
+      <div class="po-card">
+        <h3><span>🗑️ Futa Historia (anza rekodi mpya)</span></h3>
+        <div class="po-filters">
+          <select class="po-select" id="delMode" onchange="delModeChanged()">
+            <option value="all">Trades zote</option>
+            <option value="date">Kwa tarehe</option>
+            <option value="last">Idadi: N za mwisho</option>
+            <option value="first">Idadi: N za kwanza</option>
+            <option value="range">Range (nafasi A hadi B)</option>
+          </select>
+          <span id="delDateBox" style="display:none;gap:6px;flex:1 1 220px;">
+            <input class="po-input" type="date" id="delFrom" oninput="delInvalidate()" style="width:auto;flex:1;margin:0;padding:7px 10px;font-size:12px;" />
+            <input class="po-input" type="date" id="delTo" oninput="delInvalidate()" style="width:auto;flex:1;margin:0;padding:7px 10px;font-size:12px;" title="Tarehe ya mwisho (hiari)" />
+          </span>
+          <input class="po-input" type="number" min="1" id="delCount" placeholder="Idadi (mfano 50)" oninput="delInvalidate()" style="display:none;width:auto;flex:1 1 120px;margin:0;padding:7px 10px;font-size:12px;" />
+          <span id="delRangeBox" style="display:none;gap:6px;flex:1 1 220px;">
+            <input class="po-input" type="number" min="1" id="delA" placeholder="Kuanzia # (1 = mpya)" oninput="delInvalidate()" style="width:auto;flex:1;margin:0;padding:7px 10px;font-size:12px;" />
+            <input class="po-input" type="number" min="1" id="delB" placeholder="Hadi #" oninput="delInvalidate()" style="width:auto;flex:1;margin:0;padding:7px 10px;font-size:12px;" />
+          </span>
+          <label id="delSigBox" class="po-muted" style="font-size:12px;align-self:center;display:flex;gap:6px;align-items:center;"><input type="checkbox" id="delSig" onchange="delInvalidate()" /> Futa pia rekodi za signals</label>
+        </div>
+        <div class="po-filters">
+          <button class="po-btn small" onclick="delPreview(this)">🔍 Angalia kitakachofutwa</button>
+          <button class="po-btn small down" id="delGo" onclick="delRun(this)" disabled>🗑️ Futa sasa</button>
+        </div>
+        <div class="po-sum" id="delSummary"></div>
+        <div id="delBox"></div>
+        <div class="po-note">Inafuta moja kwa moja kutoka database, kwa hiyo Win rate, P/L, takwimu za jozi/saa na AI uchambuzi vinaanza upya kutoka trades zilizobaki. Tarehe zinahesabiwa kwa saa za Tanzania (tarehe ya kufunguliwa kwa trade). Trades <b>zilizo wazi hazifutwi</b> (zikifungwa zinaingia kwenye rekodi mpya). Kufuta ni <b>PERMANENT</b> — pakua Excel/CSV kwanza ukihitaji nakala. Kufuta trades za LEO kunarudisha nyuma hesabu za leo za auto-trade (kikomo cha hasara/siku na trades/siku).</div>
+      </div>
     </div>
 
     <!-- BLACKLIST -->
@@ -832,6 +862,61 @@
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = label; }
     }
+  }
+
+  // ── Futa historia ya trades (reset ya rekodi) ────────────────────────
+  let delPending = null; // { json, count }
+  function delInvalidate() { delPending = null; const g = $('delGo'); if (g) g.disabled = true; }
+  function delModeChanged() {
+    const m = $('delMode').value;
+    $('delDateBox').style.display = m === 'date' ? 'flex' : 'none';
+    $('delCount').style.display = m === 'last' || m === 'first' ? '' : 'none';
+    $('delRangeBox').style.display = m === 'range' ? 'flex' : 'none';
+    $('delSigBox').style.display = m === 'all' || m === 'date' ? 'flex' : 'none';
+    delInvalidate(); $('delSummary').innerHTML = ''; $('delBox').innerHTML = '';
+  }
+  function delBody() {
+    const mode = $('delMode').value;
+    const b = { mode, includeSignals: (mode === 'all' || mode === 'date') && $('delSig').checked };
+    if (mode === 'date') { b.from = $('delFrom').value; b.to = $('delTo').value || $('delFrom').value; }
+    if (mode === 'last' || mode === 'first') b.count = $('delCount').value;
+    if (mode === 'range') { b.from = $('delA').value; b.to = $('delB').value; }
+    return b;
+  }
+  async function delPreview(btn) {
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ ...'; }
+    delInvalidate();
+    try {
+      const body = delBody();
+      const r = await api('/api/admin/po/history/preview', { method: 'POST', body: JSON.stringify(body) });
+      const wr = r.wins + r.losses ? Math.round((r.wins / (r.wins + r.losses)) * 1000) / 10 + '%' : '—';
+      $('delSummary').innerHTML =
+        `<div><b>${r.count}</b><span>Zitafutwa</span></div><div><b class="po-up">${r.wins}</b><span>Win</span></div><div><b class="po-down">${r.losses}</b><span>Loss</span></div>` +
+        `<div><b>${wr}</b><span>Win rate</span></div><div><b class="${r.net >= 0 ? 'po-up' : 'po-down'}">${signed(r.net)}</b><span>P/L</span></div>`;
+      $('delBox').innerHTML = `<div class="po-note" style="margin:0 0 8px;">${esc(r.label)}: <b>${r.count}</b> kati ya ${r.totalInDb} kwenye database.` +
+        (r.openProtected ? ` ⏳ Trades ${r.openProtected} zilizo wazi hazitafutwa.` : '') + (r.count ? '' : ' Hakuna kinachofanana.') + '</div>';
+      if (r.count) { delPending = { json: JSON.stringify(body), count: r.count, label: r.label }; $('delGo').disabled = false; }
+    } catch (e) {
+      $('delSummary').innerHTML = ''; $('delBox').innerHTML = `<div class="po-toast err">${esc(e.message)}</div>`;
+    }
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+  async function delRun(btn) {
+    if (!delPending || delPending.json !== JSON.stringify(delBody())) { delInvalidate(); snack('Bonyeza "Angalia kitakachofutwa" kwanza.', false); return; }
+    const ans = window.prompt(`Utafuta ${delPending.label}: trades ${delPending.count} kutoka database (PERMANENT).\n\nAndika FUTA kuthibitisha:`);
+    if (String(ans || '').trim().toUpperCase() !== 'FUTA') { snack('Kufuta kumeghairiwa.', false); return; }
+    const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Inafuta...';
+    try {
+      const r = await api('/api/admin/po/history/delete', { method: 'POST', body: JSON.stringify({ ...JSON.parse(delPending.json), confirm: true, expectCount: delPending.count }) });
+      snack(`✅ Imefutwa trades ${r.deleted}${r.signalsDeleted != null ? ' + signals ' + r.signalsDeleted : ''}. Rekodi mpya imeanza.`, true);
+      delPending = null; $('delSummary').innerHTML = ''; $('delBox').innerHTML = '';
+      await refresh();
+    } catch (e) {
+      snack('❌ ' + e.message, false);
+      btn.disabled = false;
+    }
+    btn.textContent = label;
   }
 
   function setHResult(k) { hResult = k; renderHistory(); }
