@@ -232,6 +232,140 @@ async function getHourTrades({ hour, limit = 100, result = 'all', ...opts } = {}
   return { total, trades };
 }
 
+// ── Kufuta historia ya trades (reset ya rekodi) ─────────────────────────
+// Trades ZILIZO WAZI (closedAt IS NULL) HAZIFUTWI kamwe — bot bado inazifuatilia hadi
+// matokeo; zikifutwa matokeo yake yangepotea. Zikifungwa zitahesabiwa kwenye rekodi mpya.
+// Modes:
+//   { mode:'all' }                        -> trades zote zilizofungwa
+//   { mode:'date', from:'YYYY-MM-DD', to? } -> kwa tarehe ya KUFUNGULIWA (saa za EAT, au POCKET_TZ_OFFSET)
+//   { mode:'last',  count:N }             -> N za MWISHO (mpya zaidi)
+//   { mode:'first', count:N }             -> N za KWANZA (za zamani zaidi)
+//   { mode:'range', from:a, to:b }        -> nafasi a..b (1 = mpya zaidi) kati ya zilizofungwa
+const DAY_MS = 86400000;
+
+function dayStartMs(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || '').trim());
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  const probe = new Date(Date.UTC(y, mo - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d) return null;
+  return probe.getTime() - TZ_OFFSET_H * 3600000;
+}
+
+function buildDeleteFilter(opts = {}) {
+  const mode = String(opts.mode || '');
+  const CLOSED = 'closedAt IS NOT NULL';
+  const MAX = 1000000;
+  if (mode === 'all') return { where: CLOSED, params: [], label: 'trades zote zilizofungwa' };
+
+  if (mode === 'date') {
+    const a = dayStartMs(opts.from);
+    const b = dayStartMs(opts.to || opts.from);
+    if (a == null) return { error: 'Tarehe ya kuanzia si sahihi. Tumia muundo YYYY-MM-DD (mfano 2026-10-01).' };
+    if (b == null) return { error: 'Tarehe ya mwisho si sahihi. Tumia muundo YYYY-MM-DD.' };
+    if (b < a) return { error: 'Tarehe ya mwisho iko kabla ya ya kuanzia.' };
+    return {
+      where: `${CLOSED} AND openedAt >= ? AND openedAt < ?`,
+      params: [a, b + DAY_MS],
+      createdRange: [a, b + DAY_MS],
+      label: opts.to && opts.to !== opts.from ? `trades za ${opts.from} hadi ${opts.to}` : `trades za ${opts.from}`,
+    };
+  }
+
+  if (mode === 'last' || mode === 'first') {
+    const n = parseInt(opts.count, 10);
+    if (!Number.isInteger(n) || n < 1 || n > MAX) return { error: 'Idadi lazima iwe namba kuanzia 1.' };
+    const dir = mode === 'last' ? 'DESC' : 'ASC';
+    return {
+      where: `orderId IN (SELECT orderId FROM po_trades WHERE ${CLOSED} ORDER BY openedAt ${dir} LIMIT ?)`,
+      params: [n],
+      label: mode === 'last' ? `trades ${n} za mwisho` : `trades ${n} za kwanza`,
+    };
+  }
+
+  if (mode === 'range') {
+    const a = parseInt(opts.from, 10);
+    const b = parseInt(opts.to, 10);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < a || b > MAX) {
+      return { error: 'Range si sahihi. Mfano: 10-50 (nafasi ya 1 = trade ya hivi karibuni zaidi).' };
+    }
+    return {
+      where: `orderId IN (SELECT orderId FROM po_trades WHERE ${CLOSED} ORDER BY openedAt DESC LIMIT ? OFFSET ?)`,
+      params: [b - a + 1, a - 1],
+      label: `trades nafasi ${a}-${b} (kutoka mpya zaidi)`,
+    };
+  }
+
+  return { error: 'Aina ya kufuta si sahihi (all | date | last | first | range).' };
+}
+
+// Onyesho la awali: ni nini KINGEFUTWA (hakuna kinachofutwa hapa).
+async function previewDeleteTrades(opts = {}) {
+  const f = buildDeleteFilter(opts);
+  if (f.error) return { ok: false, error: f.error };
+  try {
+    await ready();
+    const r = await db.query(
+      `SELECT COUNT(*) AS n,
+              COALESCE(SUM(CASE WHEN win = 1 THEN 1 ELSE 0 END), 0) AS wins,
+              COALESCE(SUM(CASE WHEN win = 0 THEN 1 ELSE 0 END), 0) AS losses,
+              COALESCE(SUM(COALESCE(profit, 0)), 0) AS net,
+              MIN(openedAt) AS oldest, MAX(openedAt) AS newest
+         FROM po_trades WHERE ${f.where}`,
+      f.params
+    );
+    const row = (r.rows || [])[0] || {};
+    const open = await db.query('SELECT COUNT(*) AS n FROM po_trades WHERE closedAt IS NULL');
+    const total = await db.query('SELECT COUNT(*) AS n FROM po_trades');
+    return {
+      ok: true,
+      label: f.label,
+      count: Number(row.n) || 0,
+      wins: Number(row.wins) || 0,
+      losses: Number(row.losses) || 0,
+      net: Math.round((Number(row.net) || 0) * 100) / 100,
+      oldest: row.oldest != null ? Number(row.oldest) : null,
+      newest: row.newest != null ? Number(row.newest) : null,
+      openProtected: Number(((open.rows || [])[0] || {}).n) || 0,
+      totalInDb: Number(((total.rows || [])[0] || {}).n) || 0,
+    };
+  } catch (err) {
+    console.error('[pocketStore] Imeshindwa kukagua trades za kufuta:', err.message);
+    return { ok: false, error: `Database imeshindwa: ${err.message}` };
+  }
+}
+
+// Kufuta kweli kutoka database. `includeSignals`: pia futa rekodi za signals (po_signals) zilizokamilika —
+// inatumika kwa mode 'all' (zote) na 'date' (kwa tarehe ya createdAt); mode nyingine haziguzi signals.
+async function deleteTrades(opts = {}) {
+  const f = buildDeleteFilter(opts);
+  if (f.error) return { ok: false, error: f.error };
+  try {
+    await ready();
+    const before = await previewDeleteTrades(opts);
+    if (!before.ok) return before;
+    const r = await db.query(`DELETE FROM po_trades WHERE ${f.where}`, f.params);
+    const deleted = Number(r.rowsAffected);
+    const out = { ok: true, label: f.label, deleted: Number.isFinite(deleted) ? deleted : before.count, wins: before.wins, losses: before.losses, net: before.net, signalsDeleted: null };
+
+    if (opts.includeSignals && (opts.mode === 'all' || opts.mode === 'date')) {
+      try {
+        const sig = opts.mode === 'date'
+          ? await db.query("DELETE FROM po_signals WHERE status IS NOT 'pending' AND createdAt >= ? AND createdAt < ?", f.createdRange)
+          : await db.query("DELETE FROM po_signals WHERE status IS NOT 'pending'");
+        out.signalsDeleted = Number(sig.rowsAffected) || 0;
+      } catch (err) {
+        // Jedwali la signals linaweza kuwa halipo bado — trades zimeshafutwa, endelea.
+        out.signalsError = err.message;
+      }
+    }
+    return out;
+  } catch (err) {
+    console.error('[pocketStore] Imeshindwa kufuta trades:', err.message);
+    return { ok: false, error: `Database imeshindwa: ${err.message}` };
+  }
+}
+
 // ── Auto-trade (source = 'auto') ────────────────────────────────────────
 
 // Trades za auto ambazo bado ziko wazi (kwa kurejesha hali baada ya restart).
@@ -363,6 +497,8 @@ module.exports = {
   localHour,
   TZ_OFFSET_H,
   getClosedResult,
+  previewDeleteTrades,
+  deleteTrades,
   saveSetting,
   deleteSetting,
   loadSettings,

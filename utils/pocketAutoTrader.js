@@ -394,6 +394,33 @@ function resume() {
   return { ok: true, was };
 }
 
+/**
+ * Historia ya trades ikifutwa: linganisha kumbukumbu ya bot (P/L ya leo, trades za leo, hasara mfululizo)
+ * na database upya. Pause ya "hasara ya siku" / "hasara mfululizo" inaondolewa PEKEE ikiwa kikomo
+ * hakijafikiwa tena kwa data mpya. Kumbuka: kufuta trades za LEO kunarudisha hesabu za leo nyuma
+ * (kikomo cha hasara/siku na trades/siku kinaanza upya).
+ */
+async function resyncRiskState() {
+  const risk = await pocketStore.getAutoRiskState(startOfUtcDay(Date.now()));
+  if (!risk) return { ok: false, error: 'Database haipatikani.' };
+  ensureDailyReset();
+  dailyPnl = risk.dailyPnl;
+  tradesToday = risk.tradesToday;
+  consecutiveLosses = risk.consecutiveLosses;
+  let resumed = false;
+  if (pausedUntil && Date.now() < pausedUntil) {
+    const stillDaily = pauseReason === 'daily_loss_limit' && -dailyPnl >= cfg.maxDailyLoss;
+    const stillStreak = pauseReason === 'consecutive_losses' && consecutiveLosses >= cfg.maxConsecLosses;
+    if ((pauseReason === 'daily_loss_limit' && !stillDaily) || (pauseReason === 'consecutive_losses' && !stillStreak)) {
+      logEvent('resume', `Pause (${PAUSE_TEXT[pauseReason] || pauseReason}) imeondolewa — historia imefutwa/kubadilishwa`);
+      pausedUntil = null;
+      pauseReason = null;
+      resumed = true;
+    }
+  }
+  return { ok: true, dailyPnl: Number(dailyPnl.toFixed(2)), tradesToday, consecutiveLosses, resumed, stillPaused: isPaused() };
+}
+
 // ── Circuit breakers ────────────────────────────────────────────────────
 function ensureDailyReset() {
   const key = utcDateKey(Date.now());
@@ -863,6 +890,7 @@ module.exports = {
   isBlockedPair,
   normPair,
   resume,
+  resyncRiskState,
   getStatus,
   getStats,
   DEFAULTS,
