@@ -351,6 +351,7 @@
     <div class="toolbar">
       <button class="ghost" onclick="downloadBackup()">⬇️ Backup Kamili</button>
       <button class="danger" onclick="resetAllSessions()">🗑️ Futa Sessions Zote Chakavu</button>
+      <button class="ghost" id="fxAllBtn" onclick="toggleForexAll()">💹 Forex: —</button>
       <button class="ghost" onclick="loadUsers()">↻ Refresh</button>
     </div>
 
@@ -396,6 +397,11 @@
       <button onclick="resendLink()">📤 Tuma Link Upya</button>
       <button class="danger" onclick="resetUserSession()">🔌 Futa Session (Force Re-pair)</button>
       <button class="danger" onclick="deleteUserCompletely()">🗑️ Futa Kabisa (Ondoa kwenye Orodha)</button>
+    </div>
+    <div class="section-label">Commands za Forex/Trading</div>
+    <div class="actrow">
+      <span id="dForexState" style="align-self:center;font-size:13px;">—</span>
+      <button class="ghost" id="dForexBtn" onclick="toggleForexUser()">—</button>
     </div>
     <div class="toast" id="dOverviewMsg"></div>
   </div>
@@ -623,7 +629,7 @@
       <tr onclick="openDetail('${u.phoneNumber}')">
         <td>
           ${userName(u) ? `<div class="uname">${escapeHtml(userName(u))}</div>` : `<div class="uname noname">Jina halijapatikana</div>`}
-          <div class="uphone">${u.phoneNumber}</div>
+          <div class="uphone">${u.phoneNumber}${fxAllowed(u.phoneNumber) ? ' <span title="Forex imeruhusiwa">💹</span>' : ''}</div>
           <div class="liveline"><span class="status-dot ${u.liveStatus}"></span>${u.liveStatus}</div>
         </td>
         <td>${statusBadge(u)}</td>
@@ -633,11 +639,53 @@
     `).join('');
   }
 
+  /* ============ Ruhusa ya Forex kwa pairing bots ============ */
+  let FX = { all: false, phones: new Set() };
+  async function loadForexAccess() {
+    try {
+      const d = await api('/api/admin/forex-access');
+      FX = { all: !!d.all, phones: new Set((d.grants || []).map(g => String(g.phoneNumber))) };
+    } catch (e) { /* ikishindwa, hali ya zamani inabaki */ }
+    renderForexUi();
+  }
+  const fxAllowed = (phone) => FX.all || FX.phones.has(String(phone));
+  function renderForexUi() {
+    const b = document.getElementById('fxAllBtn');
+    if (b) b.textContent = FX.all ? '💹 Forex: WOTE wameruhusiwa (bonyeza kuzima)' : '🔒 Forex: wote wamefungwa (bonyeza kuruhusu wote)';
+    if (CURRENT_PHONE) renderForexDetail();
+  }
+  function renderForexDetail() {
+    const st = document.getElementById('dForexState'), btn = document.getElementById('dForexBtn');
+    if (!st || !btn) return;
+    const own = FX.phones.has(String(CURRENT_PHONE));
+    st.textContent = own ? '🟢 Ameruhusiwa' : FX.all ? '🟢 Ameruhusiwa (kwa sababu "wote" imewashwa)' : '🔒 Amefungwa';
+    btn.textContent = own ? 'Mnyime Forex' : 'Mruhusu Forex';
+    btn.className = own ? 'danger' : 'ghost';
+  }
+  async function toggleForexAll() {
+    const next = !FX.all;
+    if (next && !confirm('Kuruhusu pairing bots ZOTE kutumia commands za forex/trading (pamoja na kufungua trades)? Endelea?')) return;
+    try {
+      await api('/api/admin/forex-access', { method: 'POST', body: JSON.stringify({ action: next ? 'grant_all' : 'revoke_all' }) });
+      await loadForexAccess(); renderRows();
+    } catch (e) { alert('❌ ' + e.message); }
+  }
+  async function toggleForexUser() {
+    if (!CURRENT_PHONE) return;
+    const own = FX.phones.has(String(CURRENT_PHONE));
+    try {
+      await api('/api/admin/forex-access', { method: 'POST', body: JSON.stringify({ action: own ? 'revoke' : 'grant', phone: CURRENT_PHONE }) });
+      await loadForexAccess(); renderRows();
+      showToast('dOverviewMsg', true, own ? 'Forex imezimwa kwa mteja huyu.' : 'Forex imewashwa kwa mteja huyu.');
+    } catch (e) { showToast('dOverviewMsg', false, e.message); }
+  }
+
   async function loadUsers() {
     const data = await api('/api/admin/users');
     ALL_USERS = data.users.sort((a, b) => b.pairedAt - a.pairedAt);
     renderStats();
     renderRows();
+    loadForexAccess().then(renderRows);
   }
 
   document.getElementById('searchInput').addEventListener('input', renderRows);
@@ -759,6 +807,7 @@
     document.getElementById('dAudioFile').value = '';
     document.querySelectorAll('#dMediaTypeTabs .mtab')[0].click();
     document.querySelectorAll('#dSendModeTabs .mtab')[0].click();
+    renderForexDetail();
     await refreshDetail();
     refreshBillingPane();
   }
