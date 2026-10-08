@@ -30,6 +30,8 @@
  *   POCKET_AUTO_STAKE        stake ya kuanzia (default 1)
  *   POCKET_AUTO_MAX_STAKE    kikomo kigumu cha stake (default 25) — kinazuia makosa ya kuandika
  *   POCKET_AUTO_MAX_DELAY_MS kuchelewa kwa juu kuingia baada ya candle kufungwa (default 25000)
+ *   POCKET_AUTO_PER_DAY      trades za juu kwa siku — thamani ya kuanzia (default 30)
+ *   POCKET_AUTO_MAX_PER_DAY  kikomo kigumu cha `.poauto perday` / dashboard (default 200)
  */
 
 const pocketTrader = require('./pocketOptionTrader');
@@ -43,6 +45,7 @@ const CONFIG_KEY = 'autotrade:config';
 const CURRENCIES = new Set(['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD']);
 const HARD_MAX_STAKE = Number(process.env.POCKET_AUTO_MAX_STAKE || 25);
 const MAX_DELAY_MS = Number(process.env.POCKET_AUTO_MAX_DELAY_MS || 25000);
+const HARD_MAX_PER_DAY = Math.max(1, Math.floor(Number(process.env.POCKET_AUTO_MAX_PER_DAY) || 200));
 const MIN_STAKE = 1; // Pocket Option: kiwango cha chini cha trade
 
 // Jozi zisizotradiwa na auto-trade (kutokana na uchambuzi wa History: payout ndogo au hasara ya kudumu).
@@ -69,7 +72,7 @@ const DEFAULTS = Object.freeze({
   maxDailyLoss: 10, // USD, siku ya UTC
   maxConsecLosses: 3,
   cooldownMin: 60,
-  maxTradesPerDay: 30,
+  maxTradesPerDay: Math.min(HARD_MAX_PER_DAY, Math.max(1, Math.floor(Number(process.env.POCKET_AUTO_PER_DAY) || 30))),
   maxCurrencyExposure: 1,
   newsFilter: true,
   minBacktest: 0, // % — 0 = imezimwa. >0: backtest ya "strong" lazima ifikie hii (angalau signals 8)
@@ -179,6 +182,7 @@ async function loadConfig() {
     for (const k of Object.keys(DEFAULTS)) if (saved[k] !== undefined) cfg[k] = saved[k];
     cfg.stake = Math.min(HARD_MAX_STAKE, Math.max(MIN_STAKE, Number(cfg.stake) || DEFAULTS.stake));
     if (!Array.isArray(cfg.blockedPairs)) cfg.blockedPairs = [...DEFAULT_BLOCKED];
+    cfg.maxTradesPerDay = Math.min(HARD_MAX_PER_DAY, Math.max(1, Math.floor(Number(cfg.maxTradesPerDay)) || DEFAULTS.maxTradesPerDay));
   } catch (err) {
     console.error('[pocketAuto] Config iliyohifadhiwa si sahihi, natumia default:', err.message);
   }
@@ -275,7 +279,7 @@ function parseSetting(name, raw) {
       if (!Number.isFinite(num) || num < 5 || num > 1440) return rangeErr('Cooldown (dakika): 5-1440.');
       field = 'cooldownMin'; value = Math.round(num); break;
     case 'perday':
-      if (!Number.isInteger(num) || num < 1 || num > 200) return rangeErr('Trades za juu kwa siku: namba kamili 1-200.');
+      if (!Number.isInteger(num) || num < 1 || num > HARD_MAX_PER_DAY) return rangeErr(`Trades za juu kwa siku: namba kamili 1-${HARD_MAX_PER_DAY} (kikomo: POCKET_AUTO_MAX_PER_DAY).`);
       field = 'maxTradesPerDay'; value = num; break;
     case 'exposure':
       if (!Number.isInteger(num) || num < 1 || num > 5) return rangeErr('Exposure ya currency moja: namba kamili 1-5.');
@@ -779,6 +783,7 @@ function getStatus() {
     stats: { ...stats },
     events: events.slice(),
     hardMaxStake: HARD_MAX_STAKE,
+    hardMaxPerDay: HARD_MAX_PER_DAY,
   };
 }
 
