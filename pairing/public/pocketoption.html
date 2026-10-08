@@ -39,6 +39,7 @@
       <div class="po-tab" data-pane="trade"><em>🎯</em>Trade</div>
       <div class="po-tab" data-pane="history"><em>🕘</em>History</div>
       <div class="po-tab" data-pane="blacklist"><em>🚫</em>Blacklist</div>
+      <div class="po-tab" data-pane="hours"><em>⏰</em>Saa</div>
     </div>
 
     <!-- MUHTASARI -->
@@ -297,6 +298,24 @@
         <div class="po-note">Win% = trades za auto zilizokamilika (WIN/LOSS). <b>BE%</b> = win rate ya kuvunja sawa kulingana na payout ya jozi hiyo; ikiwa Win% iko chini ya BE% jozi inapoteza. ⚠ = trades chini ya 20 (sampuli ndogo, usiamini sana). <b>Blacklist</b> inaizuia jozi isitradiwe na bot; <b>Fungua</b> inairuhusu tena. Mabadiliko yanatumika kwa signals mpya papo hapo na yanahifadhiwa.</div>
       </div>
     </div>
+
+    <!-- SAA ZA KUTRADE -->
+    <div class="po-pane" id="pane-hours">
+      <div class="po-card">
+        <h3><span>⏰ Saa za Kutrade (EAT)</span><button class="po-btn small" onclick="loadHours()">🔄 Sasisha</button></h3>
+        <div class="po-filters" id="hrChips"></div>
+        <div class="po-sum" id="hrSummary"></div>
+        <div id="hrBox"><div class="po-empty">Fungua tab hii kupakia...</div></div>
+        <div class="po-filters" style="margin-top:12px;">
+          <button class="po-btn small" onclick="hrSelectBad()">📉 Chagua saa hasi</button>
+          <button class="po-btn small" onclick="hrReset()">↩️ Rudisha chaguo</button>
+          <button class="po-btn small" onclick="hrAllowAll()">▶️ Washa zote</button>
+        </div>
+        <button class="po-btn primary" id="hrSave" onclick="hrSave()" style="margin-top:10px;" disabled>💾 Hifadhi saa zilizozimwa</button>
+        <div class="po-note">Kila safu ni saa ya KUFUNGULIWA kwa trade (saa za Tanzania, 24h). Bonyeza <b>⏸ Zima</b> kuzuia bot kufungua trade mpya saa hiyo, kisha <b>Hifadhi</b>. Trades zilizofunguliwa tayari zinaendelea hadi zifungwe. <b>👁</b> inaonyesha trades zilizofungwa za saa hiyo. Takwimu ni za auto-trade tu; sampuli ya chini ya trades 20 kwa saa haitegemewi sana, kwa hiyo <b>Chagua saa hasi</b> inachagua saa zenye trades 20+ na P/L hasi tu (haihifadhi mpaka ubonyeze Hifadhi).</div>
+      </div>
+      <div class="po-card" id="hrDetail" style="display:none;"></div>
+    </div>
   </div>
 </div>
 
@@ -353,6 +372,7 @@
     document.querySelectorAll('.po-tab').forEach((t) => t.classList.toggle('active', t.dataset.pane === name));
     document.querySelectorAll('.po-pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + name));
     if (name === 'blacklist') loadBlacklist();
+    if (name === 'hours') loadHours();
   }
   document.querySelectorAll('.po-tab').forEach((t) => t.addEventListener('click', () => openPane(t.dataset.pane)));
 
@@ -934,6 +954,113 @@
       snack(action === 'reset' ? '↩️ Orodha ya default imerudishwa (' + d.blocked.length + ').' : '🧹 Blacklist imefutwa.', true);
     } catch (e) { snack('❌ ' + e.message, false); }
   }
+
+  // ── Saa za kutrade (EAT): takwimu, zima/washa, trades za saa ─────────
+  const swHour = (h) => 'saa ' + (((h + 6) % 12) || 12) + ' ' + (h < 5 ? 'usiku' : h < 6 ? 'alfajiri' : h < 12 ? 'asubuhi' : h < 16 ? 'mchana' : h < 19 ? 'jioni' : 'usiku');
+  const hh2 = (h) => String(h).padStart(2, '0') + ':00';
+  let hr = { rows: [], saved: [], pending: new Set(), scope: 'tf', pairs: 'active', tf: null, sel: null, res: 'all', loaded: false };
+
+  function hrRanges(list) {
+    const a = [...list].sort((x, y) => x - y), out = [];
+    for (let i = 0; i < a.length; ) {
+      let j = i; while (j + 1 < a.length && a[j + 1] === a[j] + 1) j++;
+      out.push(hh2(a[i]) + '–' + String(a[j]).padStart(2, '0') + ':59'); i = j + 1;
+    }
+    return out.join(', ');
+  }
+  const hrDirty = () => { const s = new Set(hr.saved); return hr.pending.size !== s.size || [...hr.pending].some((h) => !s.has(h)); };
+
+  async function loadHours() {
+    if (!hr.loaded) $('hrBox').innerHTML = '<div class="po-empty">Inapakia...</div>';
+    try {
+      const d = await api('/api/admin/po/hour-stats?scope=' + hr.scope + '&pairs=' + hr.pairs);
+      hr.rows = d.hours || []; hr.tf = d.tf; hr.saved = d.blockedHours || [];
+      if (!hr.loaded || !hrDirty()) hr.pending = new Set(hr.saved);
+      hr.loaded = true;
+      renderHours();
+      if (hr.sel != null) hrOpen(hr.sel, true);
+    } catch (e) {
+      $('hrBox').innerHTML = '<div class="po-toast err" style="display:block;">❌ ' + esc(e.message) + '</div>';
+    }
+  }
+  function setHr(k, v) { hr[k] = v; loadHours(); }
+
+  function renderHours() {
+    const chip = (k, v, l) => `<button class="po-btn small ${hr[k] === v ? 'active' : ''}" onclick="setHr('${k}','${v}')">${l}</button>`;
+    $('hrChips').innerHTML = chip('pairs', 'active', 'Pair zinazotradiwa') + chip('pairs', 'all', 'Pair zote') +
+      chip('scope', 'tf', 'Expiry ' + (hr.tf ? tfLabel(hr.tf) : 'ya sasa')) + chip('scope', 'all', 'Expiry zote');
+
+    // dirisha la saa 3 mfululizo: bora na dhaifu (angalau trades 15)
+    let best = null, worst = null;
+    for (let h = 0; h <= 21; h++) {
+      const w = hr.rows.slice(h, h + 3), n = w.reduce((s, r) => s + r.trades, 0);
+      if (n < 15) continue;
+      const net = w.reduce((s, r) => s + r.net, 0), wins = w.reduce((s, r) => s + r.wins, 0);
+      const o = { h, n, net, wr: Math.round((wins / n) * 1000) / 10 };
+      if (!best || net > best.net) best = o;
+      if (!worst || net < worst.net) worst = o;
+    }
+    const win = (o) => o ? `${hh2(o.h)}–${String(o.h + 2).padStart(2, '0')}:59 · ${signed(o.net)} · ${o.wr}% (${o.n})` : '—';
+    $('hrSummary').innerHTML =
+      `<div><b class="po-up" style="font-size:13px;">${win(best)}</b><span>🏆 Dirisha bora (saa 3)</span></div>` +
+      `<div><b class="po-down" style="font-size:13px;">${win(worst)}</b><span>⚠️ Dirisha dhaifu (saa 3)</span></div>` +
+      `<div><b style="font-size:13px;">${hr.saved.length ? hrRanges(hr.saved) : 'hakuna'}</b><span>⏸ Zimezimwa sasa</span></div>`;
+
+    $('hrBox').innerHTML = `<div class="po-scroll" style="max-height:600px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Saa</th><th>Trades</th><th>Win%</th><th>P/L</th><th></th></tr></thead><tbody>${
+      hr.rows.map((r) => {
+        const off = hr.pending.has(r.hour), changed = off !== hr.saved.includes(r.hour);
+        const below = r.winRate != null && r.breakeven != null && r.winRate < r.breakeven;
+        const wr = r.winRate == null ? '<span class="po-muted">—</span>' : `<span class="${below ? 'po-down' : 'po-up'}">${r.winRate}%</span> <span class="po-muted" style="font-size:11px;">(${r.wins}W-${r.losses}L)</span>`;
+        return `<tr${off ? ' style="opacity:.6;"' : ''}><td><b>${hh2(r.hour)}</b>${changed ? ' <span title="Haijahifadhiwa">•</span>' : ''}<br><span class="po-muted" style="font-size:11px;">${swHour(r.hour)}</span></td>` +
+          `<td>${r.trades}${r.trades > 0 && r.trades < 20 ? ' <span class="po-warn" title="Sampuli ndogo">⚠</span>' : ''}</td><td style="white-space:nowrap;">${wr}</td>` +
+          `<td class="${r.net >= 0 ? 'po-up' : 'po-down'}">${r.trades ? signed(r.net) : '—'}</td>` +
+          `<td style="white-space:nowrap;"><button class="po-btn small ${off ? 'up' : 'down'}" onclick="hrToggle(${r.hour})">${off ? '▶️ Washa' : '⏸ Zima'}</button> ` +
+          `<button class="po-btn small" onclick="hrOpen(${r.hour})" title="Trades za saa hii">👁</button></td></tr>`;
+      }).join('')
+    }</tbody></table></div>`;
+    const b = $('hrSave'), dirty = hrDirty();
+    b.disabled = !dirty;
+    b.textContent = dirty ? '💾 Hifadhi mabadiliko (' + (hr.pending.size ? hrRanges(hr.pending) : 'washa zote') + ')' : '💾 Hifadhi saa zilizozimwa';
+  }
+
+  function hrToggle(h) { if (hr.pending.has(h)) hr.pending.delete(h); else hr.pending.add(h); renderHours(); }
+  function hrReset() { hr.pending = new Set(hr.saved); renderHours(); }
+  function hrAllowAll() { hr.pending = new Set(); renderHours(); }
+  function hrSelectBad() {
+    const bad = hr.rows.filter((r) => r.trades >= 20 && r.net < 0).map((r) => r.hour);
+    bad.forEach((h) => hr.pending.add(h));
+    renderHours();
+    snack(bad.length ? '📉 Zimechaguliwa saa ' + bad.length + ' (' + hrRanges(bad) + '). Bonyeza Hifadhi kuthibitisha.' : 'ℹ️ Hakuna saa yenye trades 20+ na P/L hasi.', bad.length > 0);
+  }
+  async function hrSave() {
+    const b = $('hrSave'); b.disabled = true;
+    try {
+      const d = await api('/api/admin/po/hours', { method: 'POST', body: JSON.stringify({ hours: [...hr.pending] }) });
+      hr.saved = d.hours || []; hr.pending = new Set(hr.saved);
+      if (state.at) state.at.blockedHours = hr.saved;
+      renderHours();
+      snack(hr.saved.length ? '⏸ Bot haitafungua trade mpya saa: ' + hrRanges(hr.saved) : '▶️ Saa zote zimewashwa.', true);
+    } catch (e) { b.disabled = false; snack('❌ ' + e.message, false); }
+  }
+
+  async function hrOpen(h, keep) {
+    hr.sel = h; if (!keep) hr.res = hr.res || 'all';
+    const box = $('hrDetail'); box.style.display = 'block';
+    box.innerHTML = '<div class="po-empty">Inapakia trades za saa ' + hh2(h) + '...</div>';
+    try {
+      const d = await api('/api/admin/po/hour-trades?hour=' + h + '&scope=' + hr.scope + '&pairs=' + hr.pairs + '&result=' + hr.res + '&limit=80');
+      const chip = (v, l) => `<button class="po-btn small ${hr.res === v ? 'active' : ''}" onclick="hrRes('${v}')">${l}</button>`;
+      box.innerHTML = `<h3><span>👁 Trades za saa ${hh2(h)} (${swHour(h)})</span><button class="po-btn small" onclick="hrClose()">✖</button></h3>` +
+        `<div class="po-filters">${chip('all', 'Zote')}${chip('win', '✅ Zilizoshinda')}${chip('loss', '❌ Zilizopoteza')}</div>` +
+        `<div class="po-note" style="margin:6px 0;">Zilizofungwa: <b>${d.total}</b>${d.total > d.trades.length ? ' (zinaonyeshwa ' + d.trades.length + ' za mwisho)' : ''}</div>` +
+        (d.trades.length ? `<div class="po-scroll" style="max-height:420px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Muda</th><th>Jozi</th><th>Njia</th><th>P/L</th></tr></thead><tbody>${
+          d.trades.map((t) => `<tr><td style="white-space:nowrap;">${fmtDate(t.openedAt)}</td><td><b>${esc(t.pair)}</b></td><td class="${t.direction === 'UP' ? 'po-up' : 'po-down'}">${t.direction === 'UP' ? '⬆' : '⬇'}</td>` +
+            `<td class="${t.profit >= 0 && t.win === 1 ? 'po-up' : 'po-down'}">${t.win === 1 ? '✅ ' : '❌ '}${signed(t.profit)}${t.payout ? ' <span class="po-muted" style="font-size:11px;">(' + t.payout + '%)</span>' : ''}</td></tr>`).join('')
+        }</tbody></table></div>` : '<div class="po-empty">Hakuna trades zinazolingana.</div>');
+    } catch (e) { box.innerHTML = '<div class="po-toast err" style="display:block;">❌ ' + esc(e.message) + '</div>'; }
+  }
+  function hrRes(v) { hr.res = v; hrOpen(hr.sel, true); }
+  function hrClose() { hr.sel = null; $('hrDetail').style.display = 'none'; }
 
   // ── Group la signals + matokeo (profit/loss) ─────────────────────────
   async function loadTargets(manual) {
