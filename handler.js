@@ -1326,14 +1326,20 @@ const handleMessageImpl = async (sock, msg) => {
     const command = commands.get(commandName);
     if (!command) return;
 
-    // Commands za FOREX/TRADING: pairing bots zimefungwa hadi admin atoe ruhusa
-    // (dashboard au .fxaccess kwenye bot kuu — tazama utils/forexAccess.js). Bot kuu haiguswi,
-    // na global owner (config.ownerNumber) haizuiwi hata akitumia pairing bot.
-    if (sock?.pairingOwnerId && forexAccess.isForexCommand(command)) {
-      const senderNum = normalizeJid(normalizeJidWithLid(sender));
-      const isGlobalOwner = config.ownerNumber.some((o) => normalizeJid(normalizeJidWithLid(o.includes('@') ? o : `${o}@s.whatsapp.net`)) === senderNum);
-      if (!isGlobalOwner && !(await forexAccess.isAllowed(sock.pairingOwnerId))) {
-        return sock.sendMessage(from, { text: forexAccess.LOCKED_TEXT });
+    // Commands za FOREX/TRADING kwa PAIRING BOTS (utils/forexAccess.js):
+    //  • 'account' (kufungua/kufunga order, auto-trade, balance, positions...) = zimefungwa KABISA
+    //    hadi kila bot iwe na akaunti yake ya trading — ruhusa haizifungui.
+    //  • 'signal' (forex signals, uchambuzi tu) = zinahitaji ruhusa ya admin (.fxaccess / dashboard).
+    // Bot kuu haiguswi, na global owner (config.ownerNumber) haizuiwi hata akitumia pairing bot.
+    if (sock?.pairingOwnerId) {
+      const fxClass = forexAccess.classify(command);
+      if (fxClass) {
+        const senderNum = normalizeJid(normalizeJidWithLid(sender));
+        const isGlobalOwner = config.ownerNumber.some((o) => normalizeJid(normalizeJidWithLid(o.includes('@') ? o : `${o}@s.whatsapp.net`)) === senderNum);
+        if (!isGlobalOwner) {
+          if (fxClass === 'account') return sock.sendMessage(from, { text: forexAccess.ACCOUNT_LOCKED_TEXT });
+          if (!(await forexAccess.isAllowed(sock.pairingOwnerId))) return sock.sendMessage(from, { text: forexAccess.LOCKED_TEXT });
+        }
       }
     }
     
