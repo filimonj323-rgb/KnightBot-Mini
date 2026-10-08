@@ -1085,6 +1085,35 @@ async function handlePairingRequest(req, res) {
             await posignalCmd.startAutoFromDashboard(global.currentSock, jid, { tf, minStrength, mode });
             return sendJson(res, 200, { ok: true, auto: posignalCmd.getAutoStatus() });
           }
+          // ── BLACKLIST ya jozi za auto-trade ───────────────────────────────────
+          // GET pair-stats?scope=tf|all: win rate + idadi ya trades kwa kila jozi (+ hali ya blacklist).
+          // POST blocked { action: 'add'|'remove'|'clear'|'reset', pairs: [...] } — sawa na `.poauto block ...`
+          if (req.method === 'GET' && poPath === '/api/admin/po/pair-stats') {
+            const scope = poQuery.get('scope') === 'all' ? 'all' : 'tf';
+            const st = pocketAuto.getStatus();
+            const list = await pocketStore.getPairStats({ tf: scope === 'tf' ? st.tf : null });
+            const pairs = list.map((p) => ({ ...p, blocked: pocketAuto.isBlockedPair(p.pair) }));
+            const have = new Set(pairs.map((p) => pocketAuto.normPair(p.pair)));
+            for (const b of st.blockedPairs || []) {
+              if (!have.has(pocketAuto.normPair(b))) pairs.push({ pair: b, trades: 0, wins: 0, losses: 0, winRate: null, net: 0, payout: null, breakeven: null, blocked: true });
+            }
+            return sendJson(res, 200, { ok: true, scope, tf: st.tf, blockedCount: (st.blockedPairs || []).length, pairs });
+          }
+          if (req.method === 'POST' && poPath === '/api/admin/po/blocked') {
+            const body = await readJsonBody(req);
+            const action = String(body.action || '');
+            if (!['add', 'remove', 'clear', 'reset'].includes(action)) {
+              return sendJson(res, 400, { ok: false, error: 'action lazima iwe add, remove, clear au reset.' });
+            }
+            const r = await pocketAuto.editBlocked(action, Array.isArray(body.pairs) ? body.pairs : []);
+            if (!r.ok) return sendJson(res, 400, { ok: false, error: r.error });
+            const show = (a) => (a.length > 8 ? `jozi ${a.length}` : a.join(', '));
+            const bits = [];
+            if (r.added.length) bits.push(`➕ ${show(r.added)}`);
+            if (r.removed.length) bits.push(`➖ ${show(r.removed)}`);
+            if (bits.length) notifyOwnerWA(`🖥️ *Auto-trade blacklist (Dashboard)*\n${bits.join('\n')}\n🚫 Jumla zilizoondolewa: ${r.blocked.length}`, 'dashboard');
+            return sendJson(res, 200, { ok: true, blocked: r.blocked });
+          }
           // ── AUTO-TRADE (trade za kiotomatiki) — sawa na `.poauto ...` ──────────
           // GET: hali kamili. POST { action: 'on'|'off'|'resume'|'set', confirmReal?, settings? }
           if (poPath === '/api/admin/po/autotrade') {
