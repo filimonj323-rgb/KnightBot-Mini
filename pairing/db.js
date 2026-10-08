@@ -148,6 +148,36 @@ async function initSchema() {
       grantedAt   INTEGER NOT NULL,
       note        TEXT
     )`,
+    // Akaunti ya Deriv ya KILA mteja wa pairing bot (utils/derivAccounts.js).
+    // encToken = token iliyosimbwa (AES-256-GCM, utils/derivCrypto.js) — kamwe wazi.
+    // adminApproved/autoApproved = uamuzi wa admin (default 0 = amefungwa).
+    // userEnabled/autoEnabled   = swichi za mteja mwenyewe (default 0 = zimezimwa).
+    // realAllowed = admin ameruhusu akaunti ya REAL kwa mteja huyu (default 0 = DEMO tu).
+    `CREATE TABLE IF NOT EXISTS deriv_accounts (
+      phoneNumber    TEXT PRIMARY KEY,
+      encToken       TEXT,
+      tokenHint      TEXT,
+      accountId      TEXT,
+      isDemo         INTEGER NOT NULL DEFAULT 1,
+      currency       TEXT,
+      status         TEXT NOT NULL DEFAULT 'none',
+      adminApproved  INTEGER NOT NULL DEFAULT 0,
+      autoApproved   INTEGER NOT NULL DEFAULT 0,
+      realAllowed    INTEGER NOT NULL DEFAULT 0,
+      userEnabled    INTEGER NOT NULL DEFAULT 0,
+      autoEnabled    INTEGER NOT NULL DEFAULT 0,
+      maxStake       REAL NOT NULL DEFAULT 5,
+      maxTradesDay   INTEGER NOT NULL DEFAULT 5,
+      maxDailyLoss   REAL NOT NULL DEFAULT 10,
+      maxOpen        INTEGER NOT NULL DEFAULT 2,
+      pinHash        TEXT,
+      mustChangePin  INTEGER NOT NULL DEFAULT 0,
+      pinFails       INTEGER NOT NULL DEFAULT 0,
+      pinLockedUntil INTEGER,
+      lastError      TEXT,
+      connectedAt    INTEGER,
+      updatedAt      INTEGER NOT NULL DEFAULT 0
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_po_trades_open ON po_trades(closedAt)`,
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
     `CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_open ON fx_auto_trades(closedAt)`,
@@ -220,6 +250,19 @@ async function initSchema() {
     await client.execute('ALTER TABLE fx_auto_trades ADD COLUMN signalStrength REAL');
   } catch (e) {
     // Column already exists — expected on every run after the first.
+  }
+
+  // Migration: fx_auto_trades.ownerPhone — NULL = trades za owner/bot kuu (data zilizopo hazibadiliki);
+  // namba ya mteja = trade ya akaunti ya Deriv ya mteja huyo (utils/derivAccounts.js, hatua zinazofuata).
+  try {
+    await client.execute('ALTER TABLE fx_auto_trades ADD COLUMN ownerPhone TEXT');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
+  }
+  try {
+    await client.execute('CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_owner ON fx_auto_trades(ownerPhone, closedAt)');
+  } catch (e) {
+    console.warn('[db] idx_fx_auto_trades_owner:', e.message);
   }
 
   schemaReady = true;

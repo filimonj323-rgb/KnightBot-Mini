@@ -42,6 +42,8 @@ const {
   removeAutoForwardRuleForToken,
   resendDashboardLink,
   getPhoneNumberByToken,
+  assertActiveForToken,
+  sendToSelfChat,
   normalizePhoneNumber,
   adminListUsers,
   adminMarkPaid,
@@ -78,6 +80,7 @@ const mainConfig = require('../config');
 const pocketTrader = require('../utils/pocketOptionTrader');
 const pocketStore = require('../utils/pocketStore');
 const forexAccess = require('../utils/forexAccess');
+const derivAccounts = require('../utils/derivAccounts');
 const pocketSignal = require('../utils/pocketSignal');
 const signalTracker = require('../utils/signalTracker');
 const pocketAuto = require('../utils/pocketAutoTrader');
@@ -383,6 +386,52 @@ async function handlePairingRequest(req, res) {
       return sendJson(res, 200, { ok: true, ...status });
     }
 
+    // ── Deriv ya mteja mwenyewe (DEMO tu): /api/dashboard/<token>/deriv[/pin|/connect|/disconnect|/toggle] ──
+    // Token ya dashboard inamtambulisha mteja; hatua nyeti (kuweka token, kuwasha) zinahitaji PIN ya trading.
+    // Body (PIN/token ya Deriv) HAIANDIKWI kwenye log kamwe.
+    const mDeriv = /^\/api\/dashboard\/([^/?]+)\/deriv(?:\/([a-z]+))?(?:\?.*)?$/.exec(req.url);
+    if (mDeriv) {
+      const dashToken = decodeURIComponent(mDeriv[1]);
+      const sub = mDeriv[2] || '';
+      try {
+        const phone = await assertActiveForToken(dashToken);
+        if (req.method === 'GET' && sub === '') {
+          return sendJson(res, 200, { ok: true, account: await derivAccounts.getPublic(phone) });
+        }
+        if (req.method === 'POST' && ['pin', 'connect', 'disconnect', 'toggle'].includes(sub)) {
+          const body = await readJsonBody(req);
+          // Rate limit TU kwa hatua zinazohitaji PIN/token (kuzuia kubashiri PIN). Kuzima trading/auto na
+          // kuondoa akaunti HAZIZUIWI kamwe — mteja lazima aweze kusimamisha trading yake wakati wowote.
+          const isSafeStop = sub === 'disconnect' || (sub === 'toggle' && body.userEnabled !== true && body.autoEnabled !== true);
+          if (!isSafeStop) derivAccounts.rateLimit(`deriv:${dashToken}`, 12, 60 * 1000);
+          if (sub === 'pin') {
+            const account = await derivAccounts.setPin(phone, body.newPin, body.oldPin);
+            return sendJson(res, 200, { ok: true, account });
+          }
+          if (sub === 'connect') {
+            const r = await derivAccounts.connect(phone, body.token, body.pin);
+            return sendJson(res, 200, { ok: true, ...r });
+          }
+          if (sub === 'disconnect') {
+            return sendJson(res, 200, { ok: true, account: await derivAccounts.disconnect(phone) });
+          }
+          const account = await derivAccounts.setSwitches(phone, {
+            userEnabled: typeof body.userEnabled === 'boolean' ? body.userEnabled : undefined,
+            autoEnabled: typeof body.autoEnabled === 'boolean' ? body.autoEnabled : undefined,
+            pin: body.pin,
+          });
+          return sendJson(res, 200, { ok: true, account });
+        }
+      } catch (err) {
+        if (err instanceof derivAccounts.DerivAccountError) {
+          return sendJson(res, err.code === 'RATE_LIMIT' ? 429 : 400, { ok: false, error: err.userMessage, code: err.code });
+        }
+        if (/Dashboard link|imezuiwa|Muda wako/.test(err.message)) return sendJson(res, 400, { ok: false, error: err.message });
+        console.error('[deriv dashboard] hitilafu:', err.message);
+        return sendJson(res, 500, { ok: false, error: 'Hitilafu ya ndani. Jaribu tena baadaye.' });
+      }
+    }
+
     if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/groups')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/groups', ''));
       const groups = await listGroups(token);
@@ -632,6 +681,35 @@ async function handlePairingRequest(req, res) {
           else return sendJson(res, 400, { ok: false, error: 'action lazima iwe grant, revoke, grant_all au revoke_all.' });
           if (!r.ok) return sendJson(res, 400, r);
           return sendJson(res, 200, { ...(await forexAccess.list()), changed: r });
+        }
+      }
+
+      // ── Admin: akaunti za Deriv za wateja (DEMO tu) ──────────────────────────────
+      // GET = orodha + kill switch. POST { action, phone?, limits?, dm? }:
+      //  approve|revoke|approve_auto|revoke_auto|allow_real|deny_real|set_limits|reset_pin|remove|kill_all|resume_all
+      if (req.url.split('?')[0] === '/api/admin/deriv') {
+        try {
+          if (req.method === 'GET') return sendJson(res, 200, { ok: true, ...(await derivAccounts.adminList()) });
+          if (req.method === 'POST') {
+            const body = await readJsonBody(req);
+            const phone = body.phone ? String(body.phone).replace(/\D/g, '') : '';
+            const r = await derivAccounts.adminAction(phone, String(body.action || ''), { limits: body.limits });
+            if (body.action === 'reset_pin') {
+              let dmSent = false;
+              if (body.dm) {
+                dmSent = await sendToSelfChat(
+                  phone,
+                  `🔐 *PIN ya muda ya Trading:* ${r.tempPin}\n\nIngia kwenye dashboard → Deriv, kisha uibadilishe kuwa PIN yako mwenyewe mara moja. Usimpe mtu yeyote.`
+                );
+              }
+              return sendJson(res, 200, { ok: true, ...r, dmSent });
+            }
+            return sendJson(res, 200, { ok: true, ...r });
+          }
+        } catch (err) {
+          if (err instanceof derivAccounts.DerivAccountError) return sendJson(res, 400, { ok: false, error: err.userMessage, code: err.code });
+          console.error('[admin deriv] hitilafu:', err.message);
+          return sendJson(res, 500, { ok: false, error: 'Hitilafu ya ndani.' });
         }
       }
 

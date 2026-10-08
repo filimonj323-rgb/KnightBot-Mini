@@ -1075,6 +1075,23 @@ async function assertActiveForToken(token) {
   return phoneNumber;
 }
 
+/**
+ * Inatuma ujumbe kwenye self-chat ya mteja (bot yake mwenyewe). Inatumia sock HAI kutoka
+ * `instances` (si reference iliyohifadhiwa — sock hubadilika baada ya reconnect).
+ * Inarudisha true/false; haitupi error. Maandishi HAYAANDIKWI kwenye log (yanaweza kuwa PIN).
+ */
+async function sendToSelfChat(phoneNumber, text) {
+  try {
+    const inst = instances.get(String(phoneNumber));
+    if (!inst || !inst.sock || inst.status !== 'connected') return false;
+    await inst.sock.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text });
+    return true;
+  } catch (e) {
+    console.error(`[pairing:${phoneNumber}] imeshindwa kutuma ujumbe wa self-chat:`, e.message);
+    return false;
+  }
+}
+
 async function getInstanceByToken(token) {
   const phoneNumber = await getPhoneNumberByToken(token);
   if (!phoneNumber) return null;
@@ -2177,6 +2194,8 @@ module.exports = {
   getInstanceStatus,
   normalizePhoneNumber,
   getPhoneNumberByToken,
+  assertActiveForToken,
+  sendToSelfChat,
   getInstanceByToken,
   listGroups,
   postGroupStatusForToken,
