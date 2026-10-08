@@ -100,6 +100,17 @@
     font-family: inherit;
   }
   select:focus, textarea:focus, input:focus { outline: none; border-color: var(--purple); }
+  input[type="password"] {
+    width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--field); color: var(--text); font-size: 14px; margin-bottom: 14px; font-family: inherit;
+  }
+  .dv-badge { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11.5px; font-weight:700; margin-right:6px; }
+  .dv-ok { background: rgba(57,255,136,0.12); color:#39ff88; }
+  .dv-warn { background: rgba(255,193,7,0.14); color:#ffc107; }
+  .dv-bad { background: rgba(255,85,102,0.14); color:#ff5566; }
+  .dv-box { border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:14px; font-size:13px; line-height:1.6; }
+  .dv-step { font-size:13px; font-weight:700; margin:18px 0 8px; color: var(--purple-light); }
+  details.dv-details summary { cursor:pointer; color: var(--muted); font-size:12.5px; margin-bottom:10px; }
   textarea { resize: vertical; min-height: 68px; }
   input[type="file"] { padding: 10px; font-size: 12.5px; }
   .file-preview {
@@ -309,6 +320,7 @@
     <div class="section-tab" data-section="broadcast"><span class="icon">📢</span>Groups</div>
     <div class="section-tab" data-section="downloads"><span class="icon">⬇️</span>Downloads</div>
     <div class="section-tab" data-section="settings"><span class="icon">⚙️</span>Settings</div>
+    <div class="section-tab" data-section="deriv"><span class="icon">📈</span>Deriv</div>
     <div class="section-tab" data-section="billing"><span class="icon">💳</span>Malipo</div>
   </div>
 
@@ -607,6 +619,64 @@
     </div>
     </div>
 
+  </div>
+
+  <!-- ============ SECTION: Deriv (akaunti ya demo ya mteja) ============ -->
+  <div class="section" id="section-deriv">
+    <div class="card">
+      <h1>📈 Akaunti Yangu ya Deriv</h1>
+      <p class="sub">Unganisha akaunti yako ya <b>DEMO</b> ya Deriv ili trades, balance na historia viwe vyako peke yako. Kwa sasa akaunti za REAL hazikubaliwi.</p>
+
+      <div class="dv-box" id="dvBanner" style="display:none"></div>
+      <div class="dv-box" id="dvSummary">Inapakia...</div>
+
+      <div id="dvPinBox">
+        <div class="dv-step" id="dvPinTitle">1) PIN ya Trading</div>
+        <p class="sub" id="dvPinHelp" style="margin-bottom:12px">PIN (tarakimu 4–8) inalinda akaunti yako: inahitajika kuweka token na kuwasha trading. Kuzima hakuhitaji PIN.</p>
+        <div id="dvOldPinWrap" style="display:none">
+          <label for="dvOldPin" id="dvOldPinLabel">PIN ya sasa</label>
+          <input type="password" id="dvOldPin" inputmode="numeric" maxlength="8" autocomplete="off" />
+        </div>
+        <label for="dvNewPin">PIN Mpya</label>
+        <input type="password" id="dvNewPin" inputmode="numeric" maxlength="8" autocomplete="new-password" />
+        <button id="dvPinBtn">🔐 Hifadhi PIN</button>
+        <div class="msg" id="dvPinMsg"></div>
+      </div>
+
+      <div id="dvConnectBox">
+        <div class="dv-step">2) Unganisha Akaunti ya Demo</div>
+        <p class="sub" style="margin-bottom:12px">Nenda <b>developers.deriv.com</b> → tengeneza <b>Personal Access Token</b> ya akaunti yako ya <b>demo</b>, kwa ruhusa ndogo kabisa zinazohitajika kutrade (usiweke ruhusa ambazo hazihitajiki). Isimamishwe kwa PIN yako — token haionyeshwi tena baada ya kuhifadhiwa.</p>
+        <label for="dvToken">Deriv API Token</label>
+        <input type="password" id="dvToken" autocomplete="off" spellcheck="false" />
+        <label for="dvConnPin">PIN yako</label>
+        <input type="password" id="dvConnPin" inputmode="numeric" maxlength="8" autocomplete="off" />
+        <button id="dvConnectBtn">🔗 Unganisha (DEMO)</button>
+        <button class="secondary" id="dvDisconnectBtn" style="display:none">🗑️ Ondoa Akaunti Yangu</button>
+        <div class="msg" id="dvConnMsg"></div>
+      </div>
+
+      <div id="dvSwitchBox">
+        <div class="dv-step">3) Swichi za Trading</div>
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">💹 Trading</span>
+            <div class="toggle-hint" id="dvTradeHint">Ruhusu bot kufanya trades kwenye akaunti yako ya demo</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="dvTradeSw"><span class="slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div>
+            <span class="toggle-label">🤖 Auto-Trade</span>
+            <div class="toggle-hint" id="dvAutoHint">Bot ifungue trades kiotomatiki (inahitaji idhini ya msimamizi)</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="dvAutoSw"><span class="slider"></span></label>
+        </div>
+        <label for="dvSwitchPin" style="margin-top:12px">PIN (inahitajika kuwasha tu)</label>
+        <input type="password" id="dvSwitchPin" inputmode="numeric" maxlength="8" autocomplete="off" />
+        <div class="msg" id="dvSwitchMsg"></div>
+        <p class="sub" style="margin:10px 0 0">Vikomo vyako: <span id="dvLimits">—</span></p>
+      </div>
+    </div>
   </div>
 
   <!-- ============ SECTION 5: Billing / Malipo ============ -->
@@ -1629,6 +1699,122 @@
     loadAutomation();
     loadBilling();
   }
+
+  /* =========================================================
+     SECTION — Deriv (akaunti ya demo ya mteja)
+     ========================================================= */
+  (function () {
+    const $ = (id) => document.getElementById(id);
+    let ACC = null;
+    let busy = false;
+    const base = () => API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/deriv';
+
+    async function call(sub, body) {
+      const res = await fetch(base() + (sub ? '/' + sub : ''), body === undefined ? undefined : {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      if (!data.ok) throw new Error(data.error || 'Hitilafu isiyojulikana');
+      return data;
+    }
+
+    function badge(text, cls) {
+      const b = document.createElement('span'); b.className = 'dv-badge ' + cls; b.textContent = text; return b;
+    }
+
+    function render() {
+      const a = ACC; if (!a) return;
+      // Banner
+      const banner = $('dvBanner'); banner.style.display = 'none'; banner.textContent = '';
+      let msg = '';
+      if (!a.vaultReady) msg = '⚠️ Huduma hii bado haijawashwa na msimamizi.';
+      else if (a.killAll) msg = '🛑 Msimamizi amesimamisha trading kwa muda kwa wateja wote.';
+      else if (a.pinLockedUntil) msg = '🔒 PIN imefungwa kwa muda mpaka ' + new Date(a.pinLockedUntil).toLocaleTimeString('sw-TZ', { hour: '2-digit', minute: '2-digit' }) + '. Mwombe msimamizi akurejeshee ukihitaji.';
+      if (msg) { banner.textContent = msg; banner.style.display = 'block'; }
+
+      // Muhtasari
+      const sum = $('dvSummary'); sum.textContent = '';
+      if (!a.connected) {
+        sum.appendChild(badge('Hujaunganisha', 'dv-warn'));
+        sum.appendChild(document.createTextNode(' Hakuna akaunti ya Deriv iliyounganishwa.'));
+      } else {
+        sum.appendChild(badge(a.isDemo ? 'DEMO' : 'REAL', a.isDemo ? 'dv-ok' : 'dv-bad'));
+        sum.appendChild(badge(a.status === 'active' ? 'Hai' : 'Ina tatizo', a.status === 'active' ? 'dv-ok' : 'dv-bad'));
+        sum.appendChild(badge(a.adminApproved ? 'Msimamizi: ameidhinisha' : 'Msimamizi: bado', a.adminApproved ? 'dv-ok' : 'dv-warn'));
+        sum.appendChild(document.createElement('br'));
+        sum.appendChild(document.createTextNode('Akaunti: ' + (a.accountIdMasked || '—') + (a.currency ? ' (' + a.currency + ')' : '') + ' • Token: ' + (a.tokenHint || '—')));
+        if (a.lastError) { sum.appendChild(document.createElement('br')); sum.appendChild(document.createTextNode('⚠️ ' + a.lastError)); }
+      }
+
+      // PIN
+      const needOld = a.hasPin;
+      $('dvOldPinWrap').style.display = needOld ? 'block' : 'none';
+      $('dvOldPinLabel').textContent = a.mustChangePin ? 'PIN ya muda uliyopewa na msimamizi' : 'PIN ya sasa';
+      $('dvPinTitle').textContent = !a.hasPin ? '1) Weka PIN ya Trading' : (a.mustChangePin ? '1) Badilisha PIN ya Muda (lazima)' : '1) Badilisha PIN');
+      $('dvPinBtn').textContent = !a.hasPin ? '🔐 Weka PIN' : '🔐 Badilisha PIN';
+
+      // Connect & switches
+      const pinReady = a.hasPin && !a.mustChangePin;
+      $('dvConnectBox').style.opacity = pinReady ? '1' : '0.5';
+      $('dvConnectBtn').disabled = !pinReady || !a.vaultReady;
+      $('dvConnectBtn').textContent = a.connected ? '🔄 Badilisha Token (DEMO)' : '🔗 Unganisha (DEMO)';
+      $('dvDisconnectBtn').style.display = a.connected ? 'block' : 'none';
+
+      $('dvSwitchBox').style.display = a.connected ? 'block' : 'none';
+      $('dvTradeSw').checked = !!a.userEnabled;
+      $('dvAutoSw').checked = !!a.autoEnabled;
+      $('dvTradeSw').disabled = busy;
+      $('dvAutoSw').disabled = busy;
+      $('dvTradeHint').textContent = a.adminApproved ? 'Ruhusu bot kufanya trades kwenye akaunti yako ya demo' : 'Subiri msimamizi akuidhinishe kwanza';
+      $('dvAutoHint').textContent = a.autoApproved ? 'Auto-trade imeidhinishwa na msimamizi. (Injini ya auto-trade kwa akaunti yako inaandaliwa — swichi hii kwa sasa inahifadhi chaguo lako tu.)' : 'Inahitaji idhini ya msimamizi';
+      const l = a.limits || {};
+      $('dvLimits').textContent = 'stake ya juu $' + l.maxStake + ' • trades/siku ' + l.maxTradesDay + ' • hasara/siku $' + l.maxDailyLoss + ' • trades wazi ' + l.maxOpen;
+    }
+
+    async function load() {
+      if (!token) return;
+      try { ACC = (await call('')).account; render(); }
+      catch (e) { $('dvSummary').textContent = '❌ ' + e.message; }
+    }
+
+    async function act(btn, msgEl, fn, okText) {
+      if (busy) return; busy = true; if (btn) btn.disabled = true;
+      try { const r = await fn(); if (r && r.account) ACC = r.account; showMsg(msgEl, true, okText(r)); }
+      catch (e) { showMsg(msgEl, false, '❌ ' + e.message); }
+      finally { busy = false; if (btn) btn.disabled = false; await load(); }
+    }
+
+    $('dvPinBtn').addEventListener('click', () => {
+      const body = { newPin: $('dvNewPin').value, oldPin: ACC && ACC.hasPin ? $('dvOldPin').value : undefined };
+      act($('dvPinBtn'), $('dvPinMsg'), () => call('pin', body), () => '✅ PIN imehifadhiwa.')
+        .then(() => { $('dvNewPin').value = ''; $('dvOldPin').value = ''; });
+    });
+    $('dvConnectBtn').addEventListener('click', () => {
+      const body = { token: $('dvToken').value.trim(), pin: $('dvConnPin').value };
+      act($('dvConnectBtn'), $('dvConnMsg'), () => call('connect', body),
+        (r) => '✅ Akaunti ya demo imeunganishwa' + (r.balance != null ? ' (balance: ' + r.balance + ')' : '') + '. Subiri msimamizi akuidhinishe, kisha uwashe trading.')
+        .then(() => { $('dvToken').value = ''; $('dvConnPin').value = ''; });
+    });
+    $('dvDisconnectBtn').addEventListener('click', () => {
+      if (!confirm('Ondoa akaunti yako ya Deriv? Token itafutwa na trading itazimwa.')) return;
+      act($('dvDisconnectBtn'), $('dvConnMsg'), () => call('disconnect', {}), () => '✅ Akaunti imeondolewa.');
+    });
+    async function toggle(key, el) {
+      const on = el.checked;
+      const body = {}; body[key] = on; body.pin = on ? $('dvSwitchPin').value : undefined;
+      if (busy) { el.checked = !on; return; }
+      busy = true; el.disabled = true;
+      try { const r = await call('toggle', body); ACC = r.account; showMsg($('dvSwitchMsg'), true, on ? '✅ Imewashwa.' : '✅ Imezimwa.'); if (on) $('dvSwitchPin').value = ''; }
+      catch (e) { el.checked = !on; showMsg($('dvSwitchMsg'), false, '❌ ' + e.message); }
+      finally { busy = false; await load(); }
+    }
+    $('dvTradeSw').addEventListener('change', () => toggle('userEnabled', $('dvTradeSw')));
+    $('dvAutoSw').addEventListener('change', () => toggle('autoEnabled', $('dvAutoSw')));
+
+    document.querySelector('.section-tab[data-section="deriv"]').addEventListener('click', load);
+    if (params.get('section') === 'deriv') load();
+  })();
 </script>
 </body>
 </html>

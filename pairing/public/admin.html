@@ -352,6 +352,7 @@
       <button class="ghost" onclick="downloadBackup()">⬇️ Backup Kamili</button>
       <button class="danger" onclick="resetAllSessions()">🗑️ Futa Sessions Zote Chakavu</button>
       <button class="ghost" id="fxAllBtn" onclick="toggleForexAll()">💹 Forex: —</button>
+      <button class="ghost" id="dvKillBtn" onclick="toggleDerivKill()">📈 Deriv wateja: —</button>
       <button class="ghost" onclick="loadUsers()">↻ Refresh</button>
     </div>
 
@@ -402,6 +403,25 @@
     <div class="actrow">
       <span id="dForexState" style="align-self:center;font-size:13px;">—</span>
       <button class="ghost" id="dForexBtn" onclick="toggleForexUser()">—</button>
+    </div>
+    <div class="section-label">Akaunti ya Deriv ya Mteja (DEMO)</div>
+    <div id="dDerivState" style="font-size:13px;line-height:1.7;">—</div>
+    <div class="actrow">
+      <button class="ghost" id="dDvApproveBtn" onclick="derivAct(DV_CUR && DV_CUR.adminApproved ? 'revoke' : 'approve')">—</button>
+      <button class="ghost" id="dDvAutoBtn" onclick="derivAct(DV_CUR && DV_CUR.autoApproved ? 'revoke_auto' : 'approve_auto')">—</button>
+    </div>
+    <div class="actrow">
+      <button class="ghost" onclick="derivResetPin(false)">🔑 Reset PIN (nionyeshe)</button>
+      <button class="ghost" onclick="derivResetPin(true)">📩 Reset PIN + tuma DM kwa mteja</button>
+      <button class="danger" onclick="derivRemove()">🗑️ Futa Akaunti ya Deriv</button>
+    </div>
+    <div class="section-label">Vikomo vya Mteja</div>
+    <div class="actrow">
+      <input type="number" step="0.5" min="0" id="dvLimStake" placeholder="Stake ya juu $" style="flex:1;min-width:110px" />
+      <input type="number" step="1" min="0" id="dvLimTrades" placeholder="Trades/siku" style="flex:1;min-width:110px" />
+      <input type="number" step="1" min="0" id="dvLimLoss" placeholder="Hasara/siku $" style="flex:1;min-width:110px" />
+      <input type="number" step="1" min="0" id="dvLimOpen" placeholder="Trades wazi" style="flex:1;min-width:110px" />
+      <button class="ghost" onclick="derivSaveLimits()">💾 Hifadhi Vikomo</button>
     </div>
     <div class="toast" id="dOverviewMsg"></div>
   </div>
@@ -680,12 +700,104 @@
     } catch (e) { showToast('dOverviewMsg', false, e.message); }
   }
 
+
+  /* ============ Deriv ya wateja (DEMO) ============ */
+  let DV = { killAll: false, vaultReady: true, byPhone: new Map() };
+  let DV_CUR = null;
+  async function loadDeriv() {
+    try {
+      const d = await api('/api/admin/deriv');
+      DV = { killAll: !!d.killAll, vaultReady: !!d.vaultReady, byPhone: new Map((d.accounts || []).map(a => [String(a.phoneNumber), a])) };
+    } catch (e) { /* hali ya zamani inabaki */ }
+    renderDerivUi();
+  }
+  function renderDerivUi() {
+    const b = document.getElementById('dvKillBtn');
+    if (b) {
+      b.textContent = DV.killAll ? '🛑 Deriv wateja: IMESIMAMISHWA (bonyeza kurudisha)' : '📈 Deriv wateja: inaruhusiwa (bonyeza kusimamisha WOTE)';
+      b.className = DV.killAll ? 'danger' : 'ghost';
+    }
+    if (CURRENT_PHONE) renderDerivDetail();
+  }
+  function renderDerivDetail() {
+    const st = document.getElementById('dDerivState');
+    if (!st) return;
+    const a = DV.byPhone.get(String(CURRENT_PHONE)) || null;
+    DV_CUR = a;
+    const lines = [];
+    if (!DV.vaultReady) lines.push('⚠️ TOKENVAULT_KEY haijawekwa kwenye server — wateja hawawezi kuhifadhi token.');
+    if (!a) lines.push('Mteja hajaanza kuweka akaunti ya Deriv.');
+    else {
+      lines.push(`${a.connected ? (a.isDemo ? '🟢 DEMO' : '🔴 REAL') : '⚪ Haijaunganishwa'} • ${a.status}${a.accountIdMasked ? ' • ' + escapeHtml(a.accountIdMasked) : ''}${a.tokenHint ? ' • token ' + escapeHtml(a.tokenHint) : ''}`);
+      lines.push(`PIN: ${a.hasPin ? (a.mustChangePin ? '⏳ PIN ya muda (hajabadilisha)' : '✅ imewekwa') : '— haijawekwa'}${a.pinLockedUntil ? ' • 🔒 imefungwa' : ''}`);
+      lines.push(`Idhini ya admin: ${a.adminApproved ? '✅' : '❌'} • Auto: ${a.autoApproved ? '✅' : '❌'} • Mteja amewasha: trading ${a.userEnabled ? '✅' : '❌'}, auto ${a.autoEnabled ? '✅' : '❌'}`);
+      if (a.lastError) lines.push('⚠️ ' + escapeHtml(a.lastError));
+    }
+    st.innerHTML = lines.join('<br>');
+    const ap = document.getElementById('dDvApproveBtn'), au = document.getElementById('dDvAutoBtn');
+    ap.textContent = a && a.adminApproved ? '⛔ Ondoa idhini ya kutrade' : '✅ Idhinisha kutrade';
+    ap.className = a && a.adminApproved ? 'danger' : 'ghost'; ap.disabled = !a || !a.connected;
+    au.textContent = a && a.autoApproved ? '⛔ Ondoa idhini ya Auto-Trade' : '🤖 Idhinisha Auto-Trade';
+    au.className = a && a.autoApproved ? 'danger' : 'ghost'; au.disabled = !a || !a.adminApproved;
+    const l = (a && a.limits) || { maxStake: 5, maxTradesDay: 5, maxDailyLoss: 10, maxOpen: 2 };
+    document.getElementById('dvLimStake').value = l.maxStake;
+    document.getElementById('dvLimTrades').value = l.maxTradesDay;
+    document.getElementById('dvLimLoss').value = l.maxDailyLoss;
+    document.getElementById('dvLimOpen').value = l.maxOpen;
+  }
+  async function derivPost(body) {
+    return api('/api/admin/deriv', { method: 'POST', body: JSON.stringify(body) });
+  }
+  async function derivAct(action) {
+    if (!CURRENT_PHONE) return;
+    try {
+      await derivPost({ action, phone: CURRENT_PHONE });
+      await loadDeriv();
+      showToast('dOverviewMsg', true, 'Imehifadhiwa.');
+    } catch (e) { showToast('dOverviewMsg', false, e.message); }
+  }
+  async function derivSaveLimits() {
+    if (!CURRENT_PHONE) return;
+    try {
+      await derivPost({ action: 'set_limits', phone: CURRENT_PHONE, limits: {
+        maxStake: document.getElementById('dvLimStake').value,
+        maxTradesDay: document.getElementById('dvLimTrades').value,
+        maxDailyLoss: document.getElementById('dvLimLoss').value,
+        maxOpen: document.getElementById('dvLimOpen').value,
+      } });
+      await loadDeriv();
+      showToast('dOverviewMsg', true, 'Vikomo vimehifadhiwa.');
+    } catch (e) { showToast('dOverviewMsg', false, e.message); }
+  }
+  async function derivResetPin(dm) {
+    if (!CURRENT_PHONE) return;
+    if (!confirm(dm ? 'Kuweka PIN ya muda mpya na kuituma kwa mteja kwenye WhatsApp yake? Trading yake itazimwa hadi abadilishe PIN.' : 'Kuweka PIN ya muda mpya? Utaiona hapa mara moja tu. Trading yake itazimwa hadi abadilishe PIN.')) return;
+    try {
+      const r = await derivPost({ action: 'reset_pin', phone: CURRENT_PHONE, dm: !!dm });
+      await loadDeriv();
+      const extra = dm ? (r.dmSent ? ' (DM imetumwa kwa mteja.)' : ' (DM HAIKUTUMWA — bot yake haijaunganishwa; mpe PIN hii mwenyewe.)') : '';
+      showToast('dOverviewMsg', true, `PIN ya muda: ${r.tempPin} — mteja ataombwa kuibadilisha.${extra}`);
+    } catch (e) { showToast('dOverviewMsg', false, e.message); }
+  }
+  async function derivRemove() {
+    if (!CURRENT_PHONE || !confirm('Futa akaunti ya Deriv ya mteja huyu (token na PIN)? Haiwezi kurudishwa.')) return;
+    try { await derivPost({ action: 'remove', phone: CURRENT_PHONE }); await loadDeriv(); showToast('dOverviewMsg', true, 'Imefutwa.'); }
+    catch (e) { showToast('dOverviewMsg', false, e.message); }
+  }
+  async function toggleDerivKill() {
+    const next = !DV.killAll;
+    if (next && !confirm('Kusimamisha trading ya Deriv kwa wateja WOTE mara moja?')) return;
+    try { await derivPost({ action: next ? 'kill_all' : 'resume_all' }); await loadDeriv(); }
+    catch (e) { alert('❌ ' + e.message); }
+  }
+
   async function loadUsers() {
     const data = await api('/api/admin/users');
     ALL_USERS = data.users.sort((a, b) => b.pairedAt - a.pairedAt);
     renderStats();
     renderRows();
     loadForexAccess().then(renderRows);
+    loadDeriv();
   }
 
   document.getElementById('searchInput').addEventListener('input', renderRows);
@@ -808,6 +920,7 @@
     document.querySelectorAll('#dMediaTypeTabs .mtab')[0].click();
     document.querySelectorAll('#dSendModeTabs .mtab')[0].click();
     renderForexDetail();
+    renderDerivDetail();
     await refreshDetail();
     refreshBillingPane();
   }
