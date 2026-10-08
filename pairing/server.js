@@ -970,6 +970,43 @@ async function handlePairingRequest(req, res) {
             return sendJson(res, 200, { ok: true, count: trades.length, trades });
           }
 
+          // Futa historia ya trades (reset ya rekodi). Hatua 2: preview (hakuna kinachofutwa) kisha delete (confirm:true).
+          // Body: { mode:'all'|'date'|'last'|'first'|'range', from?, to?, count?, includeSignals?, confirm? }
+          // Trades zilizo wazi hazifutwi. Baada ya kufuta, auto-trader inalinganisha P/L ya leo/hasara mfululizo na DB.
+          if (req.method === 'POST' && (poPath === '/api/admin/po/history/preview' || poPath === '/api/admin/po/history/delete')) {
+            const body = await readJsonBody(req);
+            const opts = {
+              mode: String(body.mode || ''),
+              from: body.from,
+              to: body.to,
+              count: body.count,
+              includeSignals: body.includeSignals === true,
+            };
+            if (poPath.endsWith('/preview')) {
+              const pv = await pocketStore.previewDeleteTrades(opts);
+              return sendJson(res, pv.ok ? 200 : 400, pv);
+            }
+            if (body.confirm !== true) return sendJson(res, 400, { ok: false, error: 'Uthibitisho unahitajika (confirm).' });
+            // Kinga: kinachofutwa lazima kiwe kile kile ulichoonyeshwa kwenye preview (data haijabadilika).
+            if (body.expectCount != null) {
+              const now = await pocketStore.previewDeleteTrades(opts);
+              if (!now.ok) return sendJson(res, 400, now);
+              if (now.count !== Number(body.expectCount)) {
+                return sendJson(res, 409, { ok: false, error: `Data imebadilika tangu preview (ilikuwa ${body.expectCount}, sasa ${now.count}). Bonyeza "Angalia" tena.` });
+              }
+            }
+            const del = await pocketStore.deleteTrades(opts);
+            if (!del.ok) return sendJson(res, 400, del);
+            const risk = await pocketAuto.resyncRiskState().catch(() => null);
+            notifyOwnerWA(
+              `🖥️ *Historia ya Pocket Option imefutwa (Dashboard)*\n` +
+                `🗑️ ${del.label}: *${del.deleted}* (W${del.wins}/L${del.losses}, P/L ${del.net >= 0 ? '+' : '-'}$${Math.abs(del.net).toFixed(2)})` +
+                (del.signalsDeleted != null ? `\n📡 Signals zilizofutwa: ${del.signalsDeleted}` : ''),
+              'dashboard'
+            );
+            return sendJson(res, 200, { ok: true, ...del, risk });
+          }
+
           // Notifications za Pocket Option: swichi za DM kwa kila aina + anti-flood. GET = hali, POST = hifadhi.
           if (poPath === '/api/admin/po/notify-prefs') {
             if (req.method === 'GET') return sendJson(res, 200, { ok: true, prefs: await notifyPrefs.get(), categories: notifyPrefs.CATEGORIES });
