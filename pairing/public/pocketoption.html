@@ -497,11 +497,18 @@
     return '<span class="po-badge on">IMEWASHWA</span>' + (a.dryRun ? ' <span class="po-badge demo">🧪 DRY-RUN</span>' : '');
   }
 
+  function atLastErr(a) {
+    const e = (a.lastOrderErrors || [])[0];
+    const cooled = (a.cooledPairs || []).length ? '<br>⏳ Zimepumzishwa: ' + esc(a.cooledPairs.map((c) => c.pair + ' (' + inMins(c.until) + ')').join(', ')) : '';
+    return (e ? rel(e.at) + ' — <b>' + esc(e.pair) + ' ' + esc(e.dir) + '</b>: ' + esc(e.msg) + (e.scope === 'pair' ? ' <span class="po-warn">(jozi imepumzishwa)</span>' : '') : '—') + cooled;
+  }
+
   function renderAutoTrade() {
     const a = state.at;
     if (!a) { $('atMini').innerHTML = $('atStatus').innerHTML = '<div class="po-empty">Hali ya auto-trade haipatikani.</div>'; return; }
     const acct = state.bridge && state.bridge.ok ? (isDemo() ? '<span class="po-badge demo">DEMO</span>' : '<span class="po-badge real">REAL</span>') : '';
-    const pausedTxt = a.isPaused ? `<div class="po-warn" style="margin-top:6px;">⏸ ${esc(PAUSE_TEXT[a.pauseReason] || 'kwa muda')} — inaisha: ${inMins(a.pausedUntil)}</div>` : '';
+    const pausedTxt = a.isPaused ? `<div class="po-warn" style="margin-top:6px;">⏸ ${esc(PAUSE_TEXT[a.pauseReason] || 'kwa muda')} — inaisha: ${inMins(a.pausedUntil)}</div>` +
+      (a.pauseReason === 'order_failures' && a.pauseDetail ? `<div class="po-muted" style="font-size:12px;margin-top:4px;word-break:break-word;">🧾 ${esc(a.pauseDetail)}</div>` : '') : '';
 
     $('atMini').innerHTML = `${atBadge(a)} ${acct}
       <div class="po-note">${tfLabel(a.tf)} • nguvu ≥ ${a.minStrength}% • stake $${fmt(a.stake)} • wazi ${a.openTrades.length}/${a.maxConcurrent} • P/L leo <b class="${a.dailyPnl >= 0 ? 'po-up' : 'po-down'}">${signed(a.dailyPnl)}</b></div>${pausedTxt}`;
@@ -511,6 +518,7 @@
       <tr><td class="po-muted">Mzunguko ujao</td><td>${a.enabled ? `<span id="atNext" data-next="${Number(a.nextCycleAt) || 0}">${inMins(a.nextCycleAt)}</span>` : '—'}</td></tr>
       <tr><td class="po-muted">Mzunguko wa mwisho</td><td>${rel(a.lastCycleAt)}${a.running ? ' • <span class="po-warn">inachanganua...</span>' : ''}</td></tr>
       <tr><td class="po-muted">Mwisho kurukwa</td><td class="po-muted" style="font-size:12px;">${esc(a.lastSkipReason || '—')}</td></tr>
+      <tr><td class="po-muted">Kosa la mwisho la order</td><td class="po-muted" style="font-size:12px;word-break:break-word;">${atLastErr(a)}</td></tr>
     </tbody></table>${pausedTxt}`;
 
     $('atOn').disabled = a.enabled; $('atOff').disabled = !a.enabled;
