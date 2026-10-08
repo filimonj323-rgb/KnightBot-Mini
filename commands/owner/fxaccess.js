@@ -9,7 +9,9 @@
  *   .fxaccess check 2557XXXXXXXX -> angalia namba moja
  *   .fxaccess commands           -> orodha ya commands zinazofungwa
  *
- * Pairing bots zote zimefungwa kwa default. Bot kuu haiathiriwi.
+ * Ruhusa hii inafungua *forex signals* tu (.forex, .eurusd, ...). Commands za TRADING/akaunti (kufungua/kufunga
+ * order, auto-trade, balance, positions, Pocket Option...) zimefungwa KABISA kwa pairing bots — ruhusa haizifungui.
+ * Bot kuu haiathiriwi.
  */
 
 const access = require('../../utils/forexAccess');
@@ -33,7 +35,12 @@ module.exports = {
     const target = String(args[1] || '').toLowerCase();
 
     if (sub === 'commands') {
-      return reply(`🔒 *Commands zinazofungwa kwa pairing bots (${access.FOREX_COMMANDS.size})*\n\n${[...access.FOREX_COMMANDS].map((c) => '.' + c).join(' ')}`);
+      const fmtList = (set) => [...set].map((x) => '.' + x).join(' ');
+      return reply(
+        `✅ *Zinafunguliwa kwa ruhusa (signals tu)*\n${fmtList(access.SIGNAL_ONLY)}\n\n` +
+          `⛔ *Zimefungwa kabisa kwa pairing bots (trading/akaunti)*\n${fmtList(access.ACCOUNT_BOUND)}\n\n` +
+          `_Hadi kila pairing bot iwe na akaunti yake ya trading._`
+      );
     }
 
     if (sub === 'grant' || sub === 'revoke') {
@@ -42,14 +49,14 @@ module.exports = {
         const r = sub === 'grant' ? await access.grantAll() : await access.revokeAll();
         if (!r.ok) return reply(`❌ ${r.error}`);
         return reply(sub === 'grant'
-          ? '✅ Pairing bots *ZOTE* sasa zinaruhusiwa commands za forex.\n_Zima: .fxaccess revoke all_'
+          ? '✅ Pairing bots *ZOTE* sasa zinaruhusiwa *forex signals*. Commands za trading zinabaki zimefungwa.\n_Zima: .fxaccess revoke all_'
           : '🔒 Ruhusa ya "wote" imeondolewa. Walioruhusiwa mmoja mmoja wanabaki (angalia *.fxaccess*).');
       }
       const r = sub === 'grant' ? await access.grant(target) : await access.revoke(target);
       if (!r.ok) return reply(`❌ ${r.error}`);
       return reply(sub === 'grant'
-        ? `✅ *${r.phone}* ameruhusiwa commands za forex (inatumika mara moja).`
-        : (r.removed ? `🔒 *${r.phone}* amenyimwa tena commands za forex.` : `ℹ️ *${r.phone}* hakuwa kwenye orodha ya walioruhusiwa.`));
+        ? `✅ *${r.phone}* ameruhusiwa *forex signals* (inatumika mara moja). Commands za trading zinabaki zimefungwa.`
+        : (r.removed ? `🔒 *${r.phone}* amenyimwa tena forex signals.` : `ℹ️ *${r.phone}* hakuwa kwenye orodha ya walioruhusiwa.`));
     }
 
     if (sub === 'check') {
@@ -61,7 +68,8 @@ module.exports = {
     const l = await access.list();
     if (!l.ok) return reply(`❌ ${l.error}`);
     const lines = [
-      `💹 *Ruhusa ya Forex kwa Pairing Bots*`,
+      `💹 *Ruhusa ya Forex Signals kwa Pairing Bots*`,
+      `_(Commands za trading zimefungwa kabisa kwa pairing bots)_`,
       ``,
       l.all ? `🟢 Wote wameruhusiwa (*.fxaccess revoke all* kuzima)` : `🔒 Pairing bots zimefungwa (default)`,
       `👥 Walioruhusiwa mmoja mmoja: *${l.grants.length}*`,
