@@ -161,6 +161,77 @@ async function getPairStats({ tf = null, source = 'auto' } = {}) {
     .sort((a, b) => a.net - b.net);
 }
 
+// ── Saa za siku. EAT = UTC+3 (Tanzania, hakuna DST). Badilisha kwa env POCKET_TZ_OFFSET. ──
+const _tz = Number(process.env.POCKET_TZ_OFFSET);
+const TZ_OFFSET_H = process.env.POCKET_TZ_OFFSET && Number.isFinite(_tz) ? _tz : 3;
+const localHour = (ms = Date.now()) => new Date(Number(ms) + TZ_OFFSET_H * 3600000).getUTCHours();
+
+// Trades za auto zilizokamilika (WIN/LOSS; tie haihesabiwi). exclude(pair) -> true = ruka jozi hiyo.
+async function closedAutoTrades({ tf = null, source = 'auto', exclude = null } = {}) {
+  const rows = await getTradeHistory(HISTORY_FULL_CAP, { full: true });
+  return rows.filter((t) => {
+    if (t.win !== 1 && t.win !== 0) return false;
+    if (source && t.source !== source) return false;
+    if (tf && Number(t.expirySeconds) !== Number(tf)) return false;
+    if (t.win === 0 && Number(t.profit || 0) === 0) return false; // tie
+    if (exclude && exclude(t.pair)) return false;
+    return true;
+  });
+}
+
+// Takwimu kwa kila saa ya siku (0-23, saa za EAT) — saa ya KUFUNGULIWA kwa trade.
+async function getHourStats(opts = {}) {
+  const rows = await closedAutoTrades(opts);
+  const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, trades: 0, wins: 0, losses: 0, net: 0, pay: [] }));
+  for (const t of rows) {
+    const s = hours[localHour(t.openedAt)];
+    const profit = Number(t.profit || 0);
+    s.trades++;
+    s.net += profit;
+    if (t.win === 1) {
+      s.wins++;
+      if (Number(t.stake) > 0) s.pay.push((profit / Number(t.stake)) * 100);
+    } else s.losses++;
+  }
+  return hours.map((s) => {
+    const pay = s.pay.sort((a, b) => a - b);
+    const payout = pay.length ? Math.round(pay[Math.floor(pay.length / 2)]) : null;
+    return {
+      hour: s.hour,
+      trades: s.trades,
+      wins: s.wins,
+      losses: s.losses,
+      winRate: s.trades ? Math.round((s.wins / s.trades) * 1000) / 10 : null,
+      net: Math.round(s.net * 100) / 100,
+      payout,
+      breakeven: payout ? Math.round((10000 / (100 + payout)) * 10) / 10 : null,
+    };
+  });
+}
+
+// Trades zilizokamilika za saa moja (mpya kwanza). result: all | win | loss.
+async function getHourTrades({ hour, limit = 100, result = 'all', ...opts } = {}) {
+  const rows = await closedAutoTrades(opts);
+  const h = Number(hour);
+  const trades = [];
+  let total = 0;
+  for (const t of rows) {
+    if (localHour(t.openedAt) !== h) continue;
+    if (result === 'win' && t.win !== 1) continue;
+    if (result === 'loss' && t.win !== 0) continue;
+    total++;
+    if (trades.length < limit) {
+      const profit = Number(t.profit || 0);
+      trades.push({
+        orderId: t.orderId, pair: t.pair, direction: t.direction, stake: t.stake, expirySeconds: t.expirySeconds,
+        openedAt: t.openedAt, win: t.win, profit,
+        payout: t.win === 1 && Number(t.stake) > 0 ? Math.round((profit / Number(t.stake)) * 100) : null,
+      });
+    }
+  }
+  return { total, trades };
+}
+
 // ── Auto-trade (source = 'auto') ────────────────────────────────────────
 
 // Trades za auto ambazo bado ziko wazi (kwa kurejesha hali baada ya restart).
@@ -287,6 +358,10 @@ module.exports = {
   getAutoStats,
   getTradeHistory,
   getPairStats,
+  getHourStats,
+  getHourTrades,
+  localHour,
+  TZ_OFFSET_H,
   getClosedResult,
   saveSetting,
   deleteSetting,

@@ -77,6 +77,7 @@ const DEFAULTS = Object.freeze({
   newsFilter: true,
   minBacktest: 0, // % — 0 = imezimwa. >0: backtest ya "strong" lazima ifikie hii (angalau signals 8)
   blockedPairs: DEFAULT_BLOCKED, // jozi zisizotradiwa (angalia DEFAULT_BLOCKED)
+  blockedHours: [], // saa za siku (0-23, EAT) ambazo bot HAIFUNGUI trade mpya — dashboard: tab ya Saa
 });
 
 let cfg = { ...DEFAULTS };
@@ -97,7 +98,7 @@ let seq = 0;
 // orderId (au "pending:N" wakati order inafunguliwa) -> { pair, key, direction, stake, strength, openedAt }
 const positions = new Map();
 const seenSignals = new Set(); // pair|direction|candleTime — kuzuia kuingia mara mbili kwenye candle ileile
-const stats = { cycles: 0, signals: 0, opened: 0, dry: 0, late: 0, blocked: 0, failed: 0, pairBlocked: 0 };
+const stats = { cycles: 0, signals: 0, opened: 0, dry: 0, late: 0, blocked: 0, failed: 0, pairBlocked: 0, hourBlocked: 0 };
 
 // Kumbukumbu ya matukio ya hivi karibuni (RAM) — inaonyeshwa kwenye dashboard.
 const events = [];
@@ -182,6 +183,7 @@ async function loadConfig() {
     for (const k of Object.keys(DEFAULTS)) if (saved[k] !== undefined) cfg[k] = saved[k];
     cfg.stake = Math.min(HARD_MAX_STAKE, Math.max(MIN_STAKE, Number(cfg.stake) || DEFAULTS.stake));
     if (!Array.isArray(cfg.blockedPairs)) cfg.blockedPairs = [...DEFAULT_BLOCKED];
+    cfg.blockedHours = normalizeHours(cfg.blockedHours);
     cfg.maxTradesPerDay = Math.min(HARD_MAX_PER_DAY, Math.max(1, Math.floor(Number(cfg.maxTradesPerDay)) || DEFAULTS.maxTradesPerDay));
   } catch (err) {
     console.error('[pocketAuto] Config iliyohifadhiwa si sahihi, natumia default:', err.message);
@@ -192,6 +194,30 @@ const bool = (v) => ['on', 'true', '1', 'yes', 'ndio'].includes(String(v).toLowe
 
 // "#AAPL_otc" / "aapl_otc" / "AAPL OTC" -> "aaplotc". EURUSD na EURUSD_otc ni jozi TOFAUTI.
 const normPair = (x) => String(x || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+// Saa za siku zilizozimwa: namba kamili 0-23, bila marudio, zimepangwa.
+function normalizeHours(list) {
+  const set = new Set();
+  for (const x of Array.isArray(list) ? list : []) {
+    const n = Number(x);
+    if (Number.isInteger(n) && n >= 0 && n <= 23) set.add(n);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+function isBlockedHour(ms = Date.now()) {
+  return Array.isArray(cfg.blockedHours) && cfg.blockedHours.includes(pocketStore.localHour(ms));
+}
+/** Weka orodha kamili ya saa zilizozimwa (inabadilisha ile ya zamani). */
+async function setBlockedHours(list) {
+  if (!Array.isArray(list)) return { ok: false, error: 'hours lazima iwe orodha ya namba 0-23.' };
+  const hours = normalizeHours(list);
+  const added = hours.filter((h) => !(cfg.blockedHours || []).includes(h));
+  const removed = (cfg.blockedHours || []).filter((h) => !hours.includes(h));
+  cfg.blockedHours = hours;
+  await saveConfig();
+  console.log(`[pocketAuto] blockedHours => [${hours.join(',')}]`);
+  return { ok: true, hours, added, removed };
+}
 
 function isBlockedPair(pair) {
   const n = normPair(pair);
@@ -466,6 +492,7 @@ async function considerSignal(r) {
   if (!cfg.enabled) return;
   if (!r || r.direction === 'NEUTRAL' || r.weakMarket || r.strength < cfg.minStrength) return;
   if (isBlockedPair(r.pair)) { stats.pairBlocked++; return; } // jozi iliyoondolewa — kimya, bila kelele kwenye events
+  if (isBlockedHour()) { stats.hourBlocked++; return; } // saa iliyozimwa (dashboard > Saa) — kimya
   stats.signals++;
 
   // 1) Late-entry guard — signal inatokana na candle iliyofungwa; ikichelewa, bei imeshasogea.
@@ -798,6 +825,7 @@ module.exports = {
   setSetting,
   setSettings,
   editBlocked,
+  setBlockedHours,
   isBlockedPair,
   normPair,
   resume,
@@ -806,5 +834,5 @@ module.exports = {
   DEFAULTS,
   DEFAULT_BLOCKED,
   PAUSE_TEXT,
-  _internals: { runCycle, considerSignal, handleSettled, isBlockedPair }, // kwa majaribio tu
+  _internals: { runCycle, considerSignal, handleSettled, isBlockedPair, isBlockedHour }, // kwa majaribio tu
 };
