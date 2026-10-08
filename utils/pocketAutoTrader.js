@@ -93,12 +93,30 @@ let lastCycleAt = null;
 let lastSkipReason = null;
 let lastBridge = null; // { ok, connected, demo }
 let orderFailStreak = 0;
+
+// Makosa ya orders (kuonekana kwenye dashboard) + jozi zilizopumzishwa kwa muda.
+// Kosa la MALI (imefungwa/haipo kwenye orodha/haikuthibitishwa) halihesabiwi kwenye breaker ya bot nzima —
+// jozi hiyo tu inapumzishwa dk 30. Kosa la muunganisho/SSID na yasiyojulikana yanahesabiwa kama zamani.
+const recentOrderErrors = []; // { at, pair, dir, msg, scope } — mpya kwanza, max 5
+let pauseDetail = null;
+const pairCooldown = new Map(); // normPair -> { pair, until }
+const PAIR_COOLDOWN_MS = 30 * 60000;
+const GLOBAL_ERR_RE = /econn|enotfound|etimedout|fetch failed|socket|network|ssid|not connected|haijaunganishwa|unauthori|forbidden|session|login|auth/i;
+const PAIR_ERR_RE = /closed|not available|unavailable|not found|not open|not tradable|inactive|disabled|haipo kwenye|haipatikani|haikuthibitisha|timeout waiting|payout|invalid (asset|symbol|pair)|asset|market/i;
+const isPairLevelError = (msg) => !GLOBAL_ERR_RE.test(String(msg)) && PAIR_ERR_RE.test(String(msg));
+function isPairCoolingDown(pair) {
+  const n = normPair(pair), e = pairCooldown.get(n);
+  if (!e) return false;
+  if (e.until > Date.now()) return true;
+  pairCooldown.delete(n);
+  return false;
+}
 let seq = 0;
 
 // orderId (au "pending:N" wakati order inafunguliwa) -> { pair, key, direction, stake, strength, openedAt }
 const positions = new Map();
 const seenSignals = new Set(); // pair|direction|candleTime — kuzuia kuingia mara mbili kwenye candle ileile
-const stats = { cycles: 0, signals: 0, opened: 0, dry: 0, late: 0, blocked: 0, failed: 0, pairBlocked: 0, hourBlocked: 0 };
+const stats = { cycles: 0, signals: 0, opened: 0, dry: 0, late: 0, blocked: 0, failed: 0, pairBlocked: 0, hourBlocked: 0, cooldownSkipped: 0 };
 
 // Kumbukumbu ya matukio ya hivi karibuni (RAM) — inaonyeshwa kwenye dashboard.
 const events = [];
@@ -493,6 +511,7 @@ async function considerSignal(r) {
   if (!r || r.direction === 'NEUTRAL' || r.weakMarket || r.strength < cfg.minStrength) return;
   if (isBlockedPair(r.pair)) { stats.pairBlocked++; return; } // jozi iliyoondolewa — kimya, bila kelele kwenye events
   if (isBlockedHour()) { stats.hourBlocked++; return; } // saa iliyozimwa (dashboard > Saa) — kimya
+  if (isPairCoolingDown(r.pair)) { stats.cooldownSkipped++; return; } // jozi imepumzishwa baada ya order kushindwa — kimya
   stats.signals++;
 
   // 1) Late-entry guard — signal inatokana na candle iliyofungwa; ikichelewa, bei imeshasogea.
@@ -590,16 +609,28 @@ async function considerSignal(r) {
     positions.delete(resKey);
     tradesToday--;
     stats.failed++;
-    orderFailStreak++;
-    console.error(`[pocketAuto] ❌ Imeshindwa kufungua ${r.pair}:`, err.message);
-    logEvent('fail', `${r.pair} ${r.direction}: ${err.message}`);
-    if (orderFailStreak === 1 || orderFailStreak % 5 === 0) {
-      await notifyAs('warnings', `⚠️ *Auto-trade: order imeshindwa* — ${r.pair} ${r.direction}\n${err.message}`);
-    }
-    if (orderFailStreak >= 3 && !isPaused()) {
-      pausedUntil = Date.now() + 10 * 60000;
-      pauseReason = 'order_failures';
-      await notifyAs('breakers', '⏸️ Orders 3 zimeshindwa mfululizo — nasimama dakika 10 (angalia bridge/SSID/market).');
+    const errMsg = String((err && err.message) || err);
+    const pairLevel = isPairLevelError(errMsg);
+    recentOrderErrors.unshift({ at: Date.now(), pair: r.pair, dir: r.direction === 'BUY' ? 'UP' : 'DOWN', msg: errMsg.slice(0, 300), scope: pairLevel ? 'pair' : 'bot' });
+    recentOrderErrors.length = Math.min(recentOrderErrors.length, 5);
+    console.error(`[pocketAuto] ❌ Imeshindwa kufungua ${r.pair}:`, errMsg);
+    if (pairLevel) {
+      // Mali imefungwa/haipatikani: pumzisha jozi hii tu, usihesabu kwenye breaker ya bot nzima.
+      pairCooldown.set(normPair(r.pair), { pair: r.pair, until: Date.now() + PAIR_COOLDOWN_MS });
+      logEvent('fail', `${r.pair} ${r.direction}: ${errMsg} — jozi imepumzishwa dk 30`);
+      await notifyAs('warnings', `⚠️ *Auto-trade: ${r.pair} imepumzishwa dk 30* (mali imefungwa/haipatikani)\n${errMsg}`);
+    } else {
+      orderFailStreak++;
+      logEvent('fail', `${r.pair} ${r.direction}: ${errMsg}`);
+      if (orderFailStreak === 1 || orderFailStreak % 5 === 0) {
+        await notifyAs('warnings', `⚠️ *Auto-trade: order imeshindwa* — ${r.pair} ${r.direction}\n${errMsg}`);
+      }
+      if (orderFailStreak >= 3 && !isPaused()) {
+        pausedUntil = Date.now() + 10 * 60000;
+        pauseReason = 'order_failures';
+        pauseDetail = recentOrderErrors.slice(0, 3).map((e) => `${e.pair} ${e.dir}: ${e.msg}`).join(' | ');
+        await notifyAs('breakers', `⏸️ Orders 3 zimeshindwa mfululizo — nasimama dakika 10 (angalia bridge/SSID/market).\n\n🧾 Makosa:\n${recentOrderErrors.slice(0, 3).map((e) => `• ${e.pair} ${e.dir}: ${e.msg}`).join('\n')}`);
+      }
     }
   }
 }
@@ -811,6 +842,9 @@ function getStatus() {
     events: events.slice(),
     hardMaxStake: HARD_MAX_STAKE,
     hardMaxPerDay: HARD_MAX_PER_DAY,
+    lastOrderErrors: recentOrderErrors.slice(),
+    pauseDetail,
+    cooledPairs: [...pairCooldown.values()].filter((v) => v.until > Date.now()).map((v) => ({ pair: v.pair, until: v.until })),
   };
 }
 
@@ -834,5 +868,5 @@ module.exports = {
   DEFAULTS,
   DEFAULT_BLOCKED,
   PAUSE_TEXT,
-  _internals: { runCycle, considerSignal, handleSettled, isBlockedPair, isBlockedHour }, // kwa majaribio tu
+  _internals: { runCycle, considerSignal, handleSettled, isBlockedPair, isBlockedHour, isPairLevelError, isPairCoolingDown }, // kwa majaribio tu
 };
