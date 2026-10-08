@@ -38,6 +38,7 @@
       <div class="po-tab" data-pane="auto"><em>🤖</em>Auto-Trade</div>
       <div class="po-tab" data-pane="trade"><em>🎯</em>Trade</div>
       <div class="po-tab" data-pane="history"><em>🕘</em>History</div>
+      <div class="po-tab" data-pane="blacklist"><em>🚫</em>Blacklist</div>
     </div>
 
     <!-- MUHTASARI -->
@@ -271,6 +272,31 @@
         <div id="hBox"><div class="po-empty">Inapakia...</div></div>
       </div>
     </div>
+
+    <!-- BLACKLIST -->
+    <div class="po-pane" id="pane-blacklist">
+      <div class="po-card">
+        <h3><span>🚫 Blacklist ya Jozi (Auto-Trade)</span><button class="po-btn small" onclick="loadBlacklist()">🔄 Sasisha</button></h3>
+        <div class="po-filters" id="blChips"></div>
+        <div class="po-filters">
+          <input class="po-input" id="blSearch" placeholder="Tafuta jozi..." oninput="setBl('q', this.value)" style="width:auto;flex:1 1 140px;margin:0;padding:7px 10px;font-size:12px;" />
+          <select class="po-select" id="blSort" onchange="setBl('sort', this.value)">
+            <option value="net">Hasara kubwa kwanza</option>
+            <option value="wrlow">Win rate ya chini</option>
+            <option value="wrhigh">Win rate ya juu</option>
+            <option value="trades">Trades nyingi</option>
+            <option value="name">Jina (A-Z)</option>
+          </select>
+        </div>
+        <div class="po-sum" id="blSummary"></div>
+        <div id="blBox"><div class="po-empty">Fungua tab hii kupakia...</div></div>
+        <div class="po-filters" style="margin-top:12px;">
+          <button class="po-btn small" onclick="blBulk('reset')">↩️ Rudisha orodha ya default</button>
+          <button class="po-btn small" onclick="blBulk('clear')">🧹 Ruhusu jozi zote</button>
+        </div>
+        <div class="po-note">Win% = trades za auto zilizokamilika (WIN/LOSS). <b>BE%</b> = win rate ya kuvunja sawa kulingana na payout ya jozi hiyo; ikiwa Win% iko chini ya BE% jozi inapoteza. ⚠ = trades chini ya 20 (sampuli ndogo, usiamini sana). <b>Blacklist</b> inaizuia jozi isitradiwe na bot; <b>Fungua</b> inairuhusu tena. Mabadiliko yanatumika kwa signals mpya papo hapo na yanahifadhiwa.</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -326,6 +352,7 @@
   function openPane(name) {
     document.querySelectorAll('.po-tab').forEach((t) => t.classList.toggle('active', t.dataset.pane === name));
     document.querySelectorAll('.po-pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + name));
+    if (name === 'blacklist') loadBlacklist();
   }
   document.querySelectorAll('.po-tab').forEach((t) => t.addEventListener('click', () => openPane(t.dataset.pane)));
 
@@ -810,6 +837,103 @@
       : '<div class="po-empty">Hakuna trades zinazolingana.</div>';
   }
 
+
+  // ── Blacklist ya jozi (auto-trade) ───────────────────────────────────
+  let bl = { pairs: [], scope: 'tf', tf: null, show: 'all', sort: 'net', q: '', loaded: false };
+  const blNorm = (s) => String(s || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+  async function loadBlacklist() {
+    if (!bl.loaded) $('blBox').innerHTML = '<div class="po-empty">Inapakia...</div>';
+    try {
+      const d = await api('/api/admin/po/pair-stats?scope=' + bl.scope);
+      bl.pairs = d.pairs || []; bl.tf = d.tf; bl.loaded = true;
+      renderBlacklist();
+    } catch (e) {
+      $('blBox').innerHTML = '<div class="po-toast err" style="display:block;">❌ ' + esc(e.message) + '</div>';
+    }
+  }
+  function setBl(k, v) { bl[k] = v; if (k === 'scope') loadBlacklist(); else renderBlacklist(); }
+
+  function renderBlacklist() {
+    const chip = (k, v, l) => `<button class="po-btn small ${bl[k] === v ? 'active' : ''}" onclick="setBl('${k}','${v}')">${l}</button>`;
+    $('blChips').innerHTML = chip('show', 'all', 'Zote') + chip('show', 'blocked', '🚫 Zimezuiwa') + chip('show', 'open', '✅ Zinatradiwa') +
+      chip('scope', 'tf', 'Expiry ' + (bl.tf ? tfLabel(bl.tf) : 'ya sasa')) + chip('scope', 'all', 'Expiry zote');
+
+    const all = bl.pairs;
+    const blockedRows = all.filter((p) => p.blocked);
+    const blockedNet = blockedRows.reduce((s, p) => s + p.net, 0);
+    const tradedNet = all.filter((p) => !p.blocked).reduce((s, p) => s + p.net, 0);
+    $('blSummary').innerHTML =
+      `<div><b>${all.length}</b><span>Jozi</span></div><div><b class="po-down">${blockedRows.length}</b><span>Zimezuiwa</span></div>` +
+      `<div><b class="${blockedNet >= 0 ? 'po-up' : 'po-down'}">${signed(blockedNet)}</b><span>P/L ya zimezuiwa (historia)</span></div>` +
+      `<div><b class="${tradedNet >= 0 ? 'po-up' : 'po-down'}">${signed(tradedNet)}</b><span>P/L ya zinazotradiwa</span></div>`;
+
+    let rows = all.slice();
+    if (bl.show === 'blocked') rows = rows.filter((p) => p.blocked);
+    else if (bl.show === 'open') rows = rows.filter((p) => !p.blocked);
+    const q = bl.q.trim().toLowerCase();
+    if (q) rows = rows.filter((p) => p.pair.toLowerCase().includes(q));
+    const sorters = {
+      net: (a, b) => a.net - b.net,
+      wrlow: (a, b) => (a.winRate ?? 101) - (b.winRate ?? 101),
+      wrhigh: (a, b) => (b.winRate ?? -1) - (a.winRate ?? -1),
+      trades: (a, b) => b.trades - a.trades,
+      name: (a, b) => a.pair.localeCompare(b.pair),
+    };
+    rows.sort(sorters[bl.sort] || sorters.net);
+
+    $('blBox').innerHTML = rows.length
+      ? `<div class="po-scroll" style="max-height:560px;overflow-y:auto;"><table class="po-table"><thead><tr><th>Jozi</th><th>Trades</th><th>Win%</th><th>BE%</th><th>P/L</th><th></th></tr></thead><tbody>${
+          rows.map((p) => {
+            const below = p.winRate != null && p.breakeven != null && p.winRate < p.breakeven;
+            const wr = p.winRate == null ? '<span class="po-muted">—</span>' : `<span class="${below ? 'po-down' : 'po-up'}">${p.winRate}%</span> <span class="po-muted" style="font-size:11px;">(${p.wins}W-${p.losses}L)</span>`;
+            const btn = p.blocked
+              ? `<button class="po-btn small up" onclick="toggleBlock(this)" data-pair="${esc(encodeURIComponent(p.pair))}" data-blocked="1">✅ Fungua</button>`
+              : `<button class="po-btn small down" onclick="toggleBlock(this)" data-pair="${esc(encodeURIComponent(p.pair))}" data-blocked="0">🚫 Blacklist</button>`;
+            return `<tr${p.blocked ? ' style="opacity:.75;"' : ''}><td><b>${esc(p.pair)}</b>${p.blocked ? ' <span title="Imezuiwa">🚫</span>' : ''}</td>` +
+              `<td>${p.trades}${p.trades < 20 ? ' <span class="po-warn" title="Sampuli ndogo">⚠</span>' : ''}</td><td style="white-space:nowrap;">${wr}</td>` +
+              `<td class="po-muted">${p.breakeven == null ? '—' : p.breakeven + '%'}</td><td class="${p.net >= 0 ? 'po-up' : 'po-down'}">${p.trades ? signed(p.net) : '—'}</td><td>${btn}</td></tr>`;
+          }).join('')
+        }</tbody></table></div>`
+      : '<div class="po-empty">Hakuna jozi zinazolingana.</div>';
+  }
+
+  function applyBlocked(list) {
+    const set = new Set((list || []).map(blNorm));
+    bl.pairs.forEach((p) => { p.blocked = set.has(blNorm(p.pair)); });
+    // jozi zilizoongezwa lakini hazina trades kwenye orodha
+    const have = new Set(bl.pairs.map((p) => blNorm(p.pair)));
+    (list || []).forEach((b) => { if (!have.has(blNorm(b))) bl.pairs.push({ pair: b, trades: 0, wins: 0, losses: 0, winRate: null, net: 0, payout: null, breakeven: null, blocked: true }); });
+    // jozi zisizo na trades na zimefunguliwa -> ondoa kwenye orodha
+    bl.pairs = bl.pairs.filter((p) => p.trades > 0 || p.blocked);
+  }
+
+  async function toggleBlock(btn) {
+    const pair = decodeURIComponent(btn.dataset.pair), wasBlocked = btn.dataset.blocked === '1';
+    btn.disabled = true;
+    try {
+      const d = await api('/api/admin/po/blocked', { method: 'POST', body: JSON.stringify({ action: wasBlocked ? 'remove' : 'add', pairs: [pair] }) });
+      applyBlocked(d.blocked);
+      if (state.at) state.at.blockedPairs = d.blocked;
+      renderBlacklist();
+      snack((wasBlocked ? '✅ ' + pair + ' imefunguliwa — itatradiwa tena.' : '🚫 ' + pair + ' imezuiwa — haitatradiwa.'), true);
+    } catch (e) {
+      btn.disabled = false;
+      snack('❌ ' + e.message, false);
+    }
+  }
+
+  async function blBulk(action) {
+    const msg = action === 'reset' ? 'Rudisha orodha ya default (jozi zilizopendekezwa)? Mabadiliko yako ya mkono yatafutwa.' : 'Ruhusu jozi ZOTE zitradiwe tena (blacklist itafutwa)?';
+    if (!confirm(msg)) return;
+    try {
+      const d = await api('/api/admin/po/blocked', { method: 'POST', body: JSON.stringify({ action, pairs: [] }) });
+      applyBlocked(d.blocked);
+      if (state.at) state.at.blockedPairs = d.blocked;
+      renderBlacklist();
+      snack(action === 'reset' ? '↩️ Orodha ya default imerudishwa (' + d.blocked.length + ').' : '🧹 Blacklist imefutwa.', true);
+    } catch (e) { snack('❌ ' + e.message, false); }
+  }
 
   // ── Group la signals + matokeo (profit/loss) ─────────────────────────
   async function loadTargets(manual) {
