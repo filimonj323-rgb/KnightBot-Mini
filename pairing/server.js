@@ -77,6 +77,7 @@ const notifyPrefs = require('../utils/notifyPrefs');
 const mainConfig = require('../config');
 const pocketTrader = require('../utils/pocketOptionTrader');
 const pocketStore = require('../utils/pocketStore');
+const forexAccess = require('../utils/forexAccess');
 const pocketSignal = require('../utils/pocketSignal');
 const signalTracker = require('../utils/signalTracker');
 const pocketAuto = require('../utils/pocketAutoTrader');
@@ -610,6 +611,28 @@ async function handlePairingRequest(req, res) {
 
       if (req.method === 'GET' && req.url === '/api/admin/users') {
         return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
+      }
+
+      // ── Admin: ruhusa ya commands za forex kwa pairing bots ────────────────
+      // GET = hali (all + grants + commands). POST { action: 'grant'|'revoke'|'grant_all'|'revoke_all', phone? }
+      if (req.url.split('?')[0] === '/api/admin/forex-access') {
+        if (req.method === 'GET') {
+          const l = await forexAccess.list();
+          if (!l.ok) return sendJson(res, 500, l);
+          return sendJson(res, 200, { ...l, commands: [...forexAccess.FOREX_COMMANDS] });
+        }
+        if (req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const action = String(body.action || '');
+          let r;
+          if (action === 'grant') r = await forexAccess.grant(body.phone);
+          else if (action === 'revoke') r = await forexAccess.revoke(body.phone);
+          else if (action === 'grant_all') r = await forexAccess.grantAll();
+          else if (action === 'revoke_all') r = await forexAccess.revokeAll();
+          else return sendJson(res, 400, { ok: false, error: 'action lazima iwe grant, revoke, grant_all au revoke_all.' });
+          if (!r.ok) return sendJson(res, 400, r);
+          return sendJson(res, 200, { ...(await forexAccess.list()), changed: r });
+        }
       }
 
       // ── Admin: QR ya BOT KUU (si ya pairing bots za wateja — wale

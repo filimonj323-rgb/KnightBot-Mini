@@ -141,6 +141,13 @@ async function initSchema() {
       settingValue TEXT NOT NULL,
       updatedAt    INTEGER NOT NULL
     )`,
+    // Ruhusa ya commands za forex/trading kwa pairing bots. Kila mteja amefungwa (locked) hadi
+    // admin amruhusu. phoneNumber='*' = ruhusa kwa wote.
+    `CREATE TABLE IF NOT EXISTS forex_access (
+      phoneNumber TEXT PRIMARY KEY,
+      grantedAt   INTEGER NOT NULL,
+      note        TEXT
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_po_trades_open ON po_trades(closedAt)`,
     `CREATE INDEX IF NOT EXISTS idx_payments_phone ON payments(phoneNumber)`,
     `CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_open ON fx_auto_trades(closedAt)`,
