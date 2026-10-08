@@ -536,7 +536,7 @@
   function fillAutoForm() {
     const a = state.at; if (!a) return;
     const set = (id, v) => { $(id).value = String(v); };
-    set('fStake', a.stake); set('fStrength', a.minStrength); set('fMax', a.maxConcurrent); set('fPerday', a.maxTradesPerDay);
+    set('fStake', a.stake); set('fStrength', a.minStrength); set('fMax', a.maxConcurrent); set('fPerday', a.maxTradesPerDay); if (a.hardMaxPerDay) $('fPerday').max = a.hardMaxPerDay;
     set('fMaxloss', a.maxDailyLoss); set('fLosses', a.maxConsecLosses); set('fCooldown', a.cooldownMin);
     set('fExposure', a.maxCurrencyExposure); set('fBacktest', a.minBacktest);
     set('fNews', a.newsFilter ? 'on' : 'off'); set('fDry', a.dryRun ? 'on' : 'off');
