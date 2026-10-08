@@ -1114,6 +1114,37 @@ async function handlePairingRequest(req, res) {
             if (bits.length) notifyOwnerWA(`🖥️ *Auto-trade blacklist (Dashboard)*\n${bits.join('\n')}\n🚫 Jumla zilizoondolewa: ${r.blocked.length}`, 'dashboard');
             return sendJson(res, 200, { ok: true, blocked: r.blocked });
           }
+          // ── SAA za kutrade (EAT): takwimu kwa saa + zima/washa saa ─────────────
+          // GET hour-stats?scope=tf|all&pairs=active|all • GET hour-trades?hour=H&result=all|win|loss&limit=N
+          // POST hours { hours: [0-23,...] } — orodha kamili ya saa ambazo bot haifungui trade mpya.
+          if (req.method === 'GET' && (poPath === '/api/admin/po/hour-stats' || poPath === '/api/admin/po/hour-trades')) {
+            const st = pocketAuto.getStatus();
+            const opts = {
+              tf: poQuery.get('scope') === 'all' ? null : st.tf,
+              exclude: poQuery.get('pairs') === 'all' ? null : (p) => pocketAuto.isBlockedPair(p),
+            };
+            if (poPath === '/api/admin/po/hour-stats') {
+              const hours = await pocketStore.getHourStats(opts);
+              return sendJson(res, 200, { ok: true, tzOffset: pocketStore.TZ_OFFSET_H, tf: st.tf, blockedHours: st.blockedHours || [], hours });
+            }
+            const hour = parseInt(poQuery.get('hour'), 10);
+            if (!Number.isInteger(hour) || hour < 0 || hour > 23) return sendJson(res, 400, { ok: false, error: 'hour lazima iwe 0-23.' });
+            const result = ['win', 'loss'].includes(poQuery.get('result')) ? poQuery.get('result') : 'all';
+            const limit = Math.max(1, Math.min(parseInt(poQuery.get('limit') || '80', 10) || 80, 300));
+            const d = await pocketStore.getHourTrades({ ...opts, hour, result, limit });
+            return sendJson(res, 200, { ok: true, hour, total: d.total, trades: d.trades });
+          }
+          if (req.method === 'POST' && poPath === '/api/admin/po/hours') {
+            const body = await readJsonBody(req);
+            const r = await pocketAuto.setBlockedHours(body.hours);
+            if (!r.ok) return sendJson(res, 400, { ok: false, error: r.error });
+            const hh = (a) => a.map((h) => `${String(h).padStart(2, '0')}:00`).join(', ');
+            const bits = [];
+            if (r.added.length) bits.push(`⏸ Zimezimwa: ${hh(r.added)}`);
+            if (r.removed.length) bits.push(`▶️ Zimewashwa: ${hh(r.removed)}`);
+            if (bits.length) notifyOwnerWA(`🖥️ *Auto-trade saa (Dashboard)*\n${bits.join('\n')}\n⏰ Saa zilizozimwa sasa: ${r.hours.length ? hh(r.hours) : 'hakuna'}`, 'dashboard');
+            return sendJson(res, 200, { ok: true, hours: r.hours });
+          }
           // ── AUTO-TRADE (trade za kiotomatiki) — sawa na `.poauto ...` ──────────
           // GET: hali kamili. POST { action: 'on'|'off'|'resume'|'set', confirmReal?, settings? }
           if (poPath === '/api/admin/po/autotrade') {
