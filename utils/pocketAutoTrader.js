@@ -45,6 +45,18 @@ const HARD_MAX_STAKE = Number(process.env.POCKET_AUTO_MAX_STAKE || 25);
 const MAX_DELAY_MS = Number(process.env.POCKET_AUTO_MAX_DELAY_MS || 25000);
 const MIN_STAKE = 1; // Pocket Option: kiwango cha chini cha trade
 
+// Jozi zisizotradiwa na auto-trade (kutokana na uchambuzi wa History: payout ndogo au hasara ya kudumu).
+// Dhibiti kwa: .poauto block <jozi> | .poauto unblock <jozi> | .poauto block reset (rudisha hii)
+const DEFAULT_BLOCKED = Object.freeze([
+  // crypto (payout 23-48% — break-even haiwezekani)
+  'BCHEUR', 'BCHGBP', 'BCHJPY', 'BTCGBP', 'BTCJPY', 'BTCUSD', 'ETHUSD', 'LNKUSD', 'DASH_USD',
+  // indices za payout ~53% zenye hasara
+  '100GBP', '100GBP_otc', 'JPN225', 'D30EUR', 'D30EUR_otc', 'E50EUR', 'SP500_otc', 'DJI30_otc',
+  // win rate ya chini kwa trades nyingi
+  'EURNZD_otc', 'USDCHF', 'XAUUSD_otc', 'EURHUF_otc', '#AAPL_otc', '#BA_otc', 'EURUSD_otc',
+  'AUDUSD_otc', '#FB_otc', 'CHFJPY_otc', 'EURCHF_otc', 'NZDUSD_otc',
+]);
+
 const DEFAULTS = Object.freeze({
   enabled: false,
   dryRun: false,
@@ -61,6 +73,7 @@ const DEFAULTS = Object.freeze({
   maxCurrencyExposure: 1,
   newsFilter: true,
   minBacktest: 0, // % — 0 = imezimwa. >0: backtest ya "strong" lazima ifikie hii (angalau signals 8)
+  blockedPairs: DEFAULT_BLOCKED, // jozi zisizotradiwa (angalia DEFAULT_BLOCKED)
 });
 
 let cfg = { ...DEFAULTS };
@@ -81,7 +94,7 @@ let seq = 0;
 // orderId (au "pending:N" wakati order inafunguliwa) -> { pair, key, direction, stake, strength, openedAt }
 const positions = new Map();
 const seenSignals = new Set(); // pair|direction|candleTime — kuzuia kuingia mara mbili kwenye candle ileile
-const stats = { cycles: 0, signals: 0, opened: 0, dry: 0, late: 0, blocked: 0, failed: 0 };
+const stats = { cycles: 0, signals: 0, opened: 0, dry: 0, late: 0, blocked: 0, failed: 0, pairBlocked: 0 };
 
 // Kumbukumbu ya matukio ya hivi karibuni (RAM) — inaonyeshwa kwenye dashboard.
 const events = [];
@@ -165,12 +178,60 @@ async function loadConfig() {
     cfg = { ...DEFAULTS };
     for (const k of Object.keys(DEFAULTS)) if (saved[k] !== undefined) cfg[k] = saved[k];
     cfg.stake = Math.min(HARD_MAX_STAKE, Math.max(MIN_STAKE, Number(cfg.stake) || DEFAULTS.stake));
+    if (!Array.isArray(cfg.blockedPairs)) cfg.blockedPairs = [...DEFAULT_BLOCKED];
   } catch (err) {
     console.error('[pocketAuto] Config iliyohifadhiwa si sahihi, natumia default:', err.message);
   }
 }
 
 const bool = (v) => ['on', 'true', '1', 'yes', 'ndio'].includes(String(v).toLowerCase());
+
+// "#AAPL_otc" / "aapl_otc" / "AAPL OTC" -> "aaplotc". EURUSD na EURUSD_otc ni jozi TOFAUTI.
+const normPair = (x) => String(x || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+function isBlockedPair(pair) {
+  const n = normPair(pair);
+  return !!n && (cfg.blockedPairs || []).some((b) => normPair(b) === n);
+}
+
+/**
+ * Hariri orodha ya jozi zisizotradiwa. action: add | remove | clear | reset.
+ * Rudisha { ok, blocked, added, removed } au { ok:false, error }.
+ */
+async function editBlocked(action, names = []) {
+  const act = String(action || '').toLowerCase();
+  const list = Array.isArray(cfg.blockedPairs) ? cfg.blockedPairs : [];
+  const wanted = (Array.isArray(names) ? names : [names])
+    .flatMap((s) => String(s || '').split(/[\s,;]+/))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const added = [];
+  const removed = [];
+  let next = list.slice();
+
+  if (act === 'clear') {
+    removed.push(...next);
+    next = [];
+  } else if (act === 'reset') {
+    next = [...DEFAULT_BLOCKED];
+  } else if (act === 'add' || act === 'remove') {
+    if (!wanted.length) return { ok: false, error: 'Taja jozi angalau moja. Mfano: EURUSD_otc' };
+    for (const w of wanted) {
+      const n = normPair(w);
+      const idx = next.findIndex((b) => normPair(b) === n);
+      if (act === 'add' && idx === -1) { next.push(w); added.push(w); }
+      if (act === 'remove' && idx !== -1) { removed.push(next[idx]); next.splice(idx, 1); }
+    }
+    if (next.length > 300) return { ok: false, error: 'Orodha ni ndefu mno (kikomo 300).' };
+  } else {
+    return { ok: false, error: 'Kitendo si sahihi (add | remove | clear | reset).' };
+  }
+
+  cfg.blockedPairs = next;
+  await saveConfig();
+  console.log(`[pocketAuto] blockedPairs: ${act} (+${added.length} -${removed.length}) => ${next.length}`);
+  return { ok: true, blocked: next.slice(), added, removed };
+}
 
 /**
  * Thibitisha setting moja BILA kuihifadhi. Rudisha { ok, field, value } au { ok:false, error }.
@@ -400,6 +461,7 @@ function skip(r, why, counter) {
 async function considerSignal(r) {
   if (!cfg.enabled) return;
   if (!r || r.direction === 'NEUTRAL' || r.weakMarket || r.strength < cfg.minStrength) return;
+  if (isBlockedPair(r.pair)) { stats.pairBlocked++; return; } // jozi iliyoondolewa — kimya, bila kelele kwenye events
   stats.signals++;
 
   // 1) Late-entry guard — signal inatokana na candle iliyofungwa; ikichelewa, bei imeshasogea.
@@ -730,10 +792,14 @@ module.exports = {
   disable,
   setSetting,
   setSettings,
+  editBlocked,
+  isBlockedPair,
+  normPair,
   resume,
   getStatus,
   getStats,
   DEFAULTS,
+  DEFAULT_BLOCKED,
   PAUSE_TEXT,
-  _internals: { runCycle, considerSignal, handleSettled }, // kwa majaribio tu
+  _internals: { runCycle, considerSignal, handleSettled, isBlockedPair }, // kwa majaribio tu
 };

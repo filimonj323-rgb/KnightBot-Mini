@@ -123,6 +123,44 @@ async function getTradeHistory(limit = 200, { full = false } = {}) {
   }
 }
 
+// Takwimu kwa kila jozi (kwa dashboard ya Blacklist). Trades zilizokamilika tu (WIN/LOSS);
+// "tie" (profit 0, win 0 = stake imerudishwa) haihesabiwi. payout = wastani wa (profit/stake) ya ushindi (median).
+async function getPairStats({ tf = null, source = 'auto' } = {}) {
+  const rows = await getTradeHistory(HISTORY_FULL_CAP, { full: true });
+  const map = new Map();
+  for (const t of rows) {
+    if (t.win !== 1 && t.win !== 0) continue;
+    if (source && t.source !== source) continue;
+    if (tf && Number(t.expirySeconds) !== Number(tf)) continue;
+    const profit = Number(t.profit || 0);
+    if (t.win === 0 && profit === 0) continue; // tie
+    let s = map.get(t.pair);
+    if (!s) map.set(t.pair, (s = { pair: t.pair, trades: 0, wins: 0, losses: 0, net: 0, pay: [] }));
+    s.trades++;
+    s.net += profit;
+    if (t.win === 1) {
+      s.wins++;
+      if (Number(t.stake) > 0) s.pay.push((profit / Number(t.stake)) * 100);
+    } else s.losses++;
+  }
+  return [...map.values()]
+    .map((s) => {
+      const pay = s.pay.sort((a, b) => a - b);
+      const payout = pay.length ? Math.round(pay[Math.floor(pay.length / 2)]) : null;
+      return {
+        pair: s.pair,
+        trades: s.trades,
+        wins: s.wins,
+        losses: s.losses,
+        winRate: s.trades ? Math.round((s.wins / s.trades) * 1000) / 10 : null,
+        net: Math.round(s.net * 100) / 100,
+        payout,
+        breakeven: payout ? Math.round((10000 / (100 + payout)) * 10) / 10 : null,
+      };
+    })
+    .sort((a, b) => a.net - b.net);
+}
+
 // ── Auto-trade (source = 'auto') ────────────────────────────────────────
 
 // Trades za auto ambazo bado ziko wazi (kwa kurejesha hali baada ya restart).
@@ -248,6 +286,7 @@ module.exports = {
   getAutoRiskState,
   getAutoStats,
   getTradeHistory,
+  getPairStats,
   getClosedResult,
   saveSetting,
   deleteSetting,
