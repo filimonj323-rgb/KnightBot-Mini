@@ -1844,7 +1844,7 @@
       $('dvTradeSw').disabled = busy;
       $('dvAutoSw').disabled = busy;
       $('dvTradeHint').textContent = a.adminApproved ? 'Ruhusu bot kufanya trades kwenye akaunti yako ya demo' : 'Subiri msimamizi akuidhinishe kwanza';
-      $('dvAutoHint').textContent = a.autoApproved ? 'Auto-trade imeidhinishwa na msimamizi. (Injini ya auto-trade kwa akaunti yako inaandaliwa — swichi hii kwa sasa inahifadhi chaguo lako tu.)' : 'Inahitaji idhini ya msimamizi';
+      $('dvAutoHint').textContent = a.autoApproved ? 'Bot inafungua trades kiotomatiki kwenye akaunti yako ya demo (SL/TP lazima, ndani ya vikomo vyako). Arifa zinakuja WhatsApp.' : 'Inahitaji idhini ya msimamizi';
       const l = a.limits || {};
       $('dvLimits').textContent = 'stake ya juu $' + l.maxStake + ' • trades/siku ' + l.maxTradesDay + ' • hasara/siku $' + l.maxDailyLoss + ' • trades wazi ' + l.maxOpen;
     }
