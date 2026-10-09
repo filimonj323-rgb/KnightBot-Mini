@@ -1327,19 +1327,31 @@ const handleMessageImpl = async (sock, msg) => {
     if (!command) return;
 
     // Commands za FOREX/TRADING kwa PAIRING BOTS (utils/forexAccess.js):
-    //  • 'account' (kufungua/kufunga order, auto-trade, balance, positions...) = zimefungwa KABISA
-    //    hadi kila bot iwe na akaunti yake ya trading — ruhusa haizifungui.
-    //  • 'signal' (forex signals, uchambuzi tu) = zinahitaji ruhusa ya admin (.fxaccess / dashboard).
-    // Bot kuu haiguswi, na global owner (config.ownerNumber) haizuiwi hata akitumia pairing bot.
+    //  • 'own' (fxbuy, fxsell, positions, panic, fxclose) = akaunti ya Deriv ya MTEJA MWENYEWE — zinaruhusiwa TU kwa mteja
+    //    mwenyewe; global owner na watu wengine wanazuiwa (akaunti si yao). Vikomo/idhini viko ndani ya derivCustomerTrader.
+    //  • 'account' (auto-trade, takwimu za owner...) = zimefungwa KABISA kwa pairing bots.
+    //  • 'signal' (forex signals, uchambuzi tu) = zinahitaji ruhusa ya admin (.fxaccess / dashboard); global owner haizuiwi.
+    // Bot kuu haiguswi kabisa.
     if (sock?.pairingOwnerId) {
       const fxClass = forexAccess.classify(command);
       if (fxClass) {
         const senderNum = normalizeJid(normalizeJidWithLid(sender));
         const isGlobalOwner = config.ownerNumber.some((o) => normalizeJid(normalizeJidWithLid(o.includes('@') ? o : `${o}@s.whatsapp.net`)) === senderNum);
-        if (!isGlobalOwner) {
-          if (fxClass === 'account') return sock.sendMessage(from, { text: forexAccess.ACCOUNT_LOCKED_TEXT });
-          if (!(await forexAccess.isAllowed(sock.pairingOwnerId))) return sock.sendMessage(from, { text: forexAccess.LOCKED_TEXT });
-        }
+        // Mteja mwenyewe = namba ambayo bot hii imeunganishwa nayo (sock.user.id) au namba aliyojisajili nayo.
+        // Global owner (config.ownerNumber) SI "self" kwenye bot ya mteja — akaunti ya Deriv ni ya mteja.
+        const ownJid = sock?.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
+        const ownNum = ownJid ? normalizeJid(normalizeJidWithLid(ownJid)) : null;
+        const regNum = normalizeJid(String(sock.pairingOwnerId));
+        const isSelf = !!senderNum && (senderNum === ownNum || senderNum === regNum);
+        const decision = forexAccess.decide({
+          fxClass,
+          isGlobalOwner,
+          isSelf,
+          signalAllowed: fxClass === 'signal' && !isGlobalOwner ? await forexAccess.isAllowed(sock.pairingOwnerId) : false,
+        });
+        if (decision === 'self_only') return sock.sendMessage(from, { text: forexAccess.SELF_ONLY_TEXT });
+        if (decision === 'locked_account') return sock.sendMessage(from, { text: forexAccess.ACCOUNT_LOCKED_TEXT });
+        if (decision === 'locked_signal') return sock.sendMessage(from, { text: forexAccess.LOCKED_TEXT });
       }
     }
     
