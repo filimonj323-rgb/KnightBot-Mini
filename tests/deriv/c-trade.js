@@ -480,6 +480,19 @@ async function rej(fn, code) { try { await fn(); } catch (e) { if (code) assert.
   await t('/overview kwa mteja asiye na akaunti → 400 ujumbe, si 500', async () => {
     const r = await call('GET', url('overview', 'tok-A9')); assert(r.status === 400 || r.status === 200); assert.notStrictEqual(r.status, 500);
   });
+  await t('GET /history → rows + muhtasari wa mteja huyu tu, bila siri; limit/offset vinafanya kazi', async () => {
+    const r = await call('GET', url('history?limit=1&offset=0', 'tok-H1')); assert.strictEqual(r.status, 200, r.text);
+    assert(Array.isArray(r.data.rows) && r.data.rows.length <= 1); assert(r.data.summary && typeof r.data.summary.total === 'number' && 'winRate' in r.data.summary);
+    assert(!/OTPSECRET|tokH|encToken|pinHash|ownerPhone/.test(r.text));
+    const none = await call('GET', url('history', 'tok-A9')); assert.notStrictEqual(none.status, 500);
+  });
+  await t('POST /stake: kuongeza = ombi (pending); kupunguza = mara moja; ghairi; batili → 400', async () => {
+    let r = await call('POST', url('stake', 'tok-H1'), { stake: 4 }); assert.strictEqual(r.status, 200, r.text); assert(r.data.pending); assert.strictEqual(r.data.account.autoStakeRequest.stake, 4); assert.strictEqual(r.data.account.autoStake, 2);
+    r = await call('POST', url('stake', 'tok-H1'), { cancel: true }); assert.strictEqual(r.status, 200); assert.strictEqual(r.data.account.autoStakeRequest, null);
+    r = await call('POST', url('stake', 'tok-H1'), { stake: 1 }); assert(r.data.applied); assert.strictEqual(r.data.account.autoStake, 1);
+    for (const bad of [0, -3, 'abc', 500, 0.2]) { r = await call('POST', url('stake', 'tok-H1'), { stake: bad }); assert.strictEqual(r.status, 400, String(bad)); assert.strictEqual(r.data.code, 'BAD_STAKE'); }
+    assert(!/OTPSECRET|tokH|encToken|pinHash/.test(r.text));
+  });
   web.close();
 
   out('\n[12] Siri kwenye logs/makosa');

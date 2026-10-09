@@ -352,6 +352,85 @@ async function rej(fn, code) { try { await fn(); } catch (e) { if (code) assert.
     assert.strictEqual(rowsOf(Pm)[0].closedAt != null, true);
   });
 
+  out('\n[8b] Stake ya auto-trade: ombi la mteja + idhini ya admin');
+  const reqOf = (acc) => acc.autoStakeRequest && acc.autoStakeRequest.stake;
+  const proposalsOf = (phone) => F.requests.filter((r) => r.accountId === acctOf[phone] && r.proposal);
+  await t('default: stake ya msingi $2 (kikomo cha mteja kinaheshimiwa)', async () => {
+    const P = await mk(23); const a = await A.getPublic(P);
+    assert.strictEqual(a.autoStake, 2); assert.strictEqual(a.autoStakeApproved, null); assert.strictEqual(a.autoStakeRequest, null);
+  });
+  await t('kupunguza stake = mara moja (bila admin); engine inatumia stake mpya', async () => {
+    const P = await mk(24); const r = await A.requestAutoStake(P, 1);
+    assert(r.applied); assert.strictEqual(r.account.autoStake, 1); assert.strictEqual(reqOf(r.account), null);
+    resetFake(); strong(); await AUTO.runCycle();
+    const props = proposalsOf(P); assert(props.length >= 1 && props.every((x) => x.amount === 1 && x.limit_order.stop_loss <= 1));
+  });
+  await t('kuongeza stake = ombi linasubiri; stake ya sasa INAENDELEA kutumika hadi admin aidhinishe', async () => {
+    const P = await mk(25); const r = await A.requestAutoStake(P, 4);
+    assert(r.pending); assert.strictEqual(reqOf(r.account), 4); assert.strictEqual(r.account.autoStake, 2);
+    resetFake(); strong(); await AUTO.runCycle();
+    const props = proposalsOf(P); assert(props.length >= 1 && props.every((x) => x.amount === 2), 'stake ya ombi imetumika bila idhini!');
+  });
+  await t('admin anaidhinisha → stake mpya inatumika; mteja mwingine haathiriki; ombi linafutika', async () => {
+    const P = await mk(26), Q = await mk(27);
+    await A.requestAutoStake(P, 4);
+    const r = await A.adminAction(P, 'approve_stake');
+    assert.strictEqual(r.stakeResult.approved, true); assert.strictEqual(r.account.autoStake, 4); assert.strictEqual(reqOf(r.account), null); assert.strictEqual(r.account.autoStakeApproved, 4);
+    resetFake(); strong(); await AUTO.runCycle();
+    assert(proposalsOf(P).length >= 1 && proposalsOf(P).every((x) => x.amount === 4));
+    assert(proposalsOf(Q).length >= 1 && proposalsOf(Q).every((x) => x.amount === 2), 'mteja mwingine ameathiriwa!');
+  });
+  await t('admin anakataa → ombi linafutika, stake inabaki; approve/reject bila ombi → NO_REQUEST', async () => {
+    const P = await mk(28); await A.requestAutoStake(P, 5);
+    const r = await A.adminAction(P, 'reject_stake'); assert.strictEqual(r.stakeResult.approved, false); assert.strictEqual(r.stakeResult.stake, 5);
+    assert.strictEqual(r.account.autoStake, 2); assert.strictEqual(reqOf(r.account), null);
+    await rej(() => A.adminAction(P, 'approve_stake'), 'NO_REQUEST'); await rej(() => A.adminAction(P, 'reject_stake'), 'NO_REQUEST');
+  });
+  await t('ombi juu ya "Stake ya juu" ya mteja: admin hawezi kuidhinisha hadi aongeze kikomo', async () => {
+    const P = await mk(29, { limits: { maxStake: 3, maxTradesDay: 20, maxDailyLoss: 50, maxOpen: 5 } });
+    await A.requestAutoStake(P, 4);
+    await rej(() => A.adminAction(P, 'approve_stake'), 'ABOVE_LIMIT');
+    await A.adminAction(P, 'set_limits', { limits: { maxStake: 5 } });
+    const r = await A.adminAction(P, 'approve_stake'); assert.strictEqual(r.account.autoStake, 4);
+  });
+  await t('mteja anaghairi ombi lake', async () => {
+    const P = await mk(30); await A.requestAutoStake(P, 4); const a = await A.cancelAutoStakeRequest(P); assert.strictEqual(a.autoStakeRequest, null); assert.strictEqual(a.autoStake, 2);
+  });
+  await t('maombi batili: 0, hasi, tupu, chini ya min, juu ya kikomo kigumu, bila akaunti', async () => {
+    const P = await mk(31);
+    for (const bad of [0, -1, NaN, undefined, 'abc', 0.5, 999]) await rej(() => A.requestAutoStake(P, bad), 'BAD_STAKE');
+    await rej(() => A.requestAutoStake('255799999999', 3), 'NOT_CONNECTED');
+  });
+  await t('admin set_stake moja kwa moja; juu ya kikomo → ABOVE_LIMIT; tupu → default; stake inapunguzwa na maxStake ikishushwa', async () => {
+    const P = await mk(32);
+    let r = await A.adminAction(P, 'set_stake', { stake: 3 }); assert.strictEqual(r.account.autoStake, 3); assert.strictEqual(r.stakeResult.byAdmin, true);
+    await rej(() => A.adminAction(P, 'set_stake', { stake: 9 }), 'ABOVE_LIMIT'); await rej(() => A.adminAction(P, 'set_stake', { stake: 0.2 }), 'BAD_STAKE');
+    await A.adminAction(P, 'set_limits', { limits: { maxStake: 2 } }); assert.strictEqual((await A.getPublic(P)).autoStake, 2, 'maxStake ndogo lazima ipunguze stake');
+    r = await A.adminAction(P, 'set_stake', { stake: '' }); assert.strictEqual(r.account.autoStake, 2); assert.strictEqual(r.account.autoStakeApproved, null);
+  });
+  await t('revoke_auto na revoke zinaweka stake upya (ombi na iliyoidhinishwa zinafutwa)', async () => {
+    const P = await mk(33); await A.adminAction(P, 'set_stake', { stake: 4 }); await A.requestAutoStake(P, 5);
+    let a = (await A.adminAction(P, 'revoke_auto')).account; assert.strictEqual(a.autoStakeApproved, null); assert.strictEqual(a.autoStakeRequest, null); assert.strictEqual(a.autoStake, 2);
+  });
+
+  out('\n[8c] Historia ya mteja');
+  await t('historyView: muhtasari + kurasa; trades za mteja huyu tu; auto/manual zinatofautishwa', async () => {
+    const H = await mk(34, { auto: false }), O = await mk(35, { auto: false });
+    const ins = (phone, profit, ageMs, strength) => sqlite.prepare("INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, slUsd, tpUsd, openedAt, closedAt, profit, sellPrice, ownerPhone, signalStrength) VALUES (?, 'EURUSD', 'frxEURUSD', 'BUY', 2, 1, 2, ?, ?, ?, 2, ?, ?)").run('h' + Math.random().toString(16).slice(2), Date.now() - ageMs - 1000, Date.now() - ageMs, profit, phone, strength);
+    ins(H, 1.5, 4000, 80); ins(H, -1, 3000, 75); ins(H, 0.5, 2000, 70); ins(H, -0.5, 1000, null); ins(O, 9, 500, 90);
+    const v = await T.historyView(H, { limit: 2, offset: 0 });
+    assert.deepStrictEqual(v.summary, { total: 4, wins: 2, losses: 2, winRate: 50, pnl: 0.5, auto: 3, manual: 1 });
+    assert.strictEqual(v.rows.length, 2); assert.strictEqual(v.hasMore, true); assert.strictEqual(v.rows[0].source, 'manual'); assert(v.rows[0].closedAt >= v.rows[1].closedAt);
+    const v2 = await T.historyView(H, { limit: 2, offset: 2 }); assert.strictEqual(v2.rows.length, 2); assert.strictEqual(v2.hasMore, false);
+    assert.strictEqual(v2.rows.filter((x) => x.source === 'auto').length, 2);
+    const all = [...v.rows, ...v2.rows]; assert(!all.some((x) => x.profit === 9), 'trade ya mteja mwingine imeonekana!');
+    const empty = await T.historyView(await mk(36, { auto: false }), {}); assert.strictEqual(empty.summary.total, 0); assert.strictEqual(empty.summary.winRate, null);
+    assert(!JSON.stringify(v).includes('ownerPhone'));
+  });
+  await t('historyView: limit kubwa mno inapunguzwa (max 100)', async () => {
+    const P = await mk(37, { auto: false }); const v = await T.historyView(P, { limit: 100000, offset: -5 }); assert.strictEqual(v.rows.length, 0);
+  });
+
   out('\n[9] Hali ya injini (kwa admin) na usalama');
   await t('getStatus: haina namba kamili wala siri; running=true', async () => {
     const st = AUTO.getStatus(); assert.strictEqual(st.running, true); assert.strictEqual(st.enabled, true);
