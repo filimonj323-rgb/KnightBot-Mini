@@ -83,6 +83,46 @@ async function history(phone, limit = 20) {
   return r.rows;
 }
 
+/** Historia ya mteja (zilizofungwa tu), mpya kwanza, ukurasa kwa ukurasa. source: 'auto' | 'manual'. Mteja mmoja tu. */
+async function historyPage(phone, { limit = 20, offset = 0 } = {}) {
+  const n = Math.max(1, Math.min(Number(limit) || 20, 100));
+  const o = Math.max(0, Math.min(Number(offset) || 0, 100000));
+  const r = await db.query(
+    `SELECT contractId, code, direction, stake, buyPrice, sellPrice, profit, openedAt, closedAt, signalStrength
+     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL ORDER BY closedAt DESC LIMIT ? OFFSET ?`,
+    [String(phone), n, o]
+  );
+  return r.rows.map((x) => ({
+    contractId: String(x.contractId), code: x.code, direction: x.direction, stake: Number(x.stake),
+    buyPrice: x.buyPrice == null ? null : Number(x.buyPrice), sellPrice: x.sellPrice == null ? null : Number(x.sellPrice),
+    profit: x.profit == null ? null : Number(x.profit), openedAt: Number(x.openedAt), closedAt: Number(x.closedAt),
+    source: x.signalStrength != null ? 'auto' : 'manual',
+  }));
+}
+
+/** Muhtasari wa trades zote zilizofungwa za mteja: jumla, ushindi/hasara, win rate, P/L, na idadi ya auto vs mkono. */
+async function summary(phone) {
+  const r = await db.query(
+    `SELECT COUNT(*) AS n,
+            SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END) AS losses,
+            COALESCE(SUM(profit), 0) AS pnl,
+            SUM(CASE WHEN signalStrength IS NOT NULL THEN 1 ELSE 0 END) AS autoN
+     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL`,
+    [String(phone)]
+  );
+  const x = r.rows[0] || {};
+  const total = Number(x.n) || 0, wins = Number(x.wins) || 0, losses = Number(x.losses) || 0;
+  const decided = wins + losses;
+  return {
+    total, wins, losses,
+    winRate: decided ? Number(((wins / decided) * 100).toFixed(1)) : null,
+    pnl: Number((Number(x.pnl) || 0).toFixed(2)),
+    auto: Number(x.autoN) || 0,
+    manual: total - (Number(x.autoN) || 0),
+  };
+}
+
 /**
  * Trades za AUTO (signalStrength != NULL — za mkono zina NULL) zilizofungwa hivi karibuni za mteja huyu, mpya kwanza.
  * Zinatumika na injini ya auto-trade kuhesabu hasara mfululizo (cooldown). Mteja mmoja tu — hakuna kuvuja kwa wengine.
@@ -115,4 +155,4 @@ async function sweepStalePending(phone, olderThanMs = 5 * 60 * 1000) {
   );
 }
 
-module.exports = { reservePending, attachContract, dropPending, markClosed, openRows, todayStats, history, recentAuto, phonesWithOpenAuto, sweepStalePending, startOfUtcDay };
+module.exports = { reservePending, attachContract, dropPending, markClosed, openRows, todayStats, history, recentAuto, historyPage, summary, phonesWithOpenAuto, sweepStalePending, startOfUtcDay };

@@ -44,6 +44,18 @@ const CEILING = {
   maxOpen: Number(process.env.DERIV_CUSTOMER_MAX_OPEN_CEIL || 5),
 };
 
+// Stake ya auto-trade ya msingi (kabla ya mteja kuomba nyingine na admin kuidhinisha). Inapunguzwa hadi maxStake ya mteja.
+const AUTO_STAKE_DEFAULT = Number(process.env.DERIV_AUTO_STAKE_USD || 2);
+const MIN_STAKE = Number(process.env.DERIV_MIN_STAKE_USD || 1);
+const STAKE_RESET = 'autoStake = NULL, autoStakeReq = NULL, autoStakeReqAt = NULL';
+const r2 = (n) => Math.round(Number(n) * 100) / 100;
+/** Stake halisi ambayo auto-trade itatumia: iliyoidhinishwa (au default) ikipunguzwa hadi maxStake ya sasa. */
+function effectiveAutoStake(row) {
+  const base = row && Number(row.autoStake) > 0 ? Number(row.autoStake) : AUTO_STAKE_DEFAULT;
+  const cap = row && Number(row.maxStake) > 0 ? Number(row.maxStake) : base;
+  return r2(Math.min(base, cap));
+}
+
 const PIN_MAX_FAILS = 5;
 const PIN_LOCK_MS = 15 * 60 * 1000;
 const KILL_KEY = 'derivKillAll';
@@ -115,6 +127,9 @@ function toPublic(row) {
       maxDailyLoss: Number(row.maxDailyLoss),
       maxOpen: Number(row.maxOpen),
     },
+    autoStake: effectiveAutoStake(row),
+    autoStakeApproved: Number(row.autoStake) > 0 ? Number(row.autoStake) : null,
+    autoStakeRequest: Number(row.autoStakeReq) > 0 ? { stake: Number(row.autoStakeReq), at: row.autoStakeReqAt ? Number(row.autoStakeReqAt) : null } : null,
     lastError: row.lastError || null,
     connectedAt: row.connectedAt ? Number(row.connectedAt) : null,
     updatedAt: row.updatedAt ? Number(row.updatedAt) : null,
@@ -214,7 +229,7 @@ async function connect(phone, token, pin) {
   await touch(
     phone,
     `encToken = ?, tokenHint = ?, accountId = ?, isDemo = ?, currency = ?, status = 'active', lastError = NULL, connectedAt = ?,
-     userEnabled = 0, autoEnabled = 0` + (sameAccount ? '' : ', adminApproved = 0, autoApproved = 0'),
+     userEnabled = 0, autoEnabled = 0` + (sameAccount ? '' : `, adminApproved = 0, autoApproved = 0, ${STAKE_RESET}`),
     [enc, vault.hint(token), info.accountId, info.isDemo ? 1 : 0, info.currency, Date.now()]
   );
   events.emit('session-close', String(phone)); // token mpya → muunganisho wa zamani ufungwe
@@ -227,7 +242,7 @@ async function disconnect(phone) {
   await touch(
     phone,
     `encToken = NULL, tokenHint = NULL, accountId = NULL, currency = NULL, status = 'none', lastError = NULL, connectedAt = NULL,
-     userEnabled = 0, autoEnabled = 0, adminApproved = 0, autoApproved = 0`
+     userEnabled = 0, autoEnabled = 0, adminApproved = 0, autoApproved = 0, ${STAKE_RESET}`
   );
   events.emit('session-close', String(phone));
   return getPublic(phone);
@@ -282,7 +297,8 @@ async function canTrade(phone, { auto = false } = {}) {
     if (!row.adminApproved) return { ok: false, reason: 'not_approved' };
     if (!row.userEnabled) return { ok: false, reason: 'user_disabled' };
     if (auto && (!row.autoApproved || !row.autoEnabled)) return { ok: false, reason: 'auto_off' };
-    return { ok: true, accountId: row.accountId, isDemo: !!row.isDemo, limits: toPublic(row).limits };
+    const pub = toPublic(row);
+    return { ok: true, accountId: row.accountId, isDemo: !!row.isDemo, limits: pub.limits, autoStake: pub.autoStake };
   } catch (err) {
     console.error('[derivAccounts] canTrade imeshindwa (nazuia):', err.message);
     return { ok: false, reason: 'error' };
@@ -323,6 +339,34 @@ async function markInvalid(phone, message) {
   await ensureRow(phone);
   await touch(phone, `status = 'invalid', userEnabled = 0, autoEnabled = 0, lastError = ?`, [String(message || 'Token imekataliwa na Deriv').slice(0, 200)]);
   events.emit('session-close', String(phone));
+}
+
+/**
+ * Mteja anaomba stake ya auto-trade. Kupunguza (au kubaki sawa) = hatari ndogo → inatekelezwa mara moja.
+ * Kuongeza = ombi linasubiri idhini ya admin (approve_stake / reject_stake); stake ya sasa inaendelea hadi aidhinishe.
+ * Hakuna PIN (ombi halibadilishi chochote hadi admin aidhinishe); route ina rate limit.
+ */
+async function requestAutoStake(phone, stake) {
+  const row = await getRow(phone);
+  if (!row || !row.encToken) throw new DerivAccountError('Unganisha akaunti ya Deriv kwanza.', 'NOT_CONNECTED');
+  const v = r2(stake);
+  if (!Number.isFinite(v) || v <= 0) throw new DerivAccountError('Stake lazima iwe namba > 0.', 'BAD_STAKE');
+  if (v < MIN_STAKE) throw new DerivAccountError(`Stake ni ndogo mno (chini ya $${MIN_STAKE}).`, 'BAD_STAKE');
+  if (v > CEILING.maxStake) throw new DerivAccountError(`Stake haiwezi kuzidi $${CEILING.maxStake}.`, 'BAD_STAKE');
+  const current = effectiveAutoStake(row);
+  if (v <= current) {
+    await touch(phone, 'autoStake = ?, autoStakeReq = NULL, autoStakeReqAt = NULL', [v]);
+    return { applied: true, stake: v, account: await getPublic(phone) };
+  }
+  await touch(phone, 'autoStakeReq = ?, autoStakeReqAt = ?', [v, Date.now()]);
+  return { pending: true, stake: v, account: await getPublic(phone) };
+}
+
+/** Mteja anaondoa ombi lake linalosubiri. */
+async function cancelAutoStakeRequest(phone) {
+  await ensureRow(phone);
+  await touch(phone, 'autoStakeReq = NULL, autoStakeReqAt = NULL');
+  return getPublic(phone);
 }
 
 /**
@@ -371,15 +415,37 @@ async function adminAction(phone, action, payload = {}) {
       await touch(phone, 'adminApproved = 1');
       break;
     case 'revoke': // inazima kila kitu cha mteja huyu
-      await touch(phone, 'adminApproved = 0, autoApproved = 0, userEnabled = 0, autoEnabled = 0');
+      await touch(phone, `adminApproved = 0, autoApproved = 0, userEnabled = 0, autoEnabled = 0, ${STAKE_RESET}`);
       break;
     case 'approve_auto':
       if (!row.adminApproved) throw new DerivAccountError('Mwidhinishe kutrade kwanza.', 'NOT_APPROVED');
       await touch(phone, 'autoApproved = 1');
       break;
     case 'revoke_auto':
-      await touch(phone, 'autoApproved = 0, autoEnabled = 0');
+      await touch(phone, `autoApproved = 0, autoEnabled = 0, ${STAKE_RESET}`);
       break;
+    case 'approve_stake': { // idhinisha ombi la stake ya auto-trade la mteja
+      const req = Number(row.autoStakeReq);
+      if (!(req > 0)) throw new DerivAccountError('Mteja hana ombi la stake linalosubiri.', 'NO_REQUEST');
+      if (req > Number(row.maxStake)) throw new DerivAccountError(`Stake iliyoombwa ($${req}) inazidi "Stake ya juu" ya mteja ($${row.maxStake}). Ongeza kikomo kwanza (Vikomo vya Mteja), kisha idhinisha.`, 'ABOVE_LIMIT');
+      await touch(phone, 'autoStake = ?, autoStakeReq = NULL, autoStakeReqAt = NULL', [req]);
+      return { account: await getPublic(phone), stakeResult: { approved: true, stake: req } };
+    }
+    case 'reject_stake': {
+      const req = Number(row.autoStakeReq);
+      if (!(req > 0)) throw new DerivAccountError('Mteja hana ombi la stake linalosubiri.', 'NO_REQUEST');
+      await touch(phone, 'autoStakeReq = NULL, autoStakeReqAt = NULL');
+      return { account: await getPublic(phone), stakeResult: { approved: false, stake: req } };
+    }
+    case 'set_stake': { // admin anaweka moja kwa moja; thamani tupu = rudi kwenye default
+      const raw = payload.stake;
+      if (raw === null || raw === undefined || raw === '') { await touch(phone, STAKE_RESET); break; }
+      const v = r2(num(raw, 'Stake ya auto-trade', CEILING.maxStake));
+      if (v < MIN_STAKE) throw new DerivAccountError(`Stake ni ndogo mno (chini ya $${MIN_STAKE}).`, 'BAD_STAKE');
+      if (v > Number(row.maxStake)) throw new DerivAccountError(`Stake ($${v}) inazidi "Stake ya juu" ya mteja ($${row.maxStake}). Ongeza kikomo kwanza.`, 'ABOVE_LIMIT');
+      await touch(phone, 'autoStake = ?, autoStakeReq = NULL, autoStakeReqAt = NULL', [v]);
+      return { account: await getPublic(phone), stakeResult: { approved: true, stake: v, byAdmin: true } };
+    }
     case 'allow_real':
       await touch(phone, 'realAllowed = 1');
       break;
@@ -425,6 +491,10 @@ module.exports = {
   setSwitches,
   canTrade,
   listAutoReady,
+  requestAutoStake,
+  cancelAutoStakeRequest,
+  effectiveAutoStake,
+  AUTO_STAKE_DEFAULT,
   getTokenForTrading,
   getTokenForManage,
   markInvalid,

@@ -255,6 +255,13 @@ function syncClosed(phone) {
   });
 }
 
+/** Historia kamili ya mteja (kutoka DB) + muhtasari. Inajaribu kwanza kusasisha trades zilizofungwa na Deriv; ikishindikana inaonyesha ilichonacho. */
+async function historyView(phone, { limit = 20, offset = 0 } = {}) {
+  try { await syncClosed(phone); } catch { /* si lazima — DB ina historia tuliyo nayo */ }
+  const [rows, summary] = await Promise.all([trades.historyPage(phone, { limit, offset }), trades.summary(phone)]);
+  return { rows, summary, hasMore: Number(offset) + rows.length < summary.total };
+}
+
 function overview(phone) {
   return withLock(phone, async () => {
     try {
@@ -286,4 +293,4 @@ function overview(phone) {
   });
 }
 
-module.exports = { TradeError, PAIRS, events, openTrade, closeTrade, closeAll, overview, syncClosed, _validate: validate };
+module.exports = { TradeError, PAIRS, events, openTrade, closeTrade, closeAll, overview, syncClosed, historyView, _validate: validate };

@@ -21,7 +21,8 @@
  *   DERIV_CUSTOMER_AUTO_ENABLED         — "false" kuzima injini nzima (default: true; bado inahitaji idhini ya admin + mteja kwa kila akaunti)
  *   DERIV_AUTO_CHECK_INTERVAL_MS        — muda kati ya mizunguko (default: AUTO_TRADE_CHECK_INTERVAL_MS au saa 1)
  *   DERIV_AUTO_POLL_MS                  — muda wa kuangalia trades zilizofungwa kwa arifa (default: dakika 3)
- *   DERIV_AUTO_STAKE_USD                — stake ya auto-trade (default 2; inapunguzwa hadi maxStake ya mteja)
+ *   DERIV_AUTO_STAKE_USD                — stake ya msingi ya auto-trade (default 2). Mteja anaweza kuomba nyingine; admin akiidhinisha
+ *                                         ndiyo inatumika (derivAccounts.requestAutoStake). Daima inapunguzwa hadi maxStake ya mteja.
  *   DERIV_AUTO_MULTIPLIER               — 100/200/300/500/800 (default 100)
  *   DERIV_AUTO_MAX_CONSECUTIVE_LOSSES   — default 3
  *   DERIV_AUTO_COOLDOWN_MS              — default saa 4
@@ -41,7 +42,7 @@ const autoTrader = require('./autoTrader');
 const ENABLED = String(process.env.DERIV_CUSTOMER_AUTO_ENABLED ?? 'true').toLowerCase() !== 'false';
 const CHECK_INTERVAL_MS = Number(process.env.DERIV_AUTO_CHECK_INTERVAL_MS || process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 * 60 * 1000);
 const POLL_MS = Number(process.env.DERIV_AUTO_POLL_MS || 3 * 60 * 1000);
-const AUTO_STAKE = Number(process.env.DERIV_AUTO_STAKE_USD || 2);
+const AUTO_STAKE = accounts.AUTO_STAKE_DEFAULT; // stake ya msingi; mteja anaweza kuwa na nyingine iliyoidhinishwa na admin (gate.autoStake)
 const MULTIPLIER = (() => {
   const m = Number(process.env.DERIV_AUTO_MULTIPLIER || 100);
   return [100, 200, 300, 500, 800].includes(m) ? m : 100;
@@ -153,7 +154,7 @@ async function processCustomer(phone, candidates) {
     try { live = await getSession(phone).getPortfolio(); } catch (err) { res.skipped = 'portfolio'; return res; }
     const openList = live.map((p) => ({ code: String(p.symbol || '').replace(/^frx/i, '').toUpperCase(), direction: /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL' }));
 
-    const stake = Math.min(AUTO_STAKE, gate.limits.maxStake);
+    const stake = Math.min(Number(gate.autoStake) > 0 ? Number(gate.autoStake) : AUTO_STAKE, gate.limits.maxStake);
     for (const c of candidates) {
       const dir = c.sig.direction;
       if (openList.some((p) => p.code === c.code)) continue;
