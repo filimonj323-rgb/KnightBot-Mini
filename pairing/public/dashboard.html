@@ -676,6 +676,35 @@
         <div class="msg" id="dvSwitchMsg"></div>
         <p class="sub" style="margin:10px 0 0">Vikomo vyako: <span id="dvLimits">—</span></p>
       </div>
+
+      <div id="dvTradeBox" style="display:none">
+        <div class="dv-step">4) Trade (DEMO)</div>
+        <div class="dv-box" id="dvOverview">Bonyeza "Onyesha upya" kuona balance na positions zako.</div>
+        <button class="secondary" id="dvRefreshBtn">🔄 Onyesha upya</button>
+        <div id="dvPositions" style="margin-top:10px"></div>
+        <button class="secondary" id="dvCloseAllBtn" style="display:none">🛑 Funga Trades Zote</button>
+
+        <div class="dv-step">Fungua Trade Mpya</div>
+        <div class="dv-box" id="dvTradeNote" style="display:none"></div>
+        <label for="dvPair">Jozi</label>
+        <select id="dvPair"></select>
+        <label for="dvDir">Upande</label>
+        <select id="dvDir"><option value="BUY">BUY (panda)</option><option value="SELL">SELL (shuka)</option></select>
+        <label for="dvStake">Stake ($)</label>
+        <input type="text" id="dvStake" inputmode="decimal" placeholder="mfano 2" />
+        <label for="dvSl">Stop Loss ($) — lazima</label>
+        <input type="text" id="dvSl" inputmode="decimal" placeholder="mfano 1" />
+        <label for="dvTp">Take Profit ($) — lazima</label>
+        <input type="text" id="dvTp" inputmode="decimal" placeholder="mfano 2" />
+        <label for="dvMult">Multiplier</label>
+        <select id="dvMult"><option>100</option><option>200</option><option>300</option><option>500</option><option>800</option></select>
+        <label for="dvTradePin">PIN yako</label>
+        <input type="password" id="dvTradePin" inputmode="numeric" maxlength="8" autocomplete="off" />
+        <button id="dvTradeBtn">🚀 Fungua Trade</button>
+        <div class="msg" id="dvTradeMsg"></div>
+        <div class="dv-step">Trades za Hivi Karibuni</div>
+        <div id="dvRecent" style="font-size:12.5px;line-height:1.7;color:var(--muted)">—</div>
+      </div>
     </div>
   </div>
 
@@ -1762,6 +1791,7 @@
       $('dvDisconnectBtn').style.display = a.connected ? 'block' : 'none';
 
       $('dvSwitchBox').style.display = a.connected ? 'block' : 'none';
+      $('dvTradeBox').style.display = a.connected ? 'block' : 'none';
       $('dvTradeSw').checked = !!a.userEnabled;
       $('dvAutoSw').checked = !!a.autoEnabled;
       $('dvTradeSw').disabled = busy;
@@ -1812,8 +1842,90 @@
     $('dvTradeSw').addEventListener('change', () => toggle('userEnabled', $('dvTradeSw')));
     $('dvAutoSw').addEventListener('change', () => toggle('autoEnabled', $('dvAutoSw')));
 
-    document.querySelector('.section-tab[data-section="deriv"]').addEventListener('click', load);
-    if (params.get('section') === 'deriv') load();
+
+    // ---- Trade (DEMO): overview, fungua, funga ----
+    const PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY'];
+    PAIRS.forEach((p) => { const o = document.createElement('option'); o.value = p; o.textContent = p; $('dvPair').appendChild(o); });
+    const money = (n) => (n == null || !isFinite(n) ? 'N/A' : (n >= 0 ? '+' : '') + Number(n).toFixed(2));
+    const REASONS = {
+      kill_all: 'Msimamizi amesimamisha trading kwa muda.', not_approved: 'Msimamizi bado hajakuruhusu kutrade.',
+      user_disabled: 'Trading imezimwa kwako — iwashe kwenye swichi hapo juu.', inactive: 'Token ina tatizo — iunganishe upya.',
+      not_connected: 'Hujaunganisha akaunti.', real_not_allowed: 'Akaunti ya REAL haijaruhusiwa.', error: 'Hitilafu ya ndani.',
+    };
+
+    function renderOverview(o) {
+      const box = $('dvOverview'); box.textContent = '';
+      box.appendChild(document.createTextNode('💰 Balance: ' + (o.balance ? o.balance.currency + ' ' + o.balance.amount : 'N/A')));
+      box.appendChild(document.createElement('br'));
+      box.appendChild(document.createTextNode('📅 Leo: trades ' + o.today.opened + '/' + o.limits.maxTradesDay + ' • hasara $' + o.today.lossToday + '/' + o.limits.maxDailyLoss + ' • P/L ' + money(o.today.pnlToday)));
+
+      const list = $('dvPositions'); list.textContent = '';
+      o.positions.forEach((p) => {
+        const row = document.createElement('div'); row.className = 'dv-box'; row.style.display = 'flex'; row.style.justifyContent = 'space-between'; row.style.alignItems = 'center'; row.style.gap = '10px';
+        const info = document.createElement('div');
+        info.textContent = (p.shortcode || p.symbol || p.contractId) + ' • buy $' + p.buyPrice + ' • sasa $' + (p.bidPrice == null ? 'N/A' : p.bidPrice) + ' • P/L ' + money(p.profit);
+        const b = document.createElement('button'); b.className = 'secondary'; b.style.width = 'auto'; b.style.margin = '0'; b.textContent = 'Funga';
+        b.addEventListener('click', () => closeOne(p.contractId, b));
+        row.appendChild(info); row.appendChild(b); list.appendChild(row);
+      });
+      if (!o.positions.length) { const e = document.createElement('div'); e.className = 'sub'; e.textContent = '📭 Hakuna trade iliyo wazi.'; list.appendChild(e); }
+      $('dvCloseAllBtn').style.display = o.positions.length ? 'block' : 'none';
+
+      const note = $('dvTradeNote');
+      if (!o.canTrade) { note.style.display = 'block'; note.textContent = '🔒 ' + (REASONS[o.canTradeReason] || 'Kufungua trade hakuruhusiwi sasa.'); }
+      else { note.style.display = 'none'; }
+      $('dvTradeBtn').disabled = !o.canTrade;
+
+      const rec = $('dvRecent'); rec.textContent = '';
+      (o.recent || []).forEach((r) => {
+        const d = document.createElement('div');
+        d.textContent = new Date(r.closedAt).toLocaleString('sw-TZ', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' • ' + r.code + ' ' + r.direction + ' • $' + r.stake + ' • P/L ' + money(r.profit);
+        rec.appendChild(d);
+      });
+      if (!(o.recent || []).length) rec.textContent = 'Hakuna bado.';
+    }
+
+    async function loadOverview() {
+      if (!ACC || !ACC.connected) return;
+      try {
+        const res = await fetch(base() + '/overview'); const d = await res.json();
+        if (!d.ok) throw new Error(d.error || 'Hitilafu');
+        renderOverview(d);
+      } catch (e) { $('dvOverview').textContent = '❌ ' + e.message; }
+    }
+
+    async function closeOne(id, btn) {
+      if (!confirm('Funga trade hii sasa?')) return;
+      btn.disabled = true;
+      try { const r = await call('close', { contractId: id }); showMsg($('dvTradeMsg'), true, '✅ Imefungwa. P/L: ' + money(r.result.profit)); }
+      catch (e) { showMsg($('dvTradeMsg'), false, '❌ ' + e.message); }
+      await loadOverview();
+    }
+
+    $('dvRefreshBtn').addEventListener('click', loadOverview);
+    $('dvCloseAllBtn').addEventListener('click', async () => {
+      if (!confirm('Funga trades ZOTE sasa?')) return;
+      try { const r = await call('closeall', {}); showMsg($('dvTradeMsg'), true, '✅ Zimefungwa: ' + r.results.filter((x) => x.ok).length + '/' + r.results.length); }
+      catch (e) { showMsg($('dvTradeMsg'), false, '❌ ' + e.message); }
+      await loadOverview();
+    });
+    $('dvTradeBtn').addEventListener('click', async () => {
+      if (busy) return;
+      const dir = $('dvDir').value, pair = $('dvPair').value;
+      if (!confirm('Fungua ' + dir + ' ' + pair + ' (DEMO) stake $' + $('dvStake').value + '?')) return;
+      busy = true; $('dvTradeBtn').disabled = true;
+      try {
+        const r = await call('trade', {
+          pair, direction: dir, stake: $('dvStake').value, stopLoss: $('dvSl').value, takeProfit: $('dvTp').value,
+          multiplier: $('dvMult').value, pin: $('dvTradePin').value,
+        });
+        showMsg($('dvTradeMsg'), true, '✅ ' + r.trade.direction + ' ' + r.trade.pair + ' imefunguliwa (id ' + r.trade.contractId + ')' + (r.trade.tracked ? '' : ' — ⚠️ haikuandikishwa vizuri, iangalie kwenye positions'));
+        $('dvTradePin').value = '';
+      } catch (e) { showMsg($('dvTradeMsg'), false, '❌ ' + e.message); $('dvTradePin').value = ''; }
+      finally { busy = false; await loadOverview(); }
+    });
+    document.querySelector('.section-tab[data-section="deriv"]').addEventListener('click', () => load().then(loadOverview));
+    if (params.get('section') === 'deriv') load().then(loadOverview);
   })();
 </script>
 </body>
