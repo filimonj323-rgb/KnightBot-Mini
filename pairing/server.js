@@ -82,6 +82,7 @@ const pocketStore = require('../utils/pocketStore');
 const forexAccess = require('../utils/forexAccess');
 const derivAccounts = require('../utils/derivAccounts');
 const derivTrader2 = require('../utils/derivCustomerTrader');
+const derivCustomerAuto = require('../utils/derivCustomerAuto');
 const pocketSignal = require('../utils/pocketSignal');
 const signalTracker = require('../utils/signalTracker');
 const pocketAuto = require('../utils/pocketAutoTrader');
@@ -713,7 +714,7 @@ async function handlePairingRequest(req, res) {
       //  approve|revoke|approve_auto|revoke_auto|allow_real|deny_real|set_limits|reset_pin|remove|kill_all|resume_all
       if (req.url.split('?')[0] === '/api/admin/deriv') {
         try {
-          if (req.method === 'GET') return sendJson(res, 200, { ok: true, ...(await derivAccounts.adminList()) });
+          if (req.method === 'GET') return sendJson(res, 200, { ok: true, ...(await derivAccounts.adminList()), autoEngine: derivCustomerAuto.getStatus() });
           if (req.method === 'POST') {
             const body = await readJsonBody(req);
             const phone = body.phone ? String(body.phone).replace(/\D/g, '') : '';
@@ -1561,6 +1562,14 @@ async function initPairingServer() {
   // sessions live in Turso, so this works even without a Railway Volume
   // (see restoreAllInstances()'s comment for details).
   await restoreAllInstances();
+
+  // Auto-trade ya wateja (Deriv DEMO) — kila mteja kwenye akaunti yake; arifa zinaenda self-chat ya mteja husika.
+  // Inahitaji idhini ya admin + mteja kwa kila akaunti; DERIV_CUSTOMER_AUTO_ENABLED=false inaizima yote.
+  try {
+    derivCustomerAuto.start({ notify: (phone, text) => sendToSelfChat(phone, text) });
+  } catch (err) {
+    console.error('❌ Imeshindwa kuanzisha auto-trade ya wateja:', err.message);
+  }
 }
 
 module.exports = { handlePairingRequest, initPairingServer };
