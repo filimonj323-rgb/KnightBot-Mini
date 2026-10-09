@@ -405,7 +405,13 @@ async function handlePairingRequest(req, res) {
           derivAccounts.rateLimit(`deriv-ov:${dashToken}`, 30, 60 * 1000);
           return sendJson(res, 200, { ok: true, ...(await derivTrader2.overview(phone)) });
         }
-        if (req.method === 'POST' && ['pin', 'connect', 'disconnect', 'toggle', 'trade', 'close', 'closeall'].includes(sub)) {
+        // Historia kamili ya mteja huyu (zilizofungwa) + muhtasari: ?limit=20&offset=0
+        if (req.method === 'GET' && sub === 'history') {
+          derivAccounts.rateLimit(`deriv-hist:${dashToken}`, 30, 60 * 1000);
+          const q = new URL(req.url, 'http://x').searchParams;
+          return sendJson(res, 200, { ok: true, ...(await derivTrader2.historyView(phone, { limit: q.get('limit'), offset: q.get('offset') })) });
+        }
+        if (req.method === 'POST' && ['pin', 'connect', 'disconnect', 'toggle', 'trade', 'close', 'closeall', 'stake'].includes(sub)) {
           const body = await readJsonBody(req);
           // Rate limit TU kwa hatua zinazohitaji PIN/token (kuzuia kubashiri PIN). Kuzima trading/auto na
           // kuondoa akaunti HAZIZUIWI kamwe — mteja lazima aweze kusimamisha trading yake wakati wowote.
@@ -421,6 +427,11 @@ async function handlePairingRequest(req, res) {
               stopLoss: body.stopLoss, takeProfit: body.takeProfit, multiplier: body.multiplier,
             });
             return sendJson(res, 200, { ok: true, trade: r });
+          }
+          if (sub === 'stake') {
+            // Ombi la stake ya auto-trade: kuongeza kunahitaji idhini ya admin; kupunguza kunatekelezwa mara moja.
+            if (body.cancel === true) return sendJson(res, 200, { ok: true, account: await derivAccounts.cancelAutoStakeRequest(phone) });
+            return sendJson(res, 200, { ok: true, ...(await derivAccounts.requestAutoStake(phone, body.stake)) });
           }
           if (sub === 'close') {
             const r = await derivTrader2.closeTrade(phone, String(body.contractId || '').replace(/\D/g, ''));
@@ -718,7 +729,16 @@ async function handlePairingRequest(req, res) {
           if (req.method === 'POST') {
             const body = await readJsonBody(req);
             const phone = body.phone ? String(body.phone).replace(/\D/g, '') : '';
-            const r = await derivAccounts.adminAction(phone, String(body.action || ''), { limits: body.limits });
+            const r = await derivAccounts.adminAction(phone, String(body.action || ''), { limits: body.limits, stake: body.stake });
+            if (r.stakeResult) {
+              // Mteja ajulishwe kwenye WhatsApp yake (kimya kama bot yake haijaunganishwa).
+              const sr = r.stakeResult;
+              const text = sr.approved
+                ? `✅ *Stake ya Auto-Trade:* ${sr.byAdmin ? 'msimamizi ameiweka' : 'ombi lako limeidhinishwa'} — $${sr.stake}. Itatumika kwenye trades zako zijazo.`
+                : `❌ *Stake ya Auto-Trade:* ombi lako la $${sr.stake} limekataliwa na msimamizi. Stake yako ya sasa ($${r.account.autoStake}) inaendelea.`;
+              r.dmSent = body.dm === false ? false : await sendToSelfChat(phone, text);
+              return sendJson(res, 200, { ok: true, ...r });
+            }
             if (body.action === 'reset_pin') {
               let dmSent = false;
               if (body.dm) {

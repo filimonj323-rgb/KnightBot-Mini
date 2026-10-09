@@ -170,6 +170,9 @@ async function initSchema() {
       maxTradesDay   INTEGER NOT NULL DEFAULT 5,
       maxDailyLoss   REAL NOT NULL DEFAULT 10,
       maxOpen        INTEGER NOT NULL DEFAULT 2,
+      autoStake      REAL,
+      autoStakeReq   REAL,
+      autoStakeReqAt INTEGER,
       pinHash        TEXT,
       mustChangePin  INTEGER NOT NULL DEFAULT 0,
       pinFails       INTEGER NOT NULL DEFAULT 0,
@@ -263,6 +266,15 @@ async function initSchema() {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_owner ON fx_auto_trades(ownerPhone, closedAt)');
   } catch (e) {
     console.warn('[db] idx_fx_auto_trades_owner:', e.message);
+  }
+
+  // Migration: stake ya auto-trade ya mteja (autoStake = iliyoidhinishwa na admin, NULL = default; autoStakeReq = ombi linalosubiri).
+  for (const col of ['autoStake REAL', 'autoStakeReq REAL', 'autoStakeReqAt INTEGER']) {
+    try {
+      await client.execute(`ALTER TABLE deriv_accounts ADD COLUMN ${col}`);
+    } catch (e) {
+      // Column already exists — expected on every run after the first.
+    }
   }
 
   schemaReady = true;
