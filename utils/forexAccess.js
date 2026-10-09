@@ -25,13 +25,17 @@ const db = require('../pairing/db');
 const SIGNAL_ONLY = new Set([
   'forex', 'eurusd', 'gbpusd', 'usdjpy', 'usdchf', 'usdcad', 'audusd', 'nzdusd',
 ]);
+// 3) ACCOUNT_OWN — commands za Deriv zinazotumia akaunti ya MTEJA MWENYEWE (utils/derivCustomerCommands.js → derivCustomerTrader).
+//    Kwenye pairing bot zinaruhusiwa TU kwa mteja mwenyewe (si global owner, si mtu mwingine); idhini ya admin, swichi, vikomo na
+//    kill switch vinakaguliwa ndani ya derivCustomerTrader. Bot kuu haiguswi.
+const ACCOUNT_OWN = new Set(['fxbuy', 'fxsell', 'positions', 'panic', 'fxclose']);
 const ACCOUNT_BOUND = new Set([
-  // Deriv (forex): kufungua/kufunga/auto-trade + kuona akaunti
-  'fxbuy', 'fxsell', 'fxautostake', 'fxtrailing', 'panic', 'fxautostatus', 'autostats', 'fxcheck', 'fxbacktest', 'positions',
+  // Deriv (forex): auto-trade + takwimu za owner (hatua (d)) — bado zimefungwa kwa pairing bots
+  'fxautostake', 'fxtrailing', 'fxautostatus', 'autostats', 'fxcheck', 'fxbacktest',
   // Pocket Option: orders, auto-trade, historia, balance, signals (zinatumia bridge/akaunti ya owner)
   'pobuy', 'posell', 'poresult', 'pobalance', 'poauto', 'podelete', 'postats', 'posignal',
 ]);
-const FOREX_COMMANDS = new Set([...SIGNAL_ONLY, ...ACCOUNT_BOUND]);
+const FOREX_COMMANDS = new Set([...SIGNAL_ONLY, ...ACCOUNT_BOUND, ...ACCOUNT_OWN]);
 
 const ALL = '*';
 const CACHE_MS = 15000;
@@ -49,9 +53,10 @@ function isForexCommand(command) {
   return !!command && FOREX_COMMANDS.has(String(command.name || '').toLowerCase());
 }
 
-/** 'account' = imefungwa kabisa kwa pairing bots • 'signal' = inahitaji ruhusa • null = si ya forex */
+/** 'own' = akaunti ya mteja mwenyewe (mteja pekee) • 'account' = imefungwa kabisa kwa pairing bots • 'signal' = inahitaji ruhusa • null = si ya forex */
 function classify(command) {
   const n = String((command && command.name) || '').toLowerCase();
+  if (ACCOUNT_OWN.has(n)) return 'own';
   if (ACCOUNT_BOUND.has(n)) return 'account';
   if (SIGNAL_ONLY.has(n)) return 'signal';
   return null;
@@ -161,4 +166,19 @@ const ACCOUNT_LOCKED_TEXT =
   'Commands za trading (kufungua/kufunga order, auto-trade, balance, positions n.k.) zinahitaji akaunti ya trading ya kila bot — ' +
   'huduma hiyo bado haijawashwa. Utajulishwa ikipatikana.';
 
-module.exports = { FOREX_COMMANDS, SIGNAL_ONLY, ACCOUNT_BOUND, isForexCommand, classify, isAllowed, grant, revoke, grantAll, revokeAll, list, normPhone, LOCKED_TEXT, ACCOUNT_LOCKED_TEXT };
+
+const SELF_ONLY_TEXT = '🔒 Amri hii ya trading inaweza kutumiwa na mwenye akaunti hii ya bot PEKEE (kwa namba yake mwenyewe).';
+
+/**
+ * Uamuzi wa lango la commands za forex kwenye PAIRING BOTS (kazi safi — inajaribiwa kwa unit test).
+ * @returns 'allow' | 'locked_account' | 'locked_signal' | 'self_only'
+ */
+function decide({ fxClass, isGlobalOwner, isSelf, signalAllowed }) {
+  if (!fxClass) return 'allow';
+  if (fxClass === 'own') return isSelf ? 'allow' : 'self_only'; // global owner HAZUNGUKI hii: akaunti ni ya mteja
+  if (isGlobalOwner) return 'allow';
+  if (fxClass === 'account') return 'locked_account';
+  return signalAllowed ? 'allow' : 'locked_signal';
+}
+
+module.exports = { decide, SELF_ONLY_TEXT, ACCOUNT_OWN, FOREX_COMMANDS, SIGNAL_ONLY, ACCOUNT_BOUND, isForexCommand, classify, isAllowed, grant, revoke, grantAll, revokeAll, list, normPhone, LOCKED_TEXT, ACCOUNT_LOCKED_TEXT };

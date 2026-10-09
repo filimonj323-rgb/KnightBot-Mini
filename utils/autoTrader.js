@@ -359,6 +359,9 @@ const peakProfitPct = new Map();
 // trades ZILIZO WAZI iendelee kuwepo hata bot ikizima kabisa. DB
 // isipopatikana (Turso haijawekwa), kazi hizi zinashindwa kimya kimya
 // (bot inaendelea kufanya kazi na Map ya RAM pekee, kama awali).
+// ⚠️ fx_auto_trades pia ina trades za WATEJA (ownerPhone = namba ya mteja, utils/derivTrades.js).
+// Query zote za owner/auto-trader hapa lazima zichuje `ownerPhone IS NULL` — vinginevyo trades za wateja
+// zingeingia kwenye ufuatiliaji/stats za akaunti ya owner.
 async function dbSaveOpenTrade({ contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength }) {
   try {
     await fxTradesDb.initSchema();
@@ -442,7 +445,7 @@ async function getTradeHistory(limit = 200) {
   const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
   const result = await fxTradesDb.query(
     `SELECT contractId, code, direction, stake, buyPrice, sellPrice, profit, openedAt, closedAt, signalStrength
-       FROM fx_auto_trades WHERE closedAt IS NOT NULL ORDER BY closedAt DESC LIMIT ?`,
+       FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL ORDER BY closedAt DESC LIMIT ?`,
     [lim]
   );
   return (result.rows || []).map((r) => ({
@@ -463,7 +466,7 @@ async function getWinRateStats() {
   try {
     await fxTradesDb.initSchema();
     const result = await fxTradesDb.query(
-      `SELECT signalStrength, profit FROM fx_auto_trades WHERE closedAt IS NOT NULL`
+      `SELECT signalStrength, profit FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL`
     );
     const rows = result.rows || [];
 
@@ -663,7 +666,7 @@ async function restoreOpenTradesFromDb() {
   try {
     await fxTradesDb.initSchema();
     const result = await fxTradesDb.query(
-      'SELECT contractId, code, symbol, direction, stake, buyPrice, openedAt, slUsd, tpUsd FROM fx_auto_trades WHERE closedAt IS NULL'
+      'SELECT contractId, code, symbol, direction, stake, buyPrice, openedAt, slUsd, tpUsd FROM fx_auto_trades WHERE closedAt IS NULL AND ownerPhone IS NULL'
     );
     rows = result.rows || [];
   } catch (err) {

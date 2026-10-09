@@ -18,10 +18,14 @@
  * DB/usimbaji yanapita juu bila kuvujisha siri. Token HAIANDIKWI kwenye log.
  */
 
+const { EventEmitter } = require('events');
 const db = require('../pairing/db');
 const vault = require('./derivCrypto');
 const pins = require('./derivPin');
 const { validateToken, DerivValidationError } = require('./derivValidate');
+
+// 'session-close' (phone): muunganisho wa mteja (derivSession) lazima ufungwe — token imebadilika/imeondolewa/imekataliwa.
+const events = new EventEmitter();
 
 class DerivAccountError extends Error {
   constructor(userMessage, code, extra) {
@@ -160,6 +164,13 @@ async function checkPin(phone, pin) {
   throw new DerivAccountError(`PIN si sahihi. Umebakiwa na majaribio ${PIN_MAX_FAILS - fails}.`, 'PIN_WRONG');
 }
 
+/** Kuthibitisha PIN kwa hatua nyeti (mfano kufungua trade kutoka dashboard). Inatupa DerivAccountError ikikataliwa; inahesabu majaribio mabaya. */
+async function requirePin(phone, pin) {
+  const row = await getRow(phone);
+  needReady(row);
+  await checkPin(phone, pin);
+}
+
 /** Kuweka PIN ya kwanza (oldPin haihitajiki) au kubadilisha (oldPin inahitajika; pia baada ya admin reset). */
 async function setPin(phone, newPin, oldPin) {
   const bad = pins.formatError(newPin);
@@ -206,6 +217,7 @@ async function connect(phone, token, pin) {
      userEnabled = 0, autoEnabled = 0` + (sameAccount ? '' : ', adminApproved = 0, autoApproved = 0'),
     [enc, vault.hint(token), info.accountId, info.isDemo ? 1 : 0, info.currency, Date.now()]
   );
+  events.emit('session-close', String(phone)); // token mpya → muunganisho wa zamani ufungwe
   return { account: await getPublic(phone), balance: info.balance };
 }
 
@@ -217,6 +229,7 @@ async function disconnect(phone) {
     `encToken = NULL, tokenHint = NULL, accountId = NULL, currency = NULL, status = 'none', lastError = NULL, connectedAt = NULL,
      userEnabled = 0, autoEnabled = 0, adminApproved = 0, autoApproved = 0`
   );
+  events.emit('session-close', String(phone));
   return getPublic(phone);
 }
 
@@ -285,10 +298,31 @@ async function getTokenForTrading(phone, opts) {
   return { token, accountId: row.accountId, isDemo: !!row.isDemo, limits: gate.limits };
 }
 
+/**
+ * Token kwa ajili ya KUSIMAMIA (kuona positions/balance na KUFUNGA trades) — gate ndogo kuliko canTrade():
+ * inahitaji tu token iliyohifadhiwa, status 'active', na akaunti DEMO (au realAllowed). HAIHITAJI idhini ya admin,
+ * swichi ya mteja wala kill switch — kufunga trade ni kupunguza hatari, lazima ifanye kazi hata trading ikiwa imesimamishwa
+ * (panic wakati wa kill switch). Kufungua trade bado kunahitaji canTrade().
+ */
+async function getTokenForManage(phone) {
+  let row;
+  try {
+    row = await getRow(phone);
+  } catch (err) {
+    console.error('[derivAccounts] getTokenForManage: DB imeshindwa:', err.message);
+    throw new DerivAccountError('Hitilafu ya ndani. Jaribu tena.', 'DENIED', { reason: 'error' });
+  }
+  if (!row || !row.encToken) throw new DerivAccountError('Hujaunganisha akaunti ya Deriv.', 'DENIED', { reason: 'not_connected' });
+  if (row.status !== 'active') throw new DerivAccountError('Akaunti yako ya Deriv ina tatizo (token). Iunganishe upya.', 'DENIED', { reason: 'inactive' });
+  if (!row.isDemo && !row.realAllowed) throw new DerivAccountError('Akaunti ya REAL haijaruhusiwa.', 'DENIED', { reason: 'real_not_allowed' });
+  return { token: vault.decrypt(row.encToken, String(phone)), accountId: row.accountId, isDemo: !!row.isDemo };
+}
+
 /** Hatua zinazofuata zikiona Deriv imekataa token (401), ziite hii ili swichi zote zizimwe. */
 async function markInvalid(phone, message) {
   await ensureRow(phone);
   await touch(phone, `status = 'invalid', userEnabled = 0, autoEnabled = 0, lastError = ?`, [String(message || 'Token imekataliwa na Deriv').slice(0, 200)]);
+  events.emit('session-close', String(phone));
 }
 
 // ── Admin ────────────────────────────────────────────────────────────────────────────
@@ -358,6 +392,7 @@ async function adminAction(phone, action, payload = {}) {
     }
     case 'remove':
       await db.query('DELETE FROM deriv_accounts WHERE phoneNumber = ?', [String(phone)]);
+      events.emit('session-close', String(phone));
       return { account: null };
     default:
       throw new DerivAccountError('Action isiyojulikana.', 'BAD_ACTION');
@@ -371,12 +406,15 @@ module.exports = {
   rateLimit,
   getPublic,
   setPin,
+  requirePin,
   connect,
   disconnect,
   setSwitches,
   canTrade,
   getTokenForTrading,
+  getTokenForManage,
   markInvalid,
+  events,
   getKillAll,
   setKillAll,
   adminList,
