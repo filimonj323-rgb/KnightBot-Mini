@@ -415,6 +415,16 @@
       <button class="ghost" onclick="derivResetPin(true)">📩 Reset PIN + tuma DM kwa mteja</button>
       <button class="danger" onclick="derivRemove()">🗑️ Futa Akaunti ya Deriv</button>
     </div>
+    <div class="section-label">Stake ya Auto-Trade</div>
+    <div id="dDvStakeInfo" style="font-size:13px;line-height:1.7;">—</div>
+    <div class="actrow" id="dDvStakeReqRow" style="display:none">
+      <button class="ghost" onclick="derivAct('approve_stake')">✅ Idhinisha ombi</button>
+      <button class="danger" onclick="derivAct('reject_stake')">❌ Kataa ombi</button>
+    </div>
+    <div class="actrow">
+      <input type="number" step="0.5" min="0" id="dvSetStake" placeholder="Stake ya auto $ (tupu = default)" style="flex:1;min-width:150px" />
+      <button class="ghost" onclick="derivSetStake()">💵 Weka Stake</button>
+    </div>
     <div class="section-label">Vikomo vya Mteja</div>
     <div class="actrow">
       <input type="number" step="0.5" min="0" id="dvLimStake" placeholder="Stake ya juu $" style="flex:1;min-width:110px" />
@@ -717,6 +727,10 @@
       b.textContent = DV.killAll ? '🛑 Deriv wateja: IMESIMAMISHWA (bonyeza kurudisha)' : '📈 Deriv wateja: inaruhusiwa (bonyeza kusimamisha WOTE)';
       b.className = DV.killAll ? 'danger' : 'ghost';
     }
+    const pend = [...DV.byPhone.values()].filter((x) => x.autoStakeRequest);
+    let pb = document.getElementById('dvPendingBadge');
+    if (!pb && b) { pb = document.createElement('div'); pb.id = 'dvPendingBadge'; pb.style.cssText = 'font-size:12.5px;margin-top:6px;'; b.insertAdjacentElement('afterend', pb); }
+    if (pb) pb.innerHTML = pend.length ? '⏳ Maombi ya stake yanayosubiri: ' + pend.map((x) => escapeHtml(String(x.phoneNumber)) + ' ($' + x.autoStakeRequest.stake + ')').join(', ') : '';
     if (CURRENT_PHONE) renderDerivDetail();
   }
   function renderDerivDetail() {
@@ -734,6 +748,12 @@
       if (a.lastError) lines.push('⚠️ ' + escapeHtml(a.lastError));
     }
     st.innerHTML = lines.join('<br>');
+    const si = document.getElementById('dDvStakeInfo'), sr = document.getElementById('dDvStakeReqRow');
+    if (a && a.connected) {
+      const reqLine = a.autoStakeRequest ? `<br>⏳ <b>Ombi jipya: $${a.autoStakeRequest.stake}</b>${a.autoStakeRequest.at ? ' • ' + new Date(a.autoStakeRequest.at).toLocaleString('sw-TZ') : ''}${a.autoStakeRequest.stake > a.limits.maxStake ? ' • ⚠️ inazidi Stake ya juu ($' + a.limits.maxStake + ') — ongeza kikomo kwanza' : ''}` : '';
+      si.innerHTML = `Stake inayotumika: <b>$${a.autoStake}</b> (${a.autoStakeApproved ? 'iliyoidhinishwa' : 'default'})${reqLine}`;
+      sr.style.display = a.autoStakeRequest ? 'flex' : 'none';
+    } else { si.textContent = 'Mteja hajaunganisha akaunti.'; sr.style.display = 'none'; }
     const ap = document.getElementById('dDvApproveBtn'), au = document.getElementById('dDvAutoBtn');
     ap.textContent = a && a.adminApproved ? '⛔ Ondoa idhini ya kutrade' : '✅ Idhinisha kutrade';
     ap.className = a && a.adminApproved ? 'danger' : 'ghost'; ap.disabled = !a || !a.connected;
@@ -754,6 +774,15 @@
       await derivPost({ action, phone: CURRENT_PHONE });
       await loadDeriv();
       showToast('dOverviewMsg', true, 'Imehifadhiwa.');
+    } catch (e) { showToast('dOverviewMsg', false, e.message); }
+  }
+  async function derivSetStake() {
+    if (!CURRENT_PHONE) return;
+    try {
+      await derivPost({ action: 'set_stake', phone: CURRENT_PHONE, stake: document.getElementById('dvSetStake').value });
+      document.getElementById('dvSetStake').value = '';
+      await loadDeriv();
+      showToast('dOverviewMsg', true, 'Stake imehifadhiwa (mteja amearifiwa).');
     } catch (e) { showToast('dOverviewMsg', false, e.message); }
   }
   async function derivSaveLimits() {

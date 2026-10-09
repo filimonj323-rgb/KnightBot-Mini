@@ -698,6 +698,17 @@
       <p class="sub" style="margin:10px 0 0">Vikomo vyako: <span id="dvLimits">—</span></p>
     </div>
 
+    <div class="card" id="dvStakeBox">
+      <div class="section-label">💵 Stake ya Auto-Trade</div>
+      <div class="dv-box" id="dvStakeNow">—</div>
+      <div class="dv-box" id="dvStakeReqBox" style="display:none"></div>
+      <p class="sub" style="margin-bottom:12px">Unaweza kuomba stake unayotaka. <b>Kupunguza</b> kunaanza mara moja; <b>kuongeza</b> kunahitaji idhini ya msimamizi — stake yako ya sasa inaendelea hadi aidhinishe.</p>
+      <label for="dvStakeInput">Stake unayotaka ($)</label>
+      <input type="text" id="dvStakeInput" inputmode="decimal" placeholder="mfano 5" autocomplete="off" />
+      <button id="dvStakeBtn">📨 Tuma Ombi</button>
+      <button class="secondary" id="dvStakeCancelBtn" style="display:none">↩️ Ghairi Ombi Langu</button>
+      <div class="msg" id="dvStakeMsg"></div>
+    </div>
     </div>
 
     <div id="dvTradeBox" style="display:none">
@@ -736,8 +747,11 @@
 
       <div class="dv-page" data-dvpage="history">
       <div class="card">
-        <div class="section-label">🕘 Trades za Hivi Karibuni</div>
-        <div id="dvRecent" style="font-size:12.5px;line-height:1.7;color:var(--muted)">—</div>
+        <div class="section-label">🕘 Historia ya Trades Zako</div>
+        <div class="dv-box" id="dvHistSummary">Inapakia...</div>
+        <div id="dvHistList" style="font-size:12.5px;line-height:1.7"></div>
+        <button class="secondary" id="dvHistMore" style="display:none">⬇️ Pakia zaidi</button>
+        <button class="secondary" id="dvHistRefresh">🔄 Onyesha upya</button>
       </div>
       </div>
     </div>
@@ -1792,7 +1806,8 @@
       if (!tab || tab.style.display === 'none') name = 'account';
       document.querySelectorAll('.dv-tab').forEach((t) => t.classList.toggle('active', t.dataset.dvtab === name));
       document.querySelectorAll('.dv-page').forEach((p) => p.classList.toggle('active', p.dataset.dvpage === name));
-      if (name === 'trades' || name === 'history') loadOverview();
+      if (name === 'trades') loadOverview();
+      if (name === 'history') loadHistory(true);
     }
     document.querySelectorAll('.dv-tab').forEach((t) => t.addEventListener('click', () => dvOpen(t.dataset.dvtab)));
 
@@ -1845,6 +1860,12 @@
       $('dvAutoSw').disabled = busy;
       $('dvTradeHint').textContent = a.adminApproved ? 'Ruhusu bot kufanya trades kwenye akaunti yako ya demo' : 'Subiri msimamizi akuidhinishe kwanza';
       $('dvAutoHint').textContent = a.autoApproved ? 'Bot inafungua trades kiotomatiki kwenye akaunti yako ya demo (SL/TP lazima, ndani ya vikomo vyako). Arifa zinakuja WhatsApp.' : 'Inahitaji idhini ya msimamizi';
+      $('dvStakeBox').style.display = a.connected ? 'block' : 'none';
+      $('dvStakeNow').textContent = '💵 Stake inayotumika sasa: $' + a.autoStake + (a.autoStakeApproved ? ' (iliyoidhinishwa)' : ' (ya kawaida)') + ' • kikomo chako cha juu: $' + (a.limits ? a.limits.maxStake : '—');
+      const rq = a.autoStakeRequest;
+      $('dvStakeReqBox').style.display = rq ? 'block' : 'none';
+      if (rq) $('dvStakeReqBox').textContent = '⏳ Ombi la $' + rq.stake + ' linasubiri idhini ya msimamizi.';
+      $('dvStakeCancelBtn').style.display = rq ? 'block' : 'none';
       const l = a.limits || {};
       $('dvLimits').textContent = 'stake ya juu $' + l.maxStake + ' • trades/siku ' + l.maxTradesDay + ' • hasara/siku $' + l.maxDailyLoss + ' • trades wazi ' + l.maxOpen;
     }
@@ -1886,6 +1907,15 @@
       catch (e) { el.checked = !on; showMsg($('dvSwitchMsg'), false, '❌ ' + e.message); }
       finally { busy = false; await load(); }
     }
+    $('dvStakeBtn').addEventListener('click', () => {
+      const v = $('dvStakeInput').value.replace(',', '.').trim();
+      act($('dvStakeBtn'), $('dvStakeMsg'), () => call('stake', { stake: Number(v) }),
+        (r) => r.applied ? '✅ Stake yako imewekwa $' + r.stake + ' mara moja.' : '📨 Ombi la $' + r.stake + ' limetumwa kwa msimamizi. Utaarifiwa WhatsApp akiamua.')
+        .then(() => { $('dvStakeInput').value = ''; });
+    });
+    $('dvStakeCancelBtn').addEventListener('click', () => {
+      act($('dvStakeCancelBtn'), $('dvStakeMsg'), () => call('stake', { cancel: true }), () => '✅ Ombi limeghairiwa.');
+    });
     $('dvTradeSw').addEventListener('change', () => toggle('userEnabled', $('dvTradeSw')));
     $('dvAutoSw').addEventListener('change', () => toggle('autoEnabled', $('dvAutoSw')));
 
@@ -1923,14 +1953,43 @@
       else { note.style.display = 'none'; }
       $('dvTradeBtn').disabled = !o.canTrade;
 
-      const rec = $('dvRecent'); rec.textContent = '';
-      (o.recent || []).forEach((r) => {
-        const d = document.createElement('div');
-        d.textContent = new Date(r.closedAt).toLocaleString('sw-TZ', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' • ' + r.code + ' ' + r.direction + ' • $' + r.stake + ' • P/L ' + money(r.profit);
-        rec.appendChild(d);
-      });
-      if (!(o.recent || []).length) rec.textContent = 'Hakuna bado.';
     }
+
+    // ---- Historia kamili (zilizofungwa) + muhtasari ----
+    const HIST = { offset: 0, loading: false };
+    const HIST_PAGE = 20;
+    function renderHistRows(rows) {
+      const list = $('dvHistList');
+      rows.forEach((r) => {
+        const d = document.createElement('div');
+        d.style.cssText = 'display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)';
+        const left = document.createElement('span');
+        left.textContent = new Date(r.closedAt).toLocaleString('sw-TZ', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' • ' + (r.source === 'auto' ? '🤖 ' : '✋ ') + r.code + ' ' + r.direction + ' • $' + r.stake;
+        const right = document.createElement('b');
+        right.textContent = money(r.profit);
+        right.style.color = r.profit == null ? 'var(--muted)' : (r.profit >= 0 ? '#22c55e' : '#ef4444');
+        d.appendChild(left); d.appendChild(right); list.appendChild(d);
+      });
+    }
+    async function loadHistory(reset) {
+      if (!ACC || !ACC.connected || HIST.loading) return;
+      HIST.loading = true;
+      if (reset) { HIST.offset = 0; $('dvHistList').textContent = ''; }
+      try {
+        const res = await fetch(base() + '/history?limit=' + HIST_PAGE + '&offset=' + HIST.offset); const d = await res.json();
+        if (!d.ok) throw new Error(d.error || 'Hitilafu');
+        const s = d.summary;
+        $('dvHistSummary').textContent = '📊 Trades ' + s.total + ' (🤖 ' + s.auto + ' • ✋ ' + s.manual + ') • Ushindi ' + s.wins + ' • Hasara ' + s.losses +
+          ' • Win rate ' + (s.winRate == null ? 'N/A' : s.winRate + '%') + ' • P/L jumla ' + money(s.pnl);
+        renderHistRows(d.rows);
+        HIST.offset += d.rows.length;
+        if (!d.rows.length && HIST.offset === 0) $('dvHistList').textContent = 'Hakuna trade iliyofungwa bado.';
+        $('dvHistMore').style.display = d.hasMore ? 'block' : 'none';
+      } catch (e) { $('dvHistSummary').textContent = '❌ ' + e.message; }
+      finally { HIST.loading = false; }
+    }
+    $('dvHistMore').addEventListener('click', () => loadHistory(false));
+    $('dvHistRefresh').addEventListener('click', () => loadHistory(true));
 
     async function loadOverview() {
       if (!ACC || !ACC.connected) return;
