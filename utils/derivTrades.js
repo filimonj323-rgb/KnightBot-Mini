@@ -14,12 +14,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const startOfUtcDay = (ts) => Math.floor(ts / DAY_MS) * DAY_MS;
 
 /** Inahifadhi nafasi ya trade KABLA ya kuinunua (contractId ya muda). Ikishindikana, trade haifunguliwi. */
-async function reservePending(phone, { code, symbol, direction, stake, slUsd, tpUsd }) {
+async function reservePending(phone, { code, symbol, direction, stake, slUsd, tpUsd, signalStrength = null }) {
   const id = `pending:${phone}:${crypto.randomBytes(6).toString('hex')}`;
   await db.query(
-    `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, slUsd, tpUsd, openedAt, ownerPhone)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, code, symbol, direction, stake, slUsd, tpUsd, Date.now(), String(phone)]
+    `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, slUsd, tpUsd, openedAt, ownerPhone, signalStrength)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, code, symbol, direction, stake, slUsd, tpUsd, Date.now(), String(phone), Number.isFinite(Number(signalStrength)) && signalStrength !== null ? Number(signalStrength) : null]
   );
   return id;
 }
@@ -45,7 +45,7 @@ async function markClosed(phone, contractId, { closedAt = Date.now(), sellPrice 
 
 async function openRows(phone) {
   const r = await db.query(
-    'SELECT contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NULL ORDER BY openedAt ASC',
+    'SELECT contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NULL ORDER BY openedAt ASC',
     [String(phone)]
   );
   return r.rows;
@@ -83,6 +83,30 @@ async function history(phone, limit = 20) {
   return r.rows;
 }
 
+/**
+ * Trades za AUTO (signalStrength != NULL — za mkono zina NULL) zilizofungwa hivi karibuni za mteja huyu, mpya kwanza.
+ * Zinatumika na injini ya auto-trade kuhesabu hasara mfululizo (cooldown). Mteja mmoja tu — hakuna kuvuja kwa wengine.
+ */
+async function recentAuto(phone, limit = 3) {
+  const n = Math.max(1, Math.min(Number(limit) || 3, 50));
+  const r = await db.query(
+    `SELECT contractId, code, direction, profit, closedAt FROM fx_auto_trades
+     WHERE ownerPhone = ? AND signalStrength IS NOT NULL AND closedAt IS NOT NULL ORDER BY closedAt DESC LIMIT ?`,
+    [String(phone), n]
+  );
+  return r.rows;
+}
+
+/** Wateja wenye trade ya AUTO bado wazi (zenye contract halisi) — injini inaangalia kama zimefungwa ili kutuma arifa. */
+async function phonesWithOpenAuto() {
+  const r = await db.query(
+    `SELECT DISTINCT ownerPhone FROM fx_auto_trades
+     WHERE ownerPhone IS NOT NULL AND closedAt IS NULL AND signalStrength IS NOT NULL AND contractId NOT LIKE 'pending:%'`,
+    []
+  );
+  return r.rows.map((x) => String(x.ownerPhone));
+}
+
 /** Ondoa "pending" za zamani (zaidi ya dakika 5) zilizobaki kwa sababu ya ajali — hazina contract halisi. */
 async function sweepStalePending(phone, olderThanMs = 5 * 60 * 1000) {
   await db.query(
@@ -91,4 +115,4 @@ async function sweepStalePending(phone, olderThanMs = 5 * 60 * 1000) {
   );
 }
 
-module.exports = { reservePending, attachContract, dropPending, markClosed, openRows, todayStats, history, sweepStalePending, startOfUtcDay };
+module.exports = { reservePending, attachContract, dropPending, markClosed, openRows, todayStats, history, recentAuto, phonesWithOpenAuto, sweepStalePending, startOfUtcDay };

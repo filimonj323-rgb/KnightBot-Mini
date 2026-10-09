@@ -1596,4 +1596,6 @@ module.exports = {
   // Kwa ajili ya utils/backtest.js — formula HII HII inatumika live, ili
   // matokeo ya backtest yaendane na kile bot inachofanya kweli.
   computeAtrBasedRisk,
+  // Kwa injini ya auto-trade ya wateja (utils/derivCustomerAuto.js) — cache ileile ya regime filter inashirikiwa.
+  checkRegimeFilter,
 };

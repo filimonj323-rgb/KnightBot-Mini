@@ -15,6 +15,7 @@
  * ikiwa imezimwa au kill switch ikiwa imewashwa — kufunga ni kupunguza hatari.
  */
 
+const { EventEmitter } = require('events');
 const accounts = require('./derivAccounts');
 const trades = require('./derivTrades');
 const { getSession, ALLOWED_MULTIPLIERS } = require('./derivSession');
@@ -23,6 +24,10 @@ const PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'USDCAD', 'AUDUSD', 'NZDU
 const MIN_STAKE = Number(process.env.DERIV_MIN_STAKE_USD || 1);
 const DEFAULT_MULTIPLIER = 100;
 const DUP_WINDOW_MS = 8000;
+
+// 'auto-closed' ({phone, contractId, code, direction, stake, profit, sellPrice}): trade ya AUTO ya mteja imegundulika kufungwa (SL/TP/Deriv).
+// Injini ya auto-trade inasikiliza ili kutuma arifa. Trade za mkono hazitoi tukio hili.
+const events = new EventEmitter();
 
 class TradeError extends Error {
   constructor(userMessage, code, extra) {
@@ -105,17 +110,23 @@ async function reconcile(phone, session, live) {
         sellPrice = Number.isFinite(sp) ? sp : null;
       }
     } catch { /* profit inabaki null → inahesabiwa hasara mbaya zaidi kwenye vikomo (salama) */ }
-    await trades.markClosed(phone, id, { sellPrice, profit });
+    const changed = await trades.markClosed(phone, id, { sellPrice, profit });
+    if (changed > 0 && row.signalStrength != null) {
+      try {
+        events.emit('auto-closed', { phone: String(phone), contractId: id, code: row.code, direction: row.direction, stake: Number(row.stake), profit, sellPrice });
+      } catch (e) { console.error('[derivCustomerTrader] msikilizaji wa auto-closed ameshindwa:', e.message); }
+    }
   }
 }
 
 // ── kufungua ─────────────────────────────────────────────────────────────────────────
-function openTrade(phone, params) {
+function openTrade(phone, params, opts = {}) {
+  const auto = !!(opts && opts.auto); // auto: lango linahitaji pia autoApproved + autoEnabled (canTrade {auto:true})
   return withLock(phone, async () => {
     let pendingId = null;
     let keepPending = false;
     try {
-      const gate = await accounts.canTrade(phone);
+      const gate = await accounts.canTrade(phone, { auto });
       if (!gate.ok) throw new TradeError(REASON_TEXT[gate.reason] || 'Trading haijaruhusiwa.', 'DENIED', { reason: gate.reason });
       const limits = gate.limits;
       const t = validate(params, limits);
@@ -145,10 +156,10 @@ function openTrade(phone, params) {
         throw new TradeError(`Hasara ya leo ($${stats.lossToday}) + Stop Loss ya trade hii ($${t.stopLoss}) ingezidi kikomo cha hasara ya siku ($${limits.maxDailyLoss}). Punguza SL/stake.`, 'LOSS_BUDGET');
       }
 
-      pendingId = await trades.reservePending(phone, { code: t.code, symbol, direction: t.direction, stake: t.stake, slUsd: t.stopLoss, tpUsd: t.takeProfit });
+      pendingId = await trades.reservePending(phone, { code: t.code, symbol, direction: t.direction, stake: t.stake, slUsd: t.stopLoss, tpUsd: t.takeProfit, signalStrength: auto ? opts.signalStrength : null });
 
       // Hundi ya mwisho kabla ya kununua (kill switch/idhini inaweza kubadilika wakati tunasubiri Deriv).
-      const gate2 = await accounts.canTrade(phone);
+      const gate2 = await accounts.canTrade(phone, { auto });
       if (!gate2.ok) throw new TradeError(REASON_TEXT[gate2.reason] || 'Trading haijaruhusiwa.', 'DENIED', { reason: gate2.reason });
 
       recent.set(dupKey, Date.now());
@@ -230,6 +241,20 @@ function closeAll(phone) {
   });
 }
 
+/** Angalia (bila kufungua chochote) kama trades za mteja zimefungwa na Deriv; zile za AUTO zinatoa tukio 'auto-closed'. */
+function syncClosed(phone) {
+  return withLock(phone, async () => {
+    try {
+      const session = getSession(phone);
+      const live = await session.getPortfolio();
+      await reconcile(phone, session, live);
+      return { open: live.length };
+    } catch (err) {
+      throw toTradeError(err, 'Imeshindwa kusoma akaunti yako ya Deriv.');
+    }
+  });
+}
+
 function overview(phone) {
   return withLock(phone, async () => {
     try {
@@ -261,4 +286,4 @@ function overview(phone) {
   });
 }
 
-module.exports = { TradeError, PAIRS, openTrade, closeTrade, closeAll, overview, _validate: validate };
+module.exports = { TradeError, PAIRS, events, openTrade, closeTrade, closeAll, overview, syncClosed, _validate: validate };

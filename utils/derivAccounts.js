@@ -325,6 +325,19 @@ async function markInvalid(phone, message) {
   events.emit('session-close', String(phone));
 }
 
+/**
+ * Wateja (namba tu) ambao auto-trade yao iko tayari: token hai + admin amewaidhinisha kutrade na auto + wamewasha swichi zote mbili.
+ * Hii ni orodha ya awali tu — kila trade bado inapita canTrade(phone, {auto:true}) (kill switch, DEMO, n.k.).
+ */
+async function listAutoReady() {
+  const r = await db.query(
+    `SELECT phoneNumber FROM deriv_accounts
+     WHERE encToken IS NOT NULL AND status = 'active' AND adminApproved = 1 AND userEnabled = 1 AND autoApproved = 1 AND autoEnabled = 1`,
+    []
+  );
+  return r.rows.map((x) => String(x.phoneNumber));
+}
+
 // ── Admin ────────────────────────────────────────────────────────────────────────────
 async function adminList() {
   const r = await db.query('SELECT * FROM deriv_accounts ORDER BY updatedAt DESC', []);
@@ -411,6 +424,7 @@ module.exports = {
   disconnect,
   setSwitches,
   canTrade,
+  listAutoReady,
   getTokenForTrading,
   getTokenForManage,
   markInvalid,
