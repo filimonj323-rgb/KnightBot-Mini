@@ -81,6 +81,7 @@ const pocketTrader = require('../utils/pocketOptionTrader');
 const pocketStore = require('../utils/pocketStore');
 const forexAccess = require('../utils/forexAccess');
 const derivAccounts = require('../utils/derivAccounts');
+const derivTrader2 = require('../utils/derivCustomerTrader');
 const pocketSignal = require('../utils/pocketSignal');
 const signalTracker = require('../utils/signalTracker');
 const pocketAuto = require('../utils/pocketAutoTrader');
@@ -398,12 +399,35 @@ async function handlePairingRequest(req, res) {
         if (req.method === 'GET' && sub === '') {
           return sendJson(res, 200, { ok: true, account: await derivAccounts.getPublic(phone) });
         }
-        if (req.method === 'POST' && ['pin', 'connect', 'disconnect', 'toggle'].includes(sub)) {
+        // Balance + positions + takwimu za leo + historia fupi (inasoma Deriv kupitia muunganisho wa mteja huyu).
+        if (req.method === 'GET' && sub === 'overview') {
+          derivAccounts.rateLimit(`deriv-ov:${dashToken}`, 30, 60 * 1000);
+          return sendJson(res, 200, { ok: true, ...(await derivTrader2.overview(phone)) });
+        }
+        if (req.method === 'POST' && ['pin', 'connect', 'disconnect', 'toggle', 'trade', 'close', 'closeall'].includes(sub)) {
           const body = await readJsonBody(req);
           // Rate limit TU kwa hatua zinazohitaji PIN/token (kuzuia kubashiri PIN). Kuzima trading/auto na
           // kuondoa akaunti HAZIZUIWI kamwe — mteja lazima aweze kusimamisha trading yake wakati wowote.
-          const isSafeStop = sub === 'disconnect' || (sub === 'toggle' && body.userEnabled !== true && body.autoEnabled !== true);
-          if (!isSafeStop) derivAccounts.rateLimit(`deriv:${dashToken}`, 12, 60 * 1000);
+          const isCloseAction = sub === 'close' || sub === 'closeall';
+          const isSafeStop = sub === 'disconnect' || isCloseAction || (sub === 'toggle' && body.userEnabled !== true && body.autoEnabled !== true);
+          if (isCloseAction) derivAccounts.rateLimit(`deriv-close:${dashToken}`, 30, 60 * 1000); // kufunga hakuhitaji PIN; kikomo kipana tu
+          else if (!isSafeStop) derivAccounts.rateLimit(`deriv:${dashToken}`, 12, 60 * 1000);
+          if (sub === 'trade') {
+            // Kufungua trade kutoka dashboard KUNAHITAJI PIN kila mara (link ya dashboard peke yake haitoshi kutrade).
+            await derivAccounts.requirePin(phone, body.pin);
+            const r = await derivTrader2.openTrade(phone, {
+              pair: body.pair, direction: body.direction, stake: body.stake,
+              stopLoss: body.stopLoss, takeProfit: body.takeProfit, multiplier: body.multiplier,
+            });
+            return sendJson(res, 200, { ok: true, trade: r });
+          }
+          if (sub === 'close') {
+            const r = await derivTrader2.closeTrade(phone, String(body.contractId || '').replace(/\D/g, ''));
+            return sendJson(res, 200, { ok: true, result: r });
+          }
+          if (sub === 'closeall') {
+            return sendJson(res, 200, { ok: true, results: await derivTrader2.closeAll(phone) });
+          }
           if (sub === 'pin') {
             const account = await derivAccounts.setPin(phone, body.newPin, body.oldPin);
             return sendJson(res, 200, { ok: true, account });
@@ -423,7 +447,7 @@ async function handlePairingRequest(req, res) {
           return sendJson(res, 200, { ok: true, account });
         }
       } catch (err) {
-        if (err instanceof derivAccounts.DerivAccountError) {
+        if (err instanceof derivAccounts.DerivAccountError || (err && err.userMessage)) { // pia TradeError/SessionError
           return sendJson(res, err.code === 'RATE_LIMIT' ? 429 : 400, { ok: false, error: err.userMessage, code: err.code });
         }
         if (/Dashboard link|imezuiwa|Muda wako/.test(err.message)) return sendJson(res, 400, { ok: false, error: err.message });
