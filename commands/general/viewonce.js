@@ -13,7 +13,18 @@ module.exports = {
   
   async execute(sock, msg, args) {
     try {
-      const chatId = msg.key.remoteJid;
+      const originChat = msg.key.remoteJid;
+      // Results go to the bot's own DM (never to the chat where the command was typed)
+      const chatId = (sock.user?.id || '').split(':')[0].split('@')[0] + '@s.whatsapp.net';
+
+      // Delete the command message from the chat automatically
+      const deleteCommand = async () => {
+        try {
+          await sock.sendMessage(originChat, { delete: msg.key });
+        } catch (e) {
+          console.error('Failed to delete viewonce command message:', e.message);
+        }
+      };
 
       // Try to get contextInfo from different message types (reply can be from text, image, video, etc.)
       const ctx = msg.message?.extendedTextMessage?.contextInfo
@@ -26,8 +37,8 @@ module.exports = {
         return await sock.sendMessage(
           chatId,
           { text: '🗑️ Reply to a *view-once* message to reveal it.' },
-          { quoted: msg }
-        );
+          {}
+        ).finally(deleteCommand);
       }
 
       const quotedMsg = ctx.quotedMessage;
@@ -46,8 +57,8 @@ module.exports = {
         return await sock.sendMessage(
           chatId,
           { text: '❌ This is not a view-once message!' },
-          { quoted: msg }
-        );
+          {}
+        ).finally(deleteCommand);
       }
 
       let actualMsg = null;
@@ -84,8 +95,8 @@ module.exports = {
         return await sock.sendMessage(
           chatId,
           { text: '❌ Unsupported view-once message type.' },
-          { quoted: msg }
-        );
+          {}
+        ).finally(deleteCommand);
       }
 
       const downloadType =
@@ -115,7 +126,7 @@ module.exports = {
             caption,
             mimetype: 'video/mp4'
           },
-          { quoted: msg }
+          {}
         );
       } else if (/image/.test(mtype)) {
         await sock.sendMessage(
@@ -125,7 +136,7 @@ module.exports = {
             caption,
             mimetype: 'image/jpeg'
           },
-          { quoted: msg }
+          {}
         );
       } else if (/audio/.test(mtype)) {
         await sock.sendMessage(
@@ -135,20 +146,24 @@ module.exports = {
             ptt: true,
             mimetype: 'audio/ogg; codecs=opus'
           },
-          { quoted: msg }
+          {}
         );
       }
+
+      await deleteCommand();
     } catch (error) {
       console.error('Error in viewonce command:', error);
+      const dmJid = (sock.user?.id || '').split(':')[0].split('@')[0] + '@s.whatsapp.net';
       await sock.sendMessage(
-        msg.key.remoteJid,
+        dmJid,
         {
           text:
             '❌ Error processing view-once message: ' +
             (error.message || 'Unknown error')
         },
-        { quoted: msg }
-      );
+        {}
+      ).catch(() => {});
+      await sock.sendMessage(msg.key.remoteJid, { delete: msg.key }).catch(() => {});
     }
   }
 };
