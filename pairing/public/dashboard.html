@@ -109,6 +109,7 @@
   .dv-warn { background: rgba(255,193,7,0.14); color:#ffc107; }
   .dv-bad { background: rgba(255,85,102,0.14); color:#ff5566; }
   .dv-box { border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:14px; font-size:13px; line-height:1.6; }
+  .section-label { font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color: var(--muted); margin:0 0 12px; }
   .dv-step { font-size:13px; font-weight:700; margin:18px 0 8px; color: var(--purple-light); }
   details.dv-details summary { cursor:pointer; color: var(--muted); font-size:12.5px; margin-bottom:10px; }
   textarea { resize: vertical; min-height: 68px; }
@@ -624,67 +625,71 @@
   <!-- ============ SECTION: Deriv (akaunti ya demo ya mteja) ============ -->
   <div class="section" id="section-deriv">
     <div class="card">
-      <h1>📈 Akaunti Yangu ya Deriv</h1>
+      <div class="section-label">📈 Akaunti Yangu ya Deriv</div>
       <p class="sub">Unganisha akaunti yako ya <b>DEMO</b> ya Deriv ili trades, balance na historia viwe vyako peke yako. Kwa sasa akaunti za REAL hazikubaliwi.</p>
 
       <div class="dv-box" id="dvBanner" style="display:none"></div>
-      <div class="dv-box" id="dvSummary">Inapakia...</div>
+      <div class="dv-box" id="dvSummary" style="margin-bottom:0">Inapakia...</div>
+    </div>
 
-      <div id="dvPinBox">
-        <div class="dv-step" id="dvPinTitle">1) PIN ya Trading</div>
-        <p class="sub" id="dvPinHelp" style="margin-bottom:12px">PIN (tarakimu 4–8) inalinda akaunti yako: inahitajika kuweka token na kuwasha trading. Kuzima hakuhitaji PIN.</p>
-        <div id="dvOldPinWrap" style="display:none">
-          <label for="dvOldPin" id="dvOldPinLabel">PIN ya sasa</label>
-          <input type="password" id="dvOldPin" inputmode="numeric" maxlength="8" autocomplete="off" />
-        </div>
-        <label for="dvNewPin">PIN Mpya</label>
-        <input type="password" id="dvNewPin" inputmode="numeric" maxlength="8" autocomplete="new-password" />
-        <button id="dvPinBtn">🔐 Hifadhi PIN</button>
-        <div class="msg" id="dvPinMsg"></div>
+    <div class="card" id="dvPinBox">
+      <div class="section-label" id="dvPinTitle">🔐 PIN ya Trading</div>
+      <p class="sub" id="dvPinHelp" style="margin-bottom:12px">PIN (tarakimu 4–8) inalinda akaunti yako: inahitajika kuweka token na kuwasha trading. Kuzima hakuhitaji PIN.</p>
+      <div id="dvOldPinWrap" style="display:none">
+        <label for="dvOldPin" id="dvOldPinLabel">PIN ya sasa</label>
+        <input type="password" id="dvOldPin" inputmode="numeric" maxlength="8" autocomplete="off" />
       </div>
+      <label for="dvNewPin">PIN Mpya</label>
+      <input type="password" id="dvNewPin" inputmode="numeric" maxlength="8" autocomplete="new-password" />
+      <button id="dvPinBtn">🔐 Hifadhi PIN</button>
+      <div class="msg" id="dvPinMsg"></div>
+    </div>
 
-      <div id="dvConnectBox">
-        <div class="dv-step">2) Unganisha Akaunti ya Demo</div>
-        <p class="sub" style="margin-bottom:12px">Nenda <b>developers.deriv.com</b> → tengeneza <b>Personal Access Token</b> ya akaunti yako ya <b>demo</b>, kwa ruhusa ndogo kabisa zinazohitajika kutrade (usiweke ruhusa ambazo hazihitajiki). Isimamishwe kwa PIN yako — token haionyeshwi tena baada ya kuhifadhiwa.</p>
-        <label for="dvToken">Deriv API Token</label>
-        <input type="password" id="dvToken" autocomplete="off" spellcheck="false" />
-        <label for="dvConnPin">PIN yako</label>
-        <input type="password" id="dvConnPin" inputmode="numeric" maxlength="8" autocomplete="off" />
-        <button id="dvConnectBtn">🔗 Unganisha (DEMO)</button>
-        <button class="secondary" id="dvDisconnectBtn" style="display:none">🗑️ Ondoa Akaunti Yangu</button>
-        <div class="msg" id="dvConnMsg"></div>
-      </div>
+    <div class="card" id="dvConnectBox">
+      <div class="section-label">🔗 Unganisha Akaunti ya Demo</div>
+      <p class="sub" style="margin-bottom:12px">Nenda <b>developers.deriv.com</b> → tengeneza <b>Personal Access Token</b> ya akaunti yako ya <b>demo</b>, kwa ruhusa ndogo kabisa zinazohitajika kutrade (usiweke ruhusa ambazo hazihitajiki). Isimamishwe kwa PIN yako — token haionyeshwi tena baada ya kuhifadhiwa.</p>
+      <label for="dvToken">Deriv API Token</label>
+      <input type="password" id="dvToken" autocomplete="off" spellcheck="false" />
+      <label for="dvConnPin">PIN yako</label>
+      <input type="password" id="dvConnPin" inputmode="numeric" maxlength="8" autocomplete="off" />
+      <button id="dvConnectBtn">🔗 Unganisha (DEMO)</button>
+      <button class="secondary" id="dvDisconnectBtn" style="display:none">🗑️ Ondoa Akaunti Yangu</button>
+      <div class="msg" id="dvConnMsg"></div>
+    </div>
 
-      <div id="dvSwitchBox">
-        <div class="dv-step">3) Swichi za Trading</div>
-        <div class="toggle-row">
-          <div>
-            <span class="toggle-label">💹 Trading</span>
-            <div class="toggle-hint" id="dvTradeHint">Ruhusu bot kufanya trades kwenye akaunti yako ya demo</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="dvTradeSw"><span class="slider"></span></label>
+    <div class="card" id="dvSwitchBox">
+      <div class="section-label">🤖 Auto-Trader &amp; Swichi za Trading</div>
+      <div class="toggle-row">
+        <div>
+          <span class="toggle-label">💹 Trading</span>
+          <div class="toggle-hint" id="dvTradeHint">Ruhusu bot kufanya trades kwenye akaunti yako ya demo</div>
         </div>
-        <div class="toggle-row">
-          <div>
-            <span class="toggle-label">🤖 Auto-Trade</span>
-            <div class="toggle-hint" id="dvAutoHint">Bot ifungue trades kiotomatiki (inahitaji idhini ya msimamizi)</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="dvAutoSw"><span class="slider"></span></label>
-        </div>
-        <label for="dvSwitchPin" style="margin-top:12px">PIN (inahitajika kuwasha tu)</label>
-        <input type="password" id="dvSwitchPin" inputmode="numeric" maxlength="8" autocomplete="off" />
-        <div class="msg" id="dvSwitchMsg"></div>
-        <p class="sub" style="margin:10px 0 0">Vikomo vyako: <span id="dvLimits">—</span></p>
+        <label class="switch"><input type="checkbox" id="dvTradeSw"><span class="slider"></span></label>
       </div>
+      <div class="toggle-row">
+        <div>
+          <span class="toggle-label">🤖 Auto-Trade</span>
+          <div class="toggle-hint" id="dvAutoHint">Bot ifungue trades kiotomatiki (inahitaji idhini ya msimamizi)</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="dvAutoSw"><span class="slider"></span></label>
+      </div>
+      <label for="dvSwitchPin" style="margin-top:12px">PIN (inahitajika kuwasha tu)</label>
+      <input type="password" id="dvSwitchPin" inputmode="numeric" maxlength="8" autocomplete="off" />
+      <div class="msg" id="dvSwitchMsg"></div>
+      <p class="sub" style="margin:10px 0 0">Vikomo vyako: <span id="dvLimits">—</span></p>
+    </div>
 
-      <div id="dvTradeBox" style="display:none">
-        <div class="dv-step">4) Trade (DEMO)</div>
+    <div id="dvTradeBox" style="display:none">
+      <div class="card">
+        <div class="section-label">📊 Trade Zilizo Wazi (DEMO)</div>
         <div class="dv-box" id="dvOverview">Bonyeza "Onyesha upya" kuona balance na positions zako.</div>
         <button class="secondary" id="dvRefreshBtn">🔄 Onyesha upya</button>
         <div id="dvPositions" style="margin-top:10px"></div>
         <button class="secondary" id="dvCloseAllBtn" style="display:none">🛑 Funga Trades Zote</button>
+      </div>
 
-        <div class="dv-step">Fungua Trade Mpya</div>
+      <div class="card">
+        <div class="section-label">➕ Fungua Trade Mpya (Mkono)</div>
         <div class="dv-box" id="dvTradeNote" style="display:none"></div>
         <label for="dvPair">Jozi</label>
         <select id="dvPair"></select>
@@ -702,7 +707,10 @@
         <input type="password" id="dvTradePin" inputmode="numeric" maxlength="8" autocomplete="off" />
         <button id="dvTradeBtn">🚀 Fungua Trade</button>
         <div class="msg" id="dvTradeMsg"></div>
-        <div class="dv-step">Trades za Hivi Karibuni</div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">🕘 Trades za Hivi Karibuni</div>
         <div id="dvRecent" style="font-size:12.5px;line-height:1.7;color:var(--muted)">—</div>
       </div>
     </div>
@@ -1780,7 +1788,7 @@
       const needOld = a.hasPin;
       $('dvOldPinWrap').style.display = needOld ? 'block' : 'none';
       $('dvOldPinLabel').textContent = a.mustChangePin ? 'PIN ya muda uliyopewa na msimamizi' : 'PIN ya sasa';
-      $('dvPinTitle').textContent = !a.hasPin ? '1) Weka PIN ya Trading' : (a.mustChangePin ? '1) Badilisha PIN ya Muda (lazima)' : '1) Badilisha PIN');
+      $('dvPinTitle').textContent = !a.hasPin ? '🔐 Weka PIN ya Trading' : (a.mustChangePin ? '🔐 Badilisha PIN ya Muda (lazima)' : '🔐 Badilisha PIN');
       $('dvPinBtn').textContent = !a.hasPin ? '🔐 Weka PIN' : '🔐 Badilisha PIN';
 
       // Connect & switches
