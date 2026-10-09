@@ -109,6 +109,13 @@
   .dv-warn { background: rgba(255,193,7,0.14); color:#ffc107; }
   .dv-bad { background: rgba(255,85,102,0.14); color:#ff5566; }
   .dv-box { border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:14px; font-size:13px; line-height:1.6; }
+  /* Sub-tabs ndani ya section ya Deriv (task bar) */
+  .dv-tabs { display:flex; gap:4px; margin-bottom:18px; background: var(--card); padding:6px; border-radius:14px; border:1px solid var(--border); overflow-x:auto; }
+  .dv-tab { flex:1; min-width:62px; text-align:center; padding:10px 4px; border-radius:10px; color: var(--muted); cursor:pointer; font-size:11px; font-weight:600; line-height:1.4; transition: background .15s ease, color .15s ease; user-select:none; }
+  .dv-tab .icon { font-size:17px; display:block; margin-bottom:2px; }
+  .dv-tab.active { background: linear-gradient(135deg, var(--purple), var(--purple-dark)); color:white; }
+  .dv-page { display:none; animation: fadeIn 0.2s ease; }
+  .dv-page.active { display:block; }
   .section-label { font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color: var(--muted); margin:0 0 12px; }
   .dv-step { font-size:13px; font-weight:700; margin:18px 0 8px; color: var(--purple-light); }
   details.dv-details summary { cursor:pointer; color: var(--muted); font-size:12.5px; margin-bottom:10px; }
@@ -624,6 +631,15 @@
 
   <!-- ============ SECTION: Deriv (akaunti ya demo ya mteja) ============ -->
   <div class="section" id="section-deriv">
+    <div class="dv-tabs" id="dvTabs">
+      <div class="dv-tab active" data-dvtab="account"><span class="icon">👤</span>Akaunti</div>
+      <div class="dv-tab" data-dvtab="auto" data-needs="conn"><span class="icon">🤖</span>Auto-Trader</div>
+      <div class="dv-tab" data-dvtab="trades" data-needs="conn"><span class="icon">📊</span>Trades</div>
+      <div class="dv-tab" data-dvtab="fungua" data-needs="conn"><span class="icon">➕</span>Fungua</div>
+      <div class="dv-tab" data-dvtab="history" data-needs="conn"><span class="icon">🕘</span>History</div>
+    </div>
+
+    <div class="dv-page active" data-dvpage="account">
     <div class="card">
       <div class="section-label">📈 Akaunti Yangu ya Deriv</div>
       <p class="sub">Unganisha akaunti yako ya <b>DEMO</b> ya Deriv ili trades, balance na historia viwe vyako peke yako. Kwa sasa akaunti za REAL hazikubaliwi.</p>
@@ -657,6 +673,9 @@
       <div class="msg" id="dvConnMsg"></div>
     </div>
 
+    </div>
+
+    <div class="dv-page" data-dvpage="auto">
     <div class="card" id="dvSwitchBox">
       <div class="section-label">🤖 Auto-Trader &amp; Swichi za Trading</div>
       <div class="toggle-row">
@@ -679,7 +698,10 @@
       <p class="sub" style="margin:10px 0 0">Vikomo vyako: <span id="dvLimits">—</span></p>
     </div>
 
+    </div>
+
     <div id="dvTradeBox" style="display:none">
+      <div class="dv-page" data-dvpage="trades">
       <div class="card">
         <div class="section-label">📊 Trade Zilizo Wazi (DEMO)</div>
         <div class="dv-box" id="dvOverview">Bonyeza "Onyesha upya" kuona balance na positions zako.</div>
@@ -687,7 +709,9 @@
         <div id="dvPositions" style="margin-top:10px"></div>
         <button class="secondary" id="dvCloseAllBtn" style="display:none">🛑 Funga Trades Zote</button>
       </div>
+      </div>
 
+      <div class="dv-page" data-dvpage="fungua">
       <div class="card">
         <div class="section-label">➕ Fungua Trade Mpya (Mkono)</div>
         <div class="dv-box" id="dvTradeNote" style="display:none"></div>
@@ -708,10 +732,13 @@
         <button id="dvTradeBtn">🚀 Fungua Trade</button>
         <div class="msg" id="dvTradeMsg"></div>
       </div>
+      </div>
 
+      <div class="dv-page" data-dvpage="history">
       <div class="card">
         <div class="section-label">🕘 Trades za Hivi Karibuni</div>
         <div id="dvRecent" style="font-size:12.5px;line-height:1.7;color:var(--muted)">—</div>
+      </div>
       </div>
     </div>
   </div>
@@ -1760,6 +1787,15 @@
       const b = document.createElement('span'); b.className = 'dv-badge ' + cls; b.textContent = text; return b;
     }
 
+    function dvOpen(name) {
+      const tab = document.querySelector('.dv-tab[data-dvtab="' + name + '"]');
+      if (!tab || tab.style.display === 'none') name = 'account';
+      document.querySelectorAll('.dv-tab').forEach((t) => t.classList.toggle('active', t.dataset.dvtab === name));
+      document.querySelectorAll('.dv-page').forEach((p) => p.classList.toggle('active', p.dataset.dvpage === name));
+      if (name === 'trades' || name === 'history') loadOverview();
+    }
+    document.querySelectorAll('.dv-tab').forEach((t) => t.addEventListener('click', () => dvOpen(t.dataset.dvtab)));
+
     function render() {
       const a = ACC; if (!a) return;
       // Banner
@@ -1798,6 +1834,9 @@
       $('dvConnectBtn').textContent = a.connected ? '🔄 Badilisha Token (DEMO)' : '🔗 Unganisha (DEMO)';
       $('dvDisconnectBtn').style.display = a.connected ? 'block' : 'none';
 
+      document.querySelectorAll('.dv-tab[data-needs="conn"]').forEach((t) => { t.style.display = a.connected ? '' : 'none'; });
+      const curTab = document.querySelector('.dv-tab.active');
+      if (curTab && curTab.style.display === 'none') dvOpen('account');
       $('dvSwitchBox').style.display = a.connected ? 'block' : 'none';
       $('dvTradeBox').style.display = a.connected ? 'block' : 'none';
       $('dvTradeSw').checked = !!a.userEnabled;
