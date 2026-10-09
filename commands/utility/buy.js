@@ -16,6 +16,8 @@ module.exports = {
     'Mfano: .fxbuy EURUSD 10 5 10 50',
 
   async execute(sock, msg, args) {
+    // Pairing bot (mteja): akaunti yake mwenyewe ya Deriv (DEMO) kupitia lango la sera — si akaunti ya owner.
+    if (sock.pairingOwnerId) return require('../../utils/derivCustomerCommands').buy(sock, msg, args);
     const jid = msg.key.remoteJid;
     const [pairRaw, stakeRaw, slRaw, tpRaw, multRaw] = args;
 

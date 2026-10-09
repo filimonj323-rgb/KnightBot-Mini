@@ -12,6 +12,7 @@ module.exports = {
   usage: '.positions',
 
   async execute(sock, msg) {
+    if (sock.pairingOwnerId) return require('../../utils/derivCustomerCommands').positions(sock, msg);
     const jid = msg.key.remoteJid;
     try {
       const [positions, balance] = await Promise.all([getOpenPositions(), getBalance()]);

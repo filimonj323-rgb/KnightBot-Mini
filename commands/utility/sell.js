@@ -16,6 +16,7 @@ module.exports = {
     'Mfano: .fxsell EURUSD 10 5 10 50',
 
   async execute(sock, msg, args) {
+    if (sock.pairingOwnerId) return require('../../utils/derivCustomerCommands').sell(sock, msg, args);
     const jid = msg.key.remoteJid;
     const [pairRaw, stakeRaw, slRaw, tpRaw, multRaw] = args;
 

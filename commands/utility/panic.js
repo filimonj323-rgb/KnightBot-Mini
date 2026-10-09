@@ -12,6 +12,7 @@ module.exports = {
   usage: '.panic',
 
   async execute(sock, msg) {
+    if (sock.pairingOwnerId) return require('../../utils/derivCustomerCommands').panic(sock, msg);
     const jid = msg.key.remoteJid;
     try {
       const results = await closeAll();
