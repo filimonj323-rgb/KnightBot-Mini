@@ -892,6 +892,25 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       }).catch(() => {});
     }
 
+    // Zuia ujumbe wa zamani/uliorudiwa (history sync, reconnect, retry) usiendeshe
+    // amri tena — hii ndiyo sababu ya .groupstatus kujipost tena baada ya masaa 24.
+    // Sawa na ulinzi uliopo kwenye index.js (notify tu, dedup, umri < dakika 5).
+    if (m.type && m.type !== 'notify') return;
+    {
+      const _id = msg.key?.id;
+      if (_id) {
+        if (!sock._seenMsgIds) sock._seenMsgIds = new Map();
+        if (sock._seenMsgIds.has(_id)) return;
+        const _ts = Number(msg.messageTimestamp?.low ?? msg.messageTimestamp) || 0;
+        if (_ts && Date.now() - _ts * 1000 > 5 * 60 * 1000) return;
+        sock._seenMsgIds.set(_id, Date.now());
+        if (sock._seenMsgIds.size > 2000) {
+          const cutoff = Date.now() - 60 * 60 * 1000;
+          for (const [k, t] of sock._seenMsgIds) if (t < cutoff) sock._seenMsgIds.delete(k);
+        }
+      }
+    }
+
     userStore.incrementUsage(phoneNumber).catch(() => {}); // fire-and-forget — powers the admin "Matumizi" tab
 
     handler.handleMessage(sock, msg).catch(err => {
