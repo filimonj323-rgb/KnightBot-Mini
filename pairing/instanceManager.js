@@ -161,6 +161,27 @@ const PROTECTION_FEATURES = {
 // .react = true in commands/owner/autostatus.js's spirit).
 const DEFAULT_ON_AUTOMATION_KEYS = ['autoViewStatus', 'autoReactStatus'];
 
+// ── Muda wa indicators (milliseconds) — BADILISHA HAPA ──────────────────
+// 1000 = sekunde 1 · 30000 = sekunde 30 · 60000 = dakika 1
+const TYPING_INDICATOR_MS = 30000;    // "inaandika..." (Auto Typing)
+const RECORDING_INDICATOR_MS = 30000; // "inarekodi sauti..." (Auto Recording)
+
+/**
+ * Onyesha presence ('composing' | 'recording') kwenye chat kisha izime
+ * ('paused') baada ya `ms`. Timer MOJA kwa kila chat+aina: ujumbe mfululizo
+ * unaanza upya muda badala ya kuzima indicator mapema.
+ */
+function showPresenceFor(sock, chatJid, type, ms) {
+  if (!sock._presenceTimers) sock._presenceTimers = new Map();
+  const key = type + ':' + chatJid;
+  if (sock._presenceTimers.has(key)) clearTimeout(sock._presenceTimers.get(key));
+  sock.sendPresenceUpdate(type, chatJid).catch(() => {});
+  sock._presenceTimers.set(key, setTimeout(() => {
+    sock._presenceTimers.delete(key);
+    sock.sendPresenceUpdate('paused', chatJid).catch(() => {});
+  }, ms));
+}
+
 async function getInstanceSettings(phoneNumber) {
   const res = await db.query('SELECT prefix, botName, automation, selfMode FROM settings WHERE phoneNumber = ?', [phoneNumber]);
   const row = res.rows[0] || {};
@@ -888,11 +909,16 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     // implementation for the single-owner bot, but scoped to this instance
     // via sock.instanceSettings instead of the shared config.js.
     if (sock.instanceSettings?.autoRecording && msg.key.remoteJid && msg.key.remoteJid !== 'status@broadcast' && !msg.key.fromMe) {
-      sock.sendPresenceUpdate('recording', msg.key.remoteJid).then(() => {
-        setTimeout(() => {
-          sock.sendPresenceUpdate('paused', msg.key.remoteJid).catch(() => {});
-        }, 3000);
-      }).catch(() => {});
+      showPresenceFor(sock, msg.key.remoteJid, 'recording', RECORDING_INDICATOR_MS);
+    }
+
+    // Auto Typing indicator — mtu YEYOTE (DM au group) akituma text, bot
+    // inaonyesha "inaandika..." kisha inazima baada ya sekunde 30.
+    // Inasoma sock.instanceSettings (toggle ya mteja huyu tu). Timer moja
+    // kwa kila chat ili ujumbe mfululizo usifanye presence ikatike.
+    if (sock.instanceSettings?.autoTyping && msg.key.remoteJid && msg.key.remoteJid !== 'status@broadcast' && !msg.key.fromMe && !/@(newsletter|broadcast)$/.test(msg.key.remoteJid)) {
+      const hasText = !!(msg.message?.conversation || msg.message?.extendedTextMessage?.text);
+      if (hasText) showPresenceFor(sock, msg.key.remoteJid, 'composing', TYPING_INDICATOR_MS);
     }
 
     // Zuia ujumbe wa zamani/uliorudiwa (history sync, reconnect, retry) usiendeshe
