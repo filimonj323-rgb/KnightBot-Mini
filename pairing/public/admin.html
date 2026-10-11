@@ -291,6 +291,31 @@
   .lookup-name { font-weight: 700; font-size: 13px; }
   .lookup-number { color: var(--muted); font-size: 11px; margin-top: 2px; }
 
+  /* ── Udhibiti wa Bot (Mipangilio) ── */
+  .bc-strip { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .bc-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:11px; border:1px solid var(--border); color:var(--muted); background:#071009; }
+  .bc-pill .bc-dot { width:7px; height:7px; border-radius:50%; background:var(--muted); }
+  .bc-pill.on { color:var(--accent); border-color:var(--accent-dim); }
+  .bc-pill.on .bc-dot { background:var(--accent); box-shadow:0 0 6px var(--accent); }
+  .bc-pill.warn { color:var(--amber); border-color:rgba(255,184,77,0.5); }
+  .bc-pill.warn .bc-dot { background:var(--amber); box-shadow:0 0 6px var(--amber); }
+  .bc-dots { display:inline-flex; gap:3px; align-items:center; }
+  .bc-dots i { width:4px; height:4px; border-radius:50%; background:currentColor; opacity:.3; animation:bcBlink 1.2s infinite; }
+  .bc-dots i:nth-child(2) { animation-delay:.2s; }
+  .bc-dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes bcBlink { 0%,80%,100% { opacity:.25; } 40% { opacity:1; } }
+  .bc-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); }
+  .bc-row:last-child { border-bottom:none; }
+  .bc-row .bc-name { font-size:12.5px; }
+  .bc-row .bc-hint { font-size:10.5px; color:var(--muted); margin-top:2px; }
+  .bc-sw { position:relative; display:inline-block; width:42px; height:22px; flex-shrink:0; margin:0; }
+  .bc-sw input { opacity:0; width:0; height:0; position:absolute; margin:0; padding:0; border:0; }
+  .bc-sw .bc-slider { position:absolute; inset:0; background:#071009; border:1px solid var(--border); border-radius:22px; cursor:pointer; transition:.2s; }
+  .bc-sw .bc-slider::before { content:''; position:absolute; width:14px; height:14px; left:3px; top:3px; background:var(--muted); border-radius:50%; transition:.2s; }
+  .bc-sw input:checked + .bc-slider { background:var(--accent-dim); border-color:var(--accent); }
+  .bc-sw input:checked + .bc-slider::before { transform:translateX(20px); background:#fff; }
+  .bc-sw input:disabled + .bc-slider { opacity:.45; cursor:not-allowed; }
+
   @media (max-width: 640px) {
     #detail { width: 100vw; }
     .content { padding: 14px 12px 60px; }
@@ -494,6 +519,11 @@
       <button class="ghost" onclick="dClearSettings()">Rudisha Default</button>
     </div>
     <div class="toast" id="dSettingsMsg"></div>
+
+    <div class="section-label">🤖 Udhibiti wa Bot (Mode & Toggles)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Mabadiliko yanahifadhiwa papo hapo na yanaanza kufanya kazi kwenye bot ya mteja huyu bila restart.</div>
+    <div id="dBotControl"><div class="empty">Inapakia...</div></div>
+    <div class="toast" id="dBotCtlMsg"></div>
 
     <div class="section-label">🔗 Links za Groups</div>
     <div class="group-list" id="dGroupLinksList"><div class="empty">Inapakia...</div></div>
@@ -930,7 +960,7 @@
     document.getElementById('overlay').style.display = 'block';
     document.getElementById('detail').style.display = 'block';
     document.querySelectorAll('.dtab')[0].click();
-    ['dOverviewMsg','dGroupsMsg','dSettingsMsg','dBillingMsg','dLookupMsg'].forEach(id => {
+    ['dOverviewMsg','dGroupsMsg','dSettingsMsg','dBotCtlMsg','dBillingMsg','dLookupMsg'].forEach(id => {
       document.getElementById(id).className = 'toast';
       document.getElementById(id).textContent = '';
     });
@@ -1017,6 +1047,7 @@
       document.getElementById('dPrefix').placeholder = 'Default: ' + data.settings.defaultPrefix;
       document.getElementById('dBotName').value = data.settings.botName || '';
       document.getElementById('dBotName').placeholder = 'Default: ' + data.settings.defaultBotName;
+      renderBotControl(data);
 
       const linksList = document.getElementById('dGroupLinksList');
       if (data.liveStatus !== 'connected') {
@@ -1184,6 +1215,116 @@
       btn.disabled = false;
       btn.textContent = originalLabel;
     }
+  }
+
+  /* ============ Udhibiti wa Bot: mode + toggles + ulinzi ============ */
+  const BC_AUTOMATION = [
+    ['autoViewStatus', '👁️ Auto View Status', 'Bot inaangalia status za watu kiotomatiki'],
+    ['autoReactStatus', '❤️ Auto React Status', 'Bot inareact status kiotomatiki'],
+    ['autoTyping', '⌨️ Auto Typing', 'Inaonyesha "inaandika..." kabla ya kujibu amri'],
+    ['autoRecording', '🎙️ Auto Recording', 'Inaonyesha "inarekodi sauti..."'],
+    ['autoReactMessages', '😊 Auto React Messages', 'Inareact kila ujumbe unaotumwa kwa bot'],
+    ['autoForwardMessages', '📤 Auto Forward Messages', 'Inaruhusu rules za auto-forward kufanya kazi'],
+    ['autoViewOnce', '👁️‍🗨️ Auto View-Once', 'Inafungua view-once kiotomatiki'],
+  ];
+  const BC_PROTECTION = [
+    ['antiGroupMention', '🚫 Anti Group Mention'],
+    ['antiPromo', '📵 Anti Promo'],
+    ['antiLink', '🔗 Anti Link'],
+  ];
+
+  function renderBotControl(data) {
+    const box = document.getElementById('dBotControl');
+    if (!box || !data || !data.settings) return;
+    const st = data.settings;
+    const auto = st.automation || {};
+    const prot = data.protection || {};
+    const live = data.liveStatus === 'connected';
+    const isPrivate = !!st.selfMode;
+    const typingOn = !!auto.autoTyping;
+
+    const strip = `
+      <div class="bc-strip">
+        <span class="bc-pill ${isPrivate ? 'warn' : 'on'}"><span class="bc-dot"></span>${isPrivate ? 'Mode: PRIVATE' : 'Mode: PUBLIC'}</span>
+        <span class="bc-pill ${typingOn ? 'on' : ''}"><span class="bc-dot"></span>Auto Typing: ${typingOn ? 'ON <span class="bc-dots"><i></i><i></i><i></i></span>' : 'OFF'}</span>
+        <span class="bc-pill ${live ? 'on' : ''}"><span class="bc-dot"></span>Bot: ${escapeHtml(data.liveStatus || 'offline')}</span>
+      </div>`;
+
+    const modeRow = `
+      <div class="bc-row">
+        <div>
+          <div class="bc-name">🔒 Mode ya Bot: Private</div>
+          <div class="bc-hint">Washa = PRIVATE (owner pekee). Zima = PUBLIC (kila mtu).</div>
+        </div>
+        <label class="bc-sw"><input type="checkbox" ${isPrivate ? 'checked' : ''} onchange="bcSetMode(this)"><span class="bc-slider"></span></label>
+      </div>`;
+
+    const autoRows = BC_AUTOMATION.map(([key, label, hint]) => `
+      <div class="bc-row">
+        <div>
+          <div class="bc-name">${label}</div>
+          <div class="bc-hint">${hint}</div>
+        </div>
+        <label class="bc-sw"><input type="checkbox" ${auto[key] ? 'checked' : ''} onchange="bcSetAuto('${key}', this)"><span class="bc-slider"></span></label>
+      </div>`).join('');
+
+    const protRows = BC_PROTECTION.map(([key, label]) => {
+      const p = prot[key] || { enabledCount: 0, total: 0 };
+      const all = p.total > 0 && p.enabledCount === p.total;
+      const partial = p.enabledCount > 0 && !all;
+      const hint = !live ? 'Inahitaji bot iwe live' : (p.total === 0 ? 'Bot haipo kwenye group yoyote' : `Imewashwa kwenye ${p.enabledCount}/${p.total} groups${partial ? ' (sehemu)' : ''}`);
+      return `
+      <div class="bc-row">
+        <div>
+          <div class="bc-name">${label}</div>
+          <div class="bc-hint">${hint}</div>
+        </div>
+        <label class="bc-sw"><input type="checkbox" ${all || partial ? 'checked' : ''} ${(!live || p.total === 0) ? 'disabled' : ''} onchange="bcSetProtection('${key}', this)"><span class="bc-slider"></span></label>
+      </div>`;
+    }).join('');
+
+    box.innerHTML = strip + modeRow +
+      '<div class="section-label" style="margin-top:12px;">Otomatiki</div>' + autoRows +
+      '<div class="section-label" style="margin-top:12px;">Ulinzi wa Groups (groups zote)</div>' + protRows;
+  }
+
+  // Tuma badiliko la toggle moja; render upya kutoka jibu la server, na
+  // rudisha switch ikishindikana. Inalinda dhidi ya admin kubadili mteja
+  // katikati ya ombi (CURRENT_PHONE).
+  async function bcPost(action, body, cb, okText) {
+    const phone = CURRENT_PHONE;
+    if (!phone) return;
+    const prev = !cb.checked;
+    cb.disabled = true;
+    try {
+      const data = await api(`/api/admin/users/${encodeURIComponent(phone)}/${action}`, {
+        method: 'POST', body: JSON.stringify(body),
+      });
+      if (CURRENT_PHONE !== phone) return;
+      CURRENT_DETAIL = data;
+      renderBotControl(data);
+      showToast('dBotCtlMsg', true, okText);
+    } catch (e) {
+      if (CURRENT_PHONE === phone) {
+        cb.checked = prev;
+        cb.disabled = false;
+        showToast('dBotCtlMsg', false, e.message);
+      }
+    }
+  }
+
+  function bcSetMode(cb) {
+    bcPost('mode', { mode: cb.checked ? 'private' : 'public' }, cb,
+      cb.checked ? 'Bot sasa ni PRIVATE.' : 'Bot sasa ni PUBLIC.');
+  }
+
+  function bcSetAuto(key, cb) {
+    bcPost('automation', { [key]: cb.checked }, cb, `${key} ${cb.checked ? 'imewashwa' : 'imezimwa'}.`);
+  }
+
+  function bcSetProtection(feature, cb) {
+    bcPost('protection', { feature, enabled: cb.checked }, cb,
+      `${feature} ${cb.checked ? 'imewashwa kwenye groups zote' : 'imezimwa kwenye groups zote'}.`);
   }
 
   async function dSaveSettings() {

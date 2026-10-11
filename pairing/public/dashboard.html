@@ -253,6 +253,22 @@
   .toggle-label { font-size: 13.5px; }
   .toggle-hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 
+  /* Mode + Auto Typing status indicators (Settings → Otomatiki) */
+  .status-strip { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 16px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:999px; font-size:11.5px; font-weight:600; border:1px solid var(--border); color: var(--muted); background: var(--field); }
+  .pill .dot { width:7px; height:7px; border-radius:50%; background: var(--muted); }
+  .pill.on { color:#d9f7e4; border-color: rgba(52,199,120,0.5); background: rgba(52,199,120,0.12); }
+  .pill.on .dot { background:#34c778; box-shadow:0 0 6px #34c778; }
+  .pill.private { color:#ffe2b0; border-color: rgba(255,184,77,0.5); background: rgba(255,184,77,0.12); }
+  .pill.private .dot { background:#ffb84d; box-shadow:0 0 6px #ffb84d; }
+  .typing-dots { display:inline-flex; gap:3px; align-items:center; }
+  .typing-dots i { width:4px; height:4px; border-radius:50%; background: currentColor; opacity:.35; animation: typingBlink 1.2s infinite; }
+  .typing-dots i:nth-child(2) { animation-delay:.2s; }
+  .typing-dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes typingBlink { 0%,80%,100% { opacity:.25; transform:translateY(0); } 40% { opacity:1; transform:translateY(-2px); } }
+  .typing-preview { display:none; margin-top:8px; padding:7px 12px; border-radius:14px 14px 14px 4px; background: var(--field); border:1px solid var(--border); font-size:12px; color: var(--muted); width:fit-content; align-items:center; gap:8px; }
+  .typing-preview.show { display:inline-flex; }
+
   /* Settings section — sub-navigation between Msingi / Otomatiki / Ulinzi */
   .settings-nav {
     display: flex;
@@ -481,6 +497,19 @@
       <h1>🔘 Vipengele vya Kiotomatiki</h1>
       <p class="sub">Washa au zima huduma hizi za bot kiotomatiki. Zinatumika kwa jumla (si group moja moja). Mabadiliko yanaanza kufanya kazi papo hapo.</p>
 
+      <div class="status-strip">
+        <span class="pill" id="pillMode"><span class="dot"></span><span id="pillModeText">Mode: ...</span></span>
+        <span class="pill" id="pillTyping"><span class="dot"></span><span id="pillTypingText">Auto Typing: ...</span></span>
+      </div>
+
+      <div class="toggle-row">
+        <div>
+          <span class="toggle-label">🔒 Mode ya Bot: Private</span>
+          <div class="toggle-hint" id="modeHint">Washa = PRIVATE (wewe tu ndiye unaweza kutumia amri). Zima = PUBLIC (kila mtu anaweza). Sawa na amri ya <code>.mode</code>.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="tg_selfMode"><span class="slider"></span></label>
+      </div>
+
       <div class="toggle-row">
         <div>
           <span class="toggle-label">👁️ Auto View Status</span>
@@ -499,6 +528,7 @@
         <div>
           <span class="toggle-label">⌨️ Auto Typing</span>
           <div class="toggle-hint">Bot itaonesha "inaandika..." kabla ya kujibu amri</div>
+          <div class="typing-preview" id="typingPreview">Bot inaandika <span class="typing-dots"><i></i><i></i><i></i></span></div>
         </div>
         <label class="switch"><input type="checkbox" id="tg_autoTyping"><span class="slider"></span></label>
       </div>
@@ -1341,6 +1371,9 @@
         if (!el) return;
         el.checked = DEFAULT_ON_TOGGLE_IDS.includes(id) ? (auto[id] !== false) : !!auto[id];
       });
+      const modeEl = document.getElementById('tg_selfMode');
+      if (modeEl) modeEl.checked = !!data.selfMode;
+      updateAutoIndicators();
     } catch (e) {
       // Silent — toggles just stay off on failure.
     }
@@ -1373,6 +1406,54 @@
     const el = document.getElementById('tg_' + id);
     if (el) el.addEventListener('change', saveAutomation);
   });
+
+  // ---- Mode ya Bot (private/public) + Auto Typing indicator ----
+  function updateAutoIndicators() {
+    const modeEl = document.getElementById('tg_selfMode');
+    const typingEl = document.getElementById('tg_autoTyping');
+    const isPrivate = !!(modeEl && modeEl.checked);
+    const typingOn = !!(typingEl && typingEl.checked);
+
+    const pillMode = document.getElementById('pillMode');
+    pillMode.className = 'pill ' + (isPrivate ? 'private' : 'on');
+    document.getElementById('pillModeText').textContent = isPrivate ? 'Mode: PRIVATE (wewe tu)' : 'Mode: PUBLIC (kila mtu)';
+
+    const pillTyping = document.getElementById('pillTyping');
+    pillTyping.className = 'pill' + (typingOn ? ' on' : '');
+    document.getElementById('pillTypingText').innerHTML = typingOn
+      ? 'Auto Typing: ON <span class="typing-dots"><i></i><i></i><i></i></span>'
+      : 'Auto Typing: OFF';
+
+    document.getElementById('typingPreview').classList.toggle('show', typingOn);
+  }
+
+  async function saveMode() {
+    const modeEl = document.getElementById('tg_selfMode');
+    const wantPrivate = modeEl.checked;
+    modeEl.disabled = true;
+    autoMsgBox.className = 'msg';
+    autoMsgBox.style.display = 'none';
+    try {
+      const res = await fetch(API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/settings/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: wantPrivate ? 'private' : 'public' }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Hitilafu imetokea.');
+      modeEl.checked = !!data.selfMode;
+      showMsg(autoMsgBox, true, data.selfMode ? '🔒 Bot sasa ni PRIVATE — wewe tu ndiye unaweza kutumia amri.' : '🌍 Bot sasa ni PUBLIC — kila mtu anaweza kutumia amri.');
+    } catch (e) {
+      modeEl.checked = !wantPrivate; // rudisha hali ya awali
+      showMsg(autoMsgBox, false, '❌ ' + (e.message || 'Imeshindwa kuwasiliana na server.'));
+    } finally {
+      modeEl.disabled = false;
+      updateAutoIndicators();
+    }
+  }
+
+  document.getElementById('tg_selfMode').addEventListener('change', saveMode);
+  document.getElementById('tg_autoTyping').addEventListener('change', updateAutoIndicators);
 
   /* =========================================================
      SECTION 4b-2 — Auto Forward: source/destination rule builder
