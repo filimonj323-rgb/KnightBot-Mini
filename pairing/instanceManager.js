@@ -162,7 +162,7 @@ const PROTECTION_FEATURES = {
 const DEFAULT_ON_AUTOMATION_KEYS = ['autoViewStatus', 'autoReactStatus'];
 
 async function getInstanceSettings(phoneNumber) {
-  const res = await db.query('SELECT prefix, botName, automation FROM settings WHERE phoneNumber = ?', [phoneNumber]);
+  const res = await db.query('SELECT prefix, botName, automation, selfMode FROM settings WHERE phoneNumber = ?', [phoneNumber]);
   const row = res.rows[0] || {};
   // autoForwardMessages, autoViewStatus and autoReactStatus default to ON
   // (see DEFAULT_ON_AUTOMATION_KEYS above) — UNLIKE the rest of
@@ -170,6 +170,8 @@ async function getInstanceSettings(phoneNumber) {
   const out = { autoForwardMessages: true, autoViewStatus: true, autoReactStatus: true, autoViewOnce: true };
   if (row.prefix) out.prefix = row.prefix;
   if (row.botName) out.botName = row.botName;
+  // Mode ya bot hii tu (private = owner pekee). Haigusi bots zingine.
+  out.selfMode = Number(row.selfMode) === 1;
   if (row.automation) {
     try {
       const parsed = JSON.parse(row.automation);
@@ -595,7 +597,8 @@ async function handleExpiredMessage(sock, msg, phoneNumber, record, access) {
 
   // .menu pekee ndiyo inaruhusiwa — na si kwa akaunti iliyozuiwa na admin.
   if (access.reason !== 'blocked' && getMenuCommandNames().has(commandName)) {
-    if (sharedConfig.selfMode && !(handler && handler.isOwner && handler.isOwner(sender, sock))) return;
+    const privateMode = sock.instanceSettings ? !!sock.instanceSettings.selfMode : sharedConfig.selfMode;
+    if (privateMode && !(handler && handler.isOwner && handler.isOwner(sender, sock))) return;
     const menuCmd = require('../commands/general/menu');
     await menuCmd.execute(sock, msg, [], {
       from: chatJid,
@@ -1376,6 +1379,24 @@ async function setPrefixForOwnInstance(phoneNumber, prefix) {
   }
 
   return trimmed;
+}
+
+/**
+ * In-chat `.mode private|public` kwa bot ya mteja MMOJA (commands/owner/
+ * mode.js). Inaandika kwenye settings row ya namba hii tu (Turso) — kamwe
+ * si config.js ya pamoja — hivyo bots zingine hazibadiliki.
+ */
+async function setSelfModeForOwnInstance(phoneNumber, isPrivate) {
+  await db.query(
+    `INSERT INTO settings (phoneNumber, selfMode) VALUES (?, ?)
+     ON CONFLICT(phoneNumber) DO UPDATE SET selfMode = excluded.selfMode`,
+    [phoneNumber, isPrivate ? 1 : 0]
+  );
+  const inst = instances.get(phoneNumber);
+  if (inst?.sock) {
+    inst.sock.instanceSettings = await getInstanceSettings(phoneNumber);
+  }
+  return !!isPrivate;
 }
 
 /**
@@ -2240,6 +2261,7 @@ module.exports = {
   getSettingsForToken,
   updateSettingsForToken,
   setPrefixForOwnInstance,
+  setSelfModeForOwnInstance,
   updateAutomationForToken,
   getProtectionForToken,
   updateProtectionForToken,

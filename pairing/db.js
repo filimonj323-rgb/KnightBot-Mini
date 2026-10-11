@@ -214,6 +214,14 @@ async function initSchema() {
     // Column already exists — expected on every run after the first.
   }
 
+  // Migration: per-number bot mode (.mode private/public) — 1 = private
+  // (owner pekee), 0/NULL = public. Inahifadhiwa Turso ili isipotee redeploy.
+  try {
+    await client.execute('ALTER TABLE settings ADD COLUMN selfMode INTEGER');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
+  }
+
   // Migration: welcome-message cooldown + cached short links, added when the
   // WhatsApp "umefanikiwa kuunganisha" message became session-aware. Same
   // swallow-if-exists pattern as the `automation` migration above.
