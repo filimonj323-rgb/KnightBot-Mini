@@ -518,6 +518,8 @@ module.exports = {
       // ikiwa na caption ya hiari: .gm groupstatus <groupId|all> [caption]
       // ══════════════════════════════════════
       if (opt === 'groupstatus' || opt === 'gstatus') {
+        // Zuia kujipost tena: ruhusu mara moja tu kwa kila ujumbe wa amri
+        if (!require('../../utils/groupStatusGuard').claim(msg)) return;
         let groupId = args[1];
 
         // ══════════════════════════════════════
