@@ -1,7 +1,7 @@
 /**
  * pairing/pairingConfig.js
  *
- * All admin/billing/ClickPesa settings hardcoded here instead of Railway
+ * All admin/billing/Abliner settings hardcoded here instead of Railway
  * environment variables — EDIT THE VALUES BELOW DIRECTLY.
  *
  * ⚠️ SECURITY WARNING: because these values live in code instead of
@@ -48,14 +48,15 @@ module.exports = {
   // link, so they can pay before the bot actually stops responding.
   TRIAL_WARNING_HOURS: 48,
 
-  // ── ClickPesa (Dashboard -> Settings -> Developers -> Create Application) ──
-  CLICKPESA_CLIENT_ID: 'IDbe0sqCEWvsLTZAAV9blyrZVQEepwHL',
-  CLICKPESA_API_KEY: 'SKCTI3z8ue17sUo0IUJpBchPODETua1Gbhr29H06k8',
-  // Checksum key (Dashboard -> Settings -> Developers -> application yako ->
-  // Checksum). Hii ni key TOFAUTI na API key — inatumika kusaini maombi
-  // yanayotoka na kuthibitisha webhook zinazoingia kutoka ClickPesa.
-  CLICKPESA_CHECKSUM_KEY: 'CHKs7WiXSBfa5DZi58Pq4VVC9oLGT9FMNQg',
-  CLICKPESA_BASE_URL: 'https://api.clickpesa.com',
+  // ── Abliner (https://abliner.net/docs) — malipo ya USSD-push ─────────
+  // ABLINER_API_KEY: "tsl_live_..." (API Keys kwenye dashboard ya Abliner,
+  // inaonyeshwa MARA MOJA). ABLINER_WEBHOOK_SECRET: "whsec_..." (tofauti na
+  // API key) — inasaini deposit na kuthibitisha webhook. Webhook URL:
+  // <PAIRING_BASE_URL>/api/payment/webhook (inatumwa pia kama callback_url
+  // kwa kila ombi, lakini iweke pia kwenye dashboard ya Abliner).
+  ABLINER_API_KEY: 'WEKA_ABLINER_API_KEY',
+  ABLINER_WEBHOOK_SECRET: 'WEKA_ABLINER_WEBHOOK_SECRET',
+  ABLINER_BASE_URL: 'https://abliner.net/api/v1',
 
   // ── Pairing website base URL (used in WhatsApp dashboard-link messages) ──
   PAIRING_BASE_URL: 'https://botkuusite.up.railway.app', // Railway service halisi (index.js + dashboard.html + /api/dashboard vyote kwenye service hii moja)

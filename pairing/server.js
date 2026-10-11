@@ -65,7 +65,7 @@ const {
   notifyPaymentReceived,
 } = require('./instanceManager');
 const adminAuth = require('./adminAuth');
-const clickpesa = require('./clickpesa');
+const abliner = require('./abliner');
 const cfg = require('./pairingConfig');
 const db = require('./db');
 const derivTrader = require('../utils/derivTrader');
@@ -152,7 +152,7 @@ async function removePendingOrder(orderReference) {
 }
 
 // ── Kuthibitisha malipo moja kwa moja (bila admin) ─────────────────────
-// Njia TATU zinaweza kugundua malipo yamekamilika: (1) webhook ya ClickPesa,
+// Njia TATU zinaweza kugundua malipo yamekamilika: (1) webhook ya Abliner,
 // (2) dashboard.html inayouliza /pay-status mteja akisubiri, (3) reconciler
 // ya nyuma (kila sekunde 30) kwa wateja waliofunga ukurasa. Zote zinapitia
 // settlePaidOrder(), ambayo "inakamata" order kwa DELETE — ni moja tu
@@ -171,12 +171,12 @@ async function settlePaidOrder(orderReference, info = {}) {
   if (!claim.rowsAffected) return null; // njia nyingine imeshaishughulikia
 
   if (info.collectedAmount != null && Number(info.collectedAmount) < Number(order.amount)) {
-    console.warn(`[payment] ${orderReference}: kiasi kilichokusanywa (${info.collectedAmount}) < bei ya package (${order.amount}) — nimeendelea kutoa huduma, angalia ClickPesa dashboard.`);
+    console.warn(`[payment] ${orderReference}: kiasi kilichokusanywa (${info.collectedAmount}) < bei ya package (${order.amount}) — nimeendelea kutoa huduma, angalia Abliner dashboard.`);
   }
 
   try {
     const user = await adminMarkPaid(order.phoneNumber, order.days, {
-      method: 'clickpesa',
+      method: 'abliner',
       orderReference,
       amount: order.amount,
       paymentReference: info.paymentReference || null,
@@ -191,38 +191,29 @@ async function settlePaidOrder(orderReference, info = {}) {
   }
 }
 
-const PAID_STATUSES = ['SUCCESS', 'SETTLED', 'COMPLETED', 'PAID'];
-const ORDER_MAX_AGE_MS = 2 * 60 * 60 * 1000; // order isiyolipwa baada ya saa 2 inafutwa (bila kupiga ClickPesa)
+const PAID_STATUSES = ['COMPLETED', 'SUCCESS', 'SETTLED', 'PAID'];
+const ORDER_MAX_AGE_MS = 2 * 60 * 60 * 1000; // order isiyolipwa baada ya saa 2 inafutwa (bila kupiga Abliner)
 
-// ClickPesa ina kikomo cha simu 100 kwa siku (hadi KYC ikamilike), kwa hiyo
-// webhook ndiyo njia KUU ya kuthibitisha malipo. Kuuliza ClickPesa moja kwa
-// moja ni akiba tu, na kunadhibitiwa kwa makali:
-//   - si kabla ya sekunde 90 tangu order iundwe (webhook kwanza)
-//   - upeo wa majaribio 3 kwa order, kila baada ya dakika 2 angalau
-//   - bajeti ya siku ya maswali 30 kwa jumla
-//   - hakuna swali lolote wakati ClickPesa imetuzuia (429)
-const STATUS_MIN_AGE_MS = 90 * 1000;
-const STATUS_MIN_GAP_MS = 2 * 60 * 1000;
-const STATUS_MAX_TRIES = 3;
-const STATUS_DAILY_BUDGET = 30;
-const statusTries = new Map(); // orderReference -> { n, last }
-let statusDay = { day: '', n: 0 };
+// Abliner inaruhusu maombi 120/dakika kwenye /transactions. Webhook ndiyo
+// njia KUU ya kuthibitisha malipo; kuuliza Abliner moja kwa moja ni akiba,
+// na kunadhibitiwa ili tusizidi kikomo:
+//   - si kabla ya sekunde 20 tangu order iundwe (webhook kwanza)
+//   - angalau sekunde 15 kati ya maswali ya order moja
+//   - hakuna swali lolote wakati Abliner imetuzuia (429)
+const STATUS_MIN_AGE_MS = 20 * 1000;
+const STATUS_MIN_GAP_MS = 15 * 1000;
+const statusTries = new Map(); // orderReference -> { last }
 
 function mayQueryStatus(order) {
-  if (clickpesa.isBlocked()) return false;
+  if (abliner.isBlocked()) return false;
   const now = Date.now();
   if (now - Number(order.createdAt) < STATUS_MIN_AGE_MS) return false;
 
-  const today = new Date().toISOString().slice(0, 10);
-  if (statusDay.day !== today) statusDay = { day: today, n: 0 };
-  if (statusDay.n >= STATUS_DAILY_BUDGET) return false;
+  const t = statusTries.get(order.orderReference) || { last: 0 };
+  if (now - t.last < STATUS_MIN_GAP_MS) return false;
 
-  const t = statusTries.get(order.orderReference) || { n: 0, last: 0 };
-  if (t.n >= STATUS_MAX_TRIES || now - t.last < STATUS_MIN_GAP_MS) return false;
-
-  t.n += 1; t.last = now;
+  t.last = now;
   statusTries.set(order.orderReference, t);
-  statusDay.n += 1;
   return true;
 }
 
@@ -235,15 +226,15 @@ async function reconcilePendingOrders() {
   const res = await db.query('SELECT * FROM pending_orders');
   for (const order of res.rows) {
     try {
-      // 1) Orders za zamani/zilizoachwa — futa bila kugusa ClickPesa.
+      // 1) Orders za zamani/zilizoachwa — futa bila kugusa Abliner.
       if (Date.now() - Number(order.createdAt) > ORDER_MAX_AGE_MS) {
         await dropOrder(order.orderReference);
         continue;
       }
-      // 2) Uliza ClickPesa kwa kiasi tu (angalia mayQueryStatus).
+      // 2) Uliza Abliner kwa kiasi tu (angalia mayQueryStatus).
       if (!mayQueryStatus(order)) continue;
 
-      const st = await clickpesa.getPaymentStatus(order.orderReference);
+      const st = await abliner.getPaymentStatus(order.orderReference);
       if (st && PAID_STATUSES.includes(st.status)) {
         statusTries.delete(order.orderReference);
         await settlePaidOrder(order.orderReference, st);
@@ -306,6 +297,22 @@ function readJsonBody(req, maxBytes = 1e6) {
         reject(new Error('Invalid JSON'));
       }
     });
+    req.on('error', reject);
+  });
+}
+
+// Webhook ya Abliner inasainiwa kwa body ghafi — tunahitaji string halisi
+// kabla ya JSON.parse ili HMAC ilingane.
+function readRawBody(req, maxBytes = 1e6) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      data += chunk;
+      if (data.length > maxBytes) { tooLarge = true; reject(new Error('Body ni kubwa mno.')); req.destroy(); }
+    });
+    req.on('end', () => { if (!tooLarge) resolve(data); });
     req.on('error', reject);
   });
 }
@@ -1441,23 +1448,16 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 400, { ok: false, error: 'Namba ya malipo si sahihi. Weka namba kamili yenye country code (mfano 2557XXXXXXXX).' });
       }
 
-      // MUHIMU: orderReference LAZIMA ibaki herufi 20 au chini tangu hapa —
-      // clickpesa.js inakata (bila taarifa) reference ndefu zaidi ya 20 kabla
-      // ya kuituma ClickPesa, na ClickPesa inarudisha ile iliyokatwa kwenye
-      // webhook. Kama tuliyohifadhi kwenye pending_orders ni ndefu zaidi,
-      // getPendingOrder() haitaikuta reference ya webhook -> malipo
-      // hayasajiliwi hata baada ya mteja kulipa kikamilifu (status inabaki
-      // "unpaid"). Fomu hii ni herufi 20 kwa mbali sana (S + siku 6 za mwisho
-      // za namba + timestamp base36), hivyo haigusiwi na ukataji huo kamwe.
+      // orderReference ni ya kipekee kwa kila jaribio (inatumika pia kama Idempotency-Key ya Abliner).
       const orderReference = `S${accountPhoneNumber.slice(-6)}${Date.now().toString(36)}`;
       await insertPendingOrder(orderReference, accountPhoneNumber, plan.days, plan.price);
 
       try {
-        await clickpesa.initiateUssdPush({ amount: plan.price, phoneNumber: paymentPhoneNumber, orderReference });
+        await abliner.initiateUssdPush({ amount: plan.price, phoneNumber: paymentPhoneNumber, orderReference });
       } catch (e) {
         // Onyesha SABABU HALISI moja kwa moja kwenye UI (si logs tu) —
-        // e.details ina jibu kamili la ClickPesa lililowekwa na
-        // clickpesa.js, ili mteja/admin waone tatizo bila kufungua Railway.
+        // e.details ina jibu kamili la Abliner lililowekwa na
+        // abliner.js, ili mteja/admin waone tatizo bila kufungua Railway.
         return sendJson(res, 400, { ok: false, error: e.message, details: e.details || null });
       }
 
@@ -1479,10 +1479,10 @@ async function handlePairingRequest(req, res) {
       let status = 'NOT_FOUND'; // tayari imeshughulikiwa (webhook/reconciler) au haipo
       const order = await getPendingOrder(ref);
       if (order && order.phoneNumber === phone) {
-        // Ukurasa unauliza kila sekunde chache — hii inasoma Turso tu. ClickPesa
+        // Ukurasa unauliza kila sekunde chache — hii inasoma Turso tu. Abliner
         // inaulizwa mara chache tu (mayQueryStatus), webhook ndiyo inayothibitisha.
         const st = mayQueryStatus(order)
-          ? await clickpesa.getPaymentStatus(ref).catch((e) => {
+          ? await abliner.getPaymentStatus(ref).catch((e) => {
               console.error('[pay-status]', e.message);
               return null;
             })
@@ -1501,48 +1501,43 @@ async function handlePairingRequest(req, res) {
       return sendJson(res, 200, { ok: true, status, ...billing });
     }
 
-    // ── ClickPesa webhook — called by ClickPesa, not the browser ───────
-    // Muundo halisi wa ClickPesa: { event: 'PAYMENT RECEIVED', data: { status,
-    // orderReference, paymentReference, collectedAmount, ... }, checksum,
-    // checksumMethod } — taarifa za malipo ziko ndani ya `data`.
+    // ── Abliner webhook — called by Abliner, not the browser ───────────
+    // Events: transaction.completed | transaction.failed (+ withdrawal.*,
+    // checkout.paid ambazo hatuzitumii). Taarifa ziko ndani ya `data`:
+    // { customer_reference (= orderReference yetu), status, amount,
+    // provider_reference, reference }. Headers: x-webhook-signature,
+    // x-webhook-timestamp, x-webhook-id.
     if (req.method === 'POST' && req.url === '/api/payment/webhook') {
-      const body = await readJsonBody(req);
-      const data = (body && body.data) || body || {};
-      const orderReference = data.orderReference;
-      const event = String(body.event || '').toUpperCase();
+      const rawBody = await readRawBody(req);
 
-      let status = String(data.status || '').toUpperCase();
-      let paymentInfo = { paymentReference: data.paymentReference || null, collectedAmount: data.collectedAmount };
-
-      if (body.checksum) {
-        if (!clickpesa.verifyWebhookChecksum(body)) {
-          console.error('[payment/webhook] checksum haikuthibitika:', JSON.stringify(body));
-          return sendJson(res, 400, { ok: false, error: 'Invalid checksum' });
-        }
-      } else {
-        // Checksum haijawashwa kwenye ClickPesa — hatuamini body; tunauliza
-        // ClickPesa moja kwa moja hali halisi ya reference hii.
-        console.warn('[payment/webhook] hakuna checksum — natumia status query ya ClickPesa badala yake.');
-        const known = orderReference ? await getPendingOrder(orderReference) : null;
-        const st = (known && !clickpesa.isBlocked())
-          ? await clickpesa.getPaymentStatus(orderReference).catch(() => null)
-          : null;
-        status = st ? st.status : '';
-        paymentInfo = st || paymentInfo;
+      if (!abliner.verifyWebhook(rawBody, req.headers)) {
+        console.error('[payment/webhook] saini/timestamp haikuthibitika');
+        return sendJson(res, 401, { ok: false, error: 'Invalid signature' });
       }
 
-      const order = orderReference ? await getPendingOrder(orderReference) : null;
-      const isSuccess = PAID_STATUSES.includes(status) && event !== 'PAYMENT FAILED';
+      let body;
+      try { body = JSON.parse(rawBody); } catch (e) { return sendJson(res, 400, { ok: false, error: 'Invalid JSON' }); }
 
-      if (order && isSuccess) {
-        await settlePaidOrder(orderReference, paymentInfo);
-      } else if (order && !isSuccess) {
+      const data = (body && body.data) || {};
+      const event = String(body.event || '').toLowerCase();
+      const orderReference = data.customer_reference;
+      const status = String(data.status || '').toUpperCase();
+
+      const order = orderReference ? await getPendingOrder(orderReference) : null;
+
+      if (event === 'transaction.completed' && order) {
+        await settlePaidOrder(orderReference, {
+          paymentReference: data.provider_reference || data.reference || null,
+          collectedAmount: data.amount != null ? Number(data.amount) : undefined,
+        });
+      } else if (event === 'transaction.failed' && order) {
         console.log(`[payment/webhook] malipo ${orderReference} hayakufanikiwa: ${status || event}`);
-        if (status === 'FAILED' || event === 'PAYMENT FAILED') await removePendingOrder(orderReference);
-      } else {
+        await removePendingOrder(orderReference);
+      } else if (!order && event.startsWith('transaction.')) {
         console.warn(`[payment/webhook] orderReference isiyojulikana au imeshashughulikiwa: ${orderReference}`);
       }
 
+      // Jibu 2xx haraka (ndani ya sekunde 8) ili Abliner isirudie.
       return sendJson(res, 200, { ok: true });
     }
 
