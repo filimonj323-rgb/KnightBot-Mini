@@ -1,6 +1,7 @@
 const { downloadContentFromMessage } = global.__baileys;
 const { PassThrough } = require('stream');
 const ffmpeg = require('fluent-ffmpeg');
+const groupStatusGuard = require('../../utils/groupStatusGuard');
 
 // Same pattern used by sticker.js / song.js in this project: point fluent-ffmpeg
 // (and baileys' own internal thumbnail/waveform generation, which shells out to
@@ -28,6 +29,9 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     try {
+      // Zuia kujipost tena: amri hii inaruhusiwa mara moja tu kwa kila ujumbe
+      if (!groupStatusGuard.claim(msg)) return;
+
       const from = extra.from;
 
       // Only inside groups
