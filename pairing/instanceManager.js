@@ -1300,6 +1300,7 @@ async function getSettingsForToken(token) {
   automation.autoViewOnce = custom.autoViewOnce !== false; // default true
 
   return {
+    selfMode: !!custom.selfMode, // true = private (owner pekee), false = public
     prefix: custom.prefix || '',
     botName: custom.botName || '',
     defaultPrefix: defaults.prefix,
@@ -1405,10 +1406,7 @@ async function setSelfModeForOwnInstance(phoneNumber, isPrivate) {
  * (not one group), takes effect immediately on the live connection via
  * sock.instanceSettings, same live-update mechanism as prefix/botName.
  */
-async function updateAutomationForToken(token, payload) {
-  const phoneNumber = await getPhoneNumberByToken(token);
-  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
-
+async function saveAutomationForPhone(phoneNumber, payload) {
   const automation = {};
   AUTOMATION_KEYS.forEach((k) => { automation[k] = !!(payload || {})[k]; });
   // Default true (unlike the AUTOMATION_KEYS above) — only an explicit
@@ -1416,8 +1414,6 @@ async function updateAutomationForToken(token, payload) {
   // entirely must not silently disable a customer's forwarding rules.
   automation.autoForwardMessages = (payload || {}).autoForwardMessages !== false;
   // Auto View-Once — same "default true, explicit opt-out only" treatment.
-  // No dashboard checkbox exists for this yet, so payload will never
-  // include it; that must NOT silently switch it off on every save.
   automation.autoViewOnce = (payload || {}).autoViewOnce !== false;
 
   const current = await getInstanceSettings(phoneNumber); // keeps prefix/botName intact
@@ -1433,6 +1429,26 @@ async function updateAutomationForToken(token, payload) {
   }
 
   return automation;
+}
+
+async function updateAutomationForToken(token, payload) {
+  const phoneNumber = await getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+  return saveAutomationForPhone(phoneNumber, payload);
+}
+
+/**
+ * Dashboard "Otomatiki" → Mode ya Bot (private/public). Inatumia njia ile
+ * ile ya amri ya `.mode` (setSelfModeForOwnInstance) — inaathiri bot ya
+ * mteja huyu TU na inaanza kufanya kazi papo hapo.
+ */
+async function updateModeForToken(token, mode) {
+  const phoneNumber = await getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+  const m = String(mode || '').toLowerCase();
+  if (m !== 'private' && m !== 'public') throw new Error('Mode lazima iwe "private" au "public".');
+  const isPrivate = await setSelfModeForOwnInstance(phoneNumber, m === 'private');
+  return { selfMode: isPrivate, mode: isPrivate ? 'private' : 'public' };
 }
 
 /**
@@ -1810,7 +1826,10 @@ async function adminGetInstanceDetail(rawPhoneNumber) {
       botName: settingsRow.botName || '',
       defaultPrefix: defaults.prefix,
       defaultBotName: defaults.botName,
+      selfMode: !!settingsRow.selfMode,
+      automation: adminAutomationView(settingsRow),
     },
+    protection: adminProtectionView(phoneNumber, groups),
     billing: {
       isPaid: user?.isPaid || false,
       paidUntil: user?.paidUntil || null,
@@ -1843,9 +1862,74 @@ async function adminUpdateInstanceSettings(rawPhoneNumber, { prefix, botName }) 
     [phoneNumber, next.prefix || null, next.botName || null]
   );
 
+  // Soma settings kamili (prefix + botName + automation + selfMode) — usiweke
+  // `next` peke yake, kwani ingefuta toggles/mode kwenye bot inayoendelea
+  // kufanya kazi hadi itakapounganishwa upya.
   const inst = instances.get(phoneNumber);
-  if (inst?.sock) inst.sock.instanceSettings = next;
+  if (inst?.sock) inst.sock.instanceSettings = await getInstanceSettings(phoneNumber);
 
+  return adminGetInstanceDetail(phoneNumber);
+}
+
+// ── Admin: udhibiti kamili wa bot ya mteja (mode, toggles, ulinzi) ──────
+function adminAutomationView(settingsRow) {
+  const out = {};
+  AUTOMATION_KEYS.forEach((k) => {
+    out[k] = DEFAULT_ON_AUTOMATION_KEYS.includes(k) ? settingsRow[k] !== false : !!settingsRow[k];
+  });
+  out.autoForwardMessages = settingsRow.autoForwardMessages !== false;
+  out.autoViewOnce = settingsRow.autoViewOnce !== false;
+  return out;
+}
+
+function adminProtectionView(phoneNumber, groups) {
+  const out = {};
+  Object.keys(PROTECTION_FEATURES).forEach((f) => { out[f] = { enabledCount: 0, total: groups.length }; });
+  if (!groups.length) return out;
+  try {
+    groupDb.runWithOwnerScope(phoneNumber, () => {
+      Object.keys(PROTECTION_FEATURES).forEach((feature) => {
+        const dbField = PROTECTION_FEATURES[feature];
+        out[feature].enabledCount = groups.filter((g) => !!groupDb.getGroupSettings(g.id)[dbField]).length;
+      });
+    });
+  } catch (e) { /* onyesha 0 badala ya kuvunja detail nzima */ }
+  return out;
+}
+
+async function adminSetMode(rawPhoneNumber, mode) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const m = String(mode || '').toLowerCase();
+  if (m !== 'private' && m !== 'public') throw new Error('Mode lazima iwe "private" au "public".');
+  await setSelfModeForOwnInstance(phoneNumber, m === 'private');
+  return adminGetInstanceDetail(phoneNumber);
+}
+
+// Badilisha toggle moja au zaidi (partial) — zisizotajwa zinabaki kama zilivyo.
+async function adminUpdateAutomation(rawPhoneNumber, patch) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const merged = adminAutomationView(await getInstanceSettings(phoneNumber));
+  const allowed = [...AUTOMATION_KEYS, 'autoForwardMessages', 'autoViewOnce'];
+  Object.keys(patch || {}).forEach((k) => { if (allowed.includes(k)) merged[k] = !!patch[k]; });
+  await saveAutomationForPhone(phoneNumber, merged);
+  return adminGetInstanceDetail(phoneNumber);
+}
+
+// Washa/zima kipengele cha ulinzi kwenye groups ZOTE za bot hii.
+// (Uchaguzi wa group moja moja unabaki kwenye dashboard ya mteja.)
+async function adminSetProtection(rawPhoneNumber, feature, enabled) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const dbField = PROTECTION_FEATURES[feature];
+  if (!dbField) throw new Error('Kipengele cha ulinzi si sahihi.');
+  const inst = instances.get(phoneNumber);
+  if (!inst || inst.status !== 'connected' || !inst.sock) {
+    throw new Error('Bot haipo "live" kwa sasa — haiwezi kubadilisha ulinzi wa groups.');
+  }
+  const chats = await inst.sock.groupFetchAllParticipating();
+  const ids = Object.values(chats).map((g) => g.id);
+  groupDb.runWithOwnerScope(phoneNumber, () => {
+    ids.forEach((id) => groupDb.updateGroupSettings(id, { [dbField]: !!enabled }));
+  });
   return adminGetInstanceDetail(phoneNumber);
 }
 
@@ -2263,6 +2347,7 @@ module.exports = {
   setPrefixForOwnInstance,
   setSelfModeForOwnInstance,
   updateAutomationForToken,
+  updateModeForToken,
   getProtectionForToken,
   updateProtectionForToken,
   getAutoForwardRulesForToken,
@@ -2278,6 +2363,9 @@ module.exports = {
   startReminderScheduler,
   adminGetInstanceDetail,
   adminUpdateInstanceSettings,
+  adminSetMode,
+  adminUpdateAutomation,
+  adminSetProtection,
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,

@@ -35,6 +35,7 @@ const {
   getSettingsForToken,
   updateSettingsForToken,
   updateAutomationForToken,
+  updateModeForToken,
   updateProtectionForToken,
   getAutoForwardRulesForToken,
   saveAutoForwardRuleForToken,
@@ -54,6 +55,9 @@ const {
   startReminderScheduler,
   adminGetInstanceDetail,
   adminUpdateInstanceSettings,
+  adminSetMode,
+  adminUpdateAutomation,
+  adminSetProtection,
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
@@ -568,6 +572,14 @@ async function handlePairingRequest(req, res) {
       return sendJson(res, 200, { ok: true, automation });
     }
 
+    // Settings: Mode ya bot (private = owner pekee / public = kila mtu).
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings/mode')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings/mode', ''));
+      const body = await readJsonBody(req);
+      const result = await updateModeForToken(token, body.mode);
+      return sendJson(res, 200, { ok: true, ...result });
+    }
+
     // Settings: save group-wise protection (antiGroupMention/antiPromo/antiLink).
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/settings/protection')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/settings/protection', ''));
@@ -822,7 +834,7 @@ async function handlePairingRequest(req, res) {
       // Full-access bot control (per-customer) — status, groups, settings,
       // messaging, force session reset. All still behind the same admin
       // Authorization check above.
-      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|message|group-status|reset-session|adjust-days|name|delete)$/);
+      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|mode|automation|protection|message|group-status|reset-session|adjust-days|name|delete)$/);
       if (phoneMatch) {
         const [, phone, action] = phoneMatch;
 
@@ -834,6 +846,25 @@ async function handlePairingRequest(req, res) {
         if (action === 'settings' && req.method === 'POST') {
           const body = await readJsonBody(req);
           const detail = await adminUpdateInstanceSettings(phone, body);
+          return sendJson(res, 200, { ok: true, ...detail });
+        }
+
+        // Udhibiti kamili wa bot ya mteja: mode, toggles za otomatiki, ulinzi.
+        if (action === 'mode' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const detail = await adminSetMode(phone, body.mode);
+          return sendJson(res, 200, { ok: true, ...detail });
+        }
+
+        if (action === 'automation' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const detail = await adminUpdateAutomation(phone, body);
+          return sendJson(res, 200, { ok: true, ...detail });
+        }
+
+        if (action === 'protection' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const detail = await adminSetProtection(phone, String(body.feature || ''), !!body.enabled);
           return sendJson(res, 200, { ok: true, ...detail });
         }
 
