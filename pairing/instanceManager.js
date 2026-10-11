@@ -1665,6 +1665,22 @@ async function notifyPaymentReceived(phoneNumber, days, paidUntil) {
 }
 
 /**
+ * Arifa ya WhatsApp malipo yakifeli (mteja alikataa, PIN si sahihi, salio
+ * halitoshi, muda uliisha n.k.). Inatumwa kwa namba ya bot ya mteja.
+ */
+async function notifyPaymentFailed(phoneNumber, days, amount) {
+  const record = instances.get(phoneNumber);
+  if (!record || record.status !== 'connected' || !record.sock) {
+    console.warn(`[payment] arifa ya kufeli haikutumwa kwa ${phoneNumber}: bot haijaunganika.`);
+    return;
+  }
+  const text = `❌ *Malipo hayakufanikiwa*\n\n` +
+    (days ? `Package: siku ${days}` : '') + (amount ? ` (TZS ${amount})` : '') +
+    `\n\nHakuna pesa iliyokatwa kama malipo hayakukamilika. Jaribu tena kupitia *💳 Malipo* kwenye dashboard yako.`;
+  await record.sock.sendMessage(`${phoneNumber}@s.whatsapp.net`, { text });
+}
+
+/**
  * Dashboard "Billing" tab — a customer's own trial/paid status, used to
  * show a countdown / pay button on their dashboard.html.
  */
@@ -2250,4 +2266,5 @@ module.exports = {
   restoreAllInstances,
   adminAdjustDays,
   notifyPaymentReceived,
+  notifyPaymentFailed,
 };

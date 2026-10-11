@@ -63,6 +63,7 @@ const {
   restoreAllInstances,
   adminAdjustDays,
   notifyPaymentReceived,
+  notifyPaymentFailed,
 } = require('./instanceManager');
 const adminAuth = require('./adminAuth');
 const abliner = require('./abliner');
@@ -182,7 +183,8 @@ async function settlePaidOrder(orderReference, info = {}) {
       paymentReference: info.paymentReference || null,
     });
     console.log(`[payment] ✅ ${orderReference}: ${order.phoneNumber} ameongezewa siku ${order.days}`);
-    notifyPaymentReceived(order.phoneNumber, order.days, user && user.paidUntil).catch(() => {});
+    notifyPaymentReceived(order.phoneNumber, order.days, user && user.paidUntil)
+      .catch((e) => console.error(`[payment] arifa ya malipo haikutumwa kwa ${order.phoneNumber}:`, e.message));
     return { order, user };
   } catch (e) {
     // Rudisha order ili reconciler ijaribu tena — mteja asipoteze malipo.
@@ -217,6 +219,16 @@ function mayQueryStatus(order) {
   return true;
 }
 
+// Malipo yamefeli: futa order (mara moja tu) na mjulishe mteja kwa WhatsApp.
+async function failOrder(order) {
+  statusTries.delete(order.orderReference);
+  const claim = await db.query('DELETE FROM pending_orders WHERE orderReference = ?', [order.orderReference]);
+  if (!claim.rowsAffected) return; // njia nyingine imeshashughulikia (hakuna arifa mara mbili)
+  console.log(`[payment] ❌ ${order.orderReference}: malipo yamefeli (${order.phoneNumber})`);
+  notifyPaymentFailed(order.phoneNumber, order.days, order.amount)
+    .catch((e) => console.error(`[payment] arifa ya kufeli haikutumwa kwa ${order.phoneNumber}:`, e.message));
+}
+
 async function dropOrder(orderReference) {
   statusTries.delete(orderReference);
   await removePendingOrder(orderReference);
@@ -239,7 +251,7 @@ async function reconcilePendingOrders() {
         statusTries.delete(order.orderReference);
         await settlePaidOrder(order.orderReference, st);
       } else if (st && st.status === 'FAILED') {
-        await dropOrder(order.orderReference);
+        await failOrder(order);
       }
     } catch (e) {
       console.error(`[payment/reconcile] ${order.orderReference}:`, e.message);
@@ -1491,7 +1503,7 @@ async function handlePairingRequest(req, res) {
           await settlePaidOrder(ref, st);
           status = 'PAID';
         } else if (st && st.status === 'FAILED') {
-          await removePendingOrder(ref);
+          await failOrder(order);
           status = 'FAILED';
         } else {
           status = 'PENDING';
@@ -1532,7 +1544,7 @@ async function handlePairingRequest(req, res) {
         });
       } else if (event === 'transaction.failed' && order) {
         console.log(`[payment/webhook] malipo ${orderReference} hayakufanikiwa: ${status || event}`);
-        await removePendingOrder(orderReference);
+        await failOrder(order);
       } else if (!order && event.startsWith('transaction.')) {
         console.warn(`[payment/webhook] orderReference isiyojulikana au imeshashughulikiwa: ${orderReference}`);
       }
