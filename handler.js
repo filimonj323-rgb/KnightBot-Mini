@@ -1326,6 +1326,15 @@ const handleMessageImpl = async (sock, msg) => {
     const command = commands.get(commandName);
     if (!command) return;
 
+    // Private mode — only owner can use commands. Bot ya mteja (pairing)
+    // inasoma mode yake MWENYEWE kutoka sock.instanceSettings (Turso); main
+    // bot inatumia config.selfMode. Ukaguzi uko HAPA (kabla ya kitu
+    // kingine) ili watu wengine wasipate jibu lolote, hata la forex/lock.
+    const privateMode = sock.instanceSettings ? !!sock.instanceSettings.selfMode : config.selfMode;
+    if (privateMode && !isOwner(sender, sock)) {
+      return;
+    }
+
     // Commands za FOREX/TRADING kwa PAIRING BOTS (utils/forexAccess.js):
     //  • 'own' (fxbuy, fxsell, positions, panic, fxclose) = akaunti ya Deriv ya MTEJA MWENYEWE — zinaruhusiwa TU kwa mteja
     //    mwenyewe; global owner na watu wengine wanazuiwa (akaunti si yao). Vikomo/idhini viko ndani ya derivCustomerTrader.
@@ -1353,11 +1362,6 @@ const handleMessageImpl = async (sock, msg) => {
         if (decision === 'locked_account') return sock.sendMessage(from, { text: forexAccess.ACCOUNT_LOCKED_TEXT });
         if (decision === 'locked_signal') return sock.sendMessage(from, { text: forexAccess.LOCKED_TEXT });
       }
-    }
-    
-    // Check self mode (private mode) - only owner can use commands
-    if (config.selfMode && !isOwner(sender, sock)) {
-      return;
     }
     
     // Permission checks
