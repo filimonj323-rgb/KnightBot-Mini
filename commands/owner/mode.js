@@ -17,9 +17,23 @@ module.exports = {
   
   async execute(sock, msg, args, extra) {
     try {
+      // Bot ya mteja (pairing): mode ni ya namba hii TU, inahifadhiwa Turso.
+      // Main bot: inabaki config.js kama zamani.
+      const isPaired = !!sock.pairingOwnerId;
+      const isPrivateNow = isPaired ? !!(sock.instanceSettings && sock.instanceSettings.selfMode) : !!config.selfMode;
+      const setMode = async (priv) => {
+        if (isPaired) {
+          const { setSelfModeForOwnInstance } = require('../../pairing/instanceManager');
+          await setSelfModeForOwnInstance(sock.pairingOwnerId, priv);
+        } else {
+          updateConfig('selfMode', priv);
+          config.selfMode = priv; // Update runtime config
+        }
+      };
+
       if (!args[0]) {
-        const currentMode = config.selfMode ? 'private' : 'public';
-        const description = config.selfMode 
+        const currentMode = isPrivateNow ? 'private' : 'public';
+        const description = isPrivateNow 
           ? 'Only owner and sudo users can use commands'
           : 'Everyone can use commands';
         
@@ -36,24 +50,20 @@ module.exports = {
       const mode = args[0].toLowerCase();
       
       if (mode === 'private' || mode === 'priv') {
-        if (config.selfMode) {
+        if (isPrivateNow) {
           return extra.reply('🔒 Bot is already in *PRIVATE* mode.\nOnly owner can use commands.');
         }
         
-        // Update config
-        updateConfig('selfMode', true);
-        config.selfMode = true; // Update runtime config
+        await setMode(true);
         return extra.reply('🔒 Bot mode changed to *PRIVATE*\n\nOnly owner can use commands now.');
       }
       
       if (mode === 'public' || mode === 'pub') {
-        if (!config.selfMode) {
+        if (!isPrivateNow) {
           return extra.reply('🌐 Bot is already in *PUBLIC* mode.\nEveryone can use commands.');
         }
         
-        // Update config
-        updateConfig('selfMode', false);
-        config.selfMode = false; // Update runtime config
+        await setMode(false);
         return extra.reply('🌐 Bot mode changed to *PUBLIC*\n\nEveryone can use commands now.');
       }
       
