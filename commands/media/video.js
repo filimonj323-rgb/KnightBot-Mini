@@ -135,7 +135,7 @@ module.exports = {
       const MAX_BYTES_YTI = 45 * 1024 * 1024; // kikomo salama cha RAM
 
       // Hatua 2: youtubei.js ikijifanya mteja wa TV (bila API ya tatu).
-      async function downloadYoutubeiTV(url) {
+      async function downloadYoutubei(url, client) {
         const id = (url.match(/(?:youtu\.be\/|v=|shorts\/)([a-zA-Z0-9_-]{11})/) || [])[1];
         if (!id) throw new Error('Video ID haipatikani');
         const yt = await getInnertube();
@@ -143,7 +143,7 @@ module.exports = {
           type: 'video+audio',
           quality: 'best',
           format: 'mp4',
-          client: 'TV',
+          client,
         });
         const reader = stream.getReader();
         const chunks = [];
@@ -199,20 +199,21 @@ module.exports = {
       try { videoBuffer = await downloadDirectYtdl(videoUrl); }
       catch (e) { errors.push('ytdl: ' + (e?.message || e)); console.error('[VIDEO] ytdl failed:', e?.message || e); }
 
+      // Hatua 2: youtubei.js — jaribu wateja kadhaa wa YouTube kwa mpangilio.
+      // "Video is unplayable" kutoka mteja mmoja haimaanishi wengine watashindwa.
+      // (API za zamani EliteProTech/Yupra/Okatsu ZIMEONDOLEWA: 404, domain
+      // haipo tena (ENOTFOUND), na 402 — zilikuwa zinachelewesha tu.)
       if (!videoBuffer) {
-        try { videoBuffer = await downloadYoutubeiTV(videoUrl); }
-        catch (e) { errors.push('youtubei-TV: ' + (e?.message || e)); console.error('[VIDEO] youtubei TV failed:', e?.message || e); }
-      }
-
-      if (!videoBuffer) {
-        const apiSteps = [
-          ['EliteProTech', () => APIs.getEliteProTechVideoByUrl(videoUrl)],
-          ['Yupra', () => APIs.getYupraVideoByUrl(videoUrl)],
-          ['Okatsu', () => APIs.getOkatsuVideoByUrl(videoUrl)],
-        ];
-        for (const [name, fn] of apiSteps) {
-          try { videoData = await fn(); if (videoData?.download) break; videoData = null; }
-          catch (e) { errors.push(name + ': ' + (e?.message || e)); console.error('[VIDEO] ' + name + ' failed:', e?.message || e); }
+        console.error('[VIDEO] url inayojaribiwa:', videoUrl);
+        for (const client of ['TV', 'TV_EMBEDDED', 'IOS', 'ANDROID']) {
+          try {
+            videoBuffer = await downloadYoutubei(videoUrl, client);
+            console.log('[VIDEO] ✅ imefanikiwa kwa youtubei client:', client);
+            break;
+          } catch (e) {
+            errors.push('youtubei-' + client + ': ' + (e?.message || e));
+            console.error('[VIDEO] youtubei ' + client + ' failed:', e?.message || e);
+          }
         }
       }
 
