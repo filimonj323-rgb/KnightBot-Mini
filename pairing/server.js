@@ -48,6 +48,7 @@ const {
   normalizePhoneNumber,
   adminListUsers,
   adminGetAvatars,
+  adminGetAvatarImage,
   adminMarkPaid,
   adminExtendTrial,
   adminSetBlocked,
@@ -733,6 +734,15 @@ async function handlePairingRequest(req, res) {
         console.log('[pairing] admin ameomba restore-bots kwa mkono...');
         restoreAllInstances().catch((e) => console.error('[pairing] restore-bots imeshindwa:', e && e.stack ? e.stack : e));
         return sendJson(res, 200, { ok: true, message: 'Urejeshaji umeanza. Angalia logs: "[pairing] auto-reconnect: X/Y zimeanzishwa".' });
+      }
+
+      if (req.method === 'GET' && req.url.split('?')[0] === '/api/admin/avatar-image') {
+        const phone = (new URL(req.url, 'http://x').searchParams.get('phone') || '').replace(/\D/g, '');
+        let img = null;
+        try { img = phone ? await adminGetAvatarImage(phone) : null; } catch (e) { img = null; }
+        if (!img) return sendJson(res, 404, { ok: false, error: 'Picha haipatikani.' });
+        res.writeHead(200, { 'Content-Type': img.type, 'Cache-Control': 'private, max-age=300' });
+        return res.end(img.buf);
       }
 
       if (req.method === 'GET' && req.url === '/api/admin/avatars') {

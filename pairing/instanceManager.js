@@ -1714,6 +1714,15 @@ async function fetchAvatarFor(phoneNumber) {
   return url;
 }
 
+// Pakua bytes za picha ya mteja mmoja (kwa admin kuiona kubwa / kuisave).
+// URL inatoka kwenye cache yetu tu, si kwa input ya mtumiaji.
+async function adminGetAvatarImage(phoneNumber) {
+  const url = await fetchAvatarFor(phoneNumber);
+  if (!url) return null;
+  const r = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
+  return { buf: Buffer.from(r.data), type: r.headers['content-type'] || 'image/jpeg' };
+}
+
 async function adminGetAvatars() {
   const phones = Array.from(instances.keys());
   const out = {};
@@ -2428,6 +2437,7 @@ module.exports = {
   resendDashboardLink,
   adminListUsers,
   adminGetAvatars,
+  adminGetAvatarImage,
   adminMarkPaid,
   adminExtendTrial,
   adminSetBlocked,
