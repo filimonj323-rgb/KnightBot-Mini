@@ -181,12 +181,12 @@ async function retryOperation(operation, operationName = 'DB Operation') {
       lastError = err;
       if (attempt < MAX_RETRIES) {
         const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
-        log.warn(`[session-db] ${operationName} attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms:`, err.message);
+        log.warn(`[session-db] ${operationName} attempt ${attempt}/${MAX_RETRIES} failed, retrying in ${delay}ms: %s`, err.message);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }
-  log.error(`[session-db] ${operationName} failed after ${MAX_RETRIES} attempts:`, lastError.message);
+  log.error(`[session-db] ${operationName} failed after ${MAX_RETRIES} attempts: %s`, lastError.message);
   throw lastError;
 }
 
@@ -225,7 +225,7 @@ async function initializeDatabase() {
     log.info('[session-db] Majedwali "wa_sessions" + "wa_session_keys" + "wa_messages" tayari (Turso).');
     return true;
   } catch (err) {
-    log.error('[session-db] Table error:', err.message);
+    log.error('[session-db] Table error: %s', err.message);
     return false;
   }
 }
@@ -553,7 +553,7 @@ function startMessagePruner(sessionId) {
 async function flushAllSessionsOnExit() {
   log.info(`[session-db] Emergency save before exit (${exitHandlers.size} session(s))...`);
   const flushes = [...exitHandlers.values()].map((flushImmediate) =>
-    flushImmediate().catch((err) => log.error('[session-db] Emergency save failed for one session:', err.message))
+    flushImmediate().catch((err) => log.error('[session-db] Emergency save failed for one session: %s', err.message))
   );
   await Promise.allSettled(flushes);
   log.info('[session-db] Final save complete.');
@@ -604,7 +604,7 @@ function createThrottledKeyWriter(sessionId) {
         await deleteKeys(sessionId, [...deletes]);
       }
     } catch (err) {
-      log.error(`[session-db] Key flush error (${sessionId}):`, err.message);
+      log.error(`[session-db] Key flush error (${sessionId}): %s`, err.message);
       for (const [k, v] of upserts) pendingUpserts.set(k, v);
       for (const k of deletes) pendingDeletes.add(k);
     } finally {
@@ -665,7 +665,7 @@ function createThrottledCredsWriter(sessionId, getSnapshot) {
     try {
       await saveCredsRow(sessionId, getSnapshot());
     } catch (err) {
-      log.error(`[session-db] Creds flush error (${sessionId}):`, err.message);
+      log.error(`[session-db] Creds flush error (${sessionId}): %s`, err.message);
       dirty = true;
     } finally {
       flushing = false;
@@ -900,7 +900,7 @@ async function useTursoAuthState(sessionId) {
         await credsWriter.flushImmediate();
         log.info(`[session-db] Pairing imekamilika — imehifadhiwa papo hapo (${sessionId}).`);
       } catch (err) {
-        log.error('[session-db] Immediate pairing-save error:', err.message);
+        log.error('[session-db] Immediate pairing-save error: %s', err.message);
       }
     }
   };
@@ -916,7 +916,7 @@ async function useTursoAuthState(sessionId) {
         await credsWriter.flushImmediate();
         log.info('[session-db] Credentials refreshed');
       } catch (err) {
-        log.error('[session-db] Credential refresh error:', err.message);
+        log.error('[session-db] Credential refresh error: %s', err.message);
       }
     }, CREDS_REFRESH_INTERVAL);
     global.credRefreshTimers.set(refreshTimerKey, timer);
