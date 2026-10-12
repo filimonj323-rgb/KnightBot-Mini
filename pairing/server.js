@@ -1619,7 +1619,25 @@ let _pairingInitialized = false;
 async function initPairingServer() {
   if (_pairingInitialized) return;
   _pairingInitialized = true;
-  await db.initSchema(); // must finish before we accept any requests
+  // Turso ikishindwa kufikika sekunde za kwanza za boot ("fetch failed" —
+  // mtandao wa container bado haujawa tayari), usikate tamaa: jaribu tena.
+  // Bila hii, flag hapo juu inabaki true na restoreAllInstances() HAIITWI
+  // kabisa — bots za wateja zinabaki zimezimwa hadi redeploy nyingine.
+  const INIT_MAX_ATTEMPTS = 8;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await db.initSchema(); // must finish before we accept any requests
+      break;
+    } catch (err) {
+      if (attempt >= INIT_MAX_ATTEMPTS) {
+        _pairingInitialized = false; // ruhusu jaribio la baadaye
+        throw err;
+      }
+      const delayMs = Math.min(5000 * attempt, 30000);
+      console.warn(`[pairing] initSchema imeshindwa (${err && err.message}) — jaribio ${attempt}/${INIT_MAX_ATTEMPTS}, nasubiri ${delayMs / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
   // Inarejesha database/groups.json, users.json, warnings.json, mods.json
   // kutoka Turso — muhimu hasa ikiwa faili hii inaendeshwa STANDALONE (deploy
   // tofauti na index.js — angalia comment ya "STANDALONE MODE" chini): bila
