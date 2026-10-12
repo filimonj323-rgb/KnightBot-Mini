@@ -4,21 +4,33 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Dashboard ya Bot Yako</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:wght@600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<script>
+  (function () { try { var t = JSON.parse(localStorage.getItem('dashLook') || '{}'); var h = document.documentElement;
+    if (t.theme) h.setAttribute('data-theme', t.theme); if (t.font) h.setAttribute('data-font', t.font); if (t.tc) h.setAttribute('data-tc', t.tc); } catch (e) {} })();
+</script>
+
 <style>
   :root {
-    --purple: #9C27B0;
-    --purple-light: #c084dc;
-    --purple-dark: #6a1b7a;
-    --bg: #0c0e13;
-    --card: #171a21;
-    --card-hover: #1c2028;
-    --field: #10131a;
-    --text: #f2f2f5;
-    --muted: #8b90a0;
-    --border: #262a35;
-    --success: #4caf50;
-    --error: #e05555;
-    --radius: 16px;
+    --accent-rgb: 139,92,246; --accent-dark-rgb: 109,40,217; --accent2-rgb: 56,189,248; --on-accent: #fff;
+    --font: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; --font-head: var(--font);
+    --purple: #8b5cf6;
+    --purple-light: #c4b5fd;
+    --purple-dark: #5b21b6;
+    --bg: #090a0f;
+    --card: #14161e;
+    --card-hover: #1a1d27;
+    --field: #0d0f15;
+    --text: #f4f4f8;
+    --muted: #8d92a3;
+    --border: #23262f;
+    --success: #34d399;
+    --error: #f87171;
+    --radius: 20px;
+    --grad: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+    --ring: 0 0 0 3px rgba(var(--accent-rgb),0.35);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -29,7 +41,7 @@
     padding: 16px 16px 40px;
     min-height: 100vh;
   }
-  .wrap { max-width: 560px; margin: 0 auto; }
+  .wrap { max-width: 720px; margin: 0 auto; }
 
   .top-header {
     display: flex;
@@ -326,9 +338,294 @@
   .dl-actions button { margin-top: 0; }
   .dl-player { display: none; margin: 0 0 14px; }
   .dl-player audio, .dl-player video { width: 100%; display: block; border-radius: 10px; background: #000; }
+
+  /* ═══════════════ v2 THEME — mwonekano wa kisasa (CSS tu, hakuna logic) ═══════════════ */
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background:
+      radial-gradient(900px 420px at 50% -120px, rgba(var(--accent-rgb),0.18), transparent 70%),
+      var(--bg);
+    padding: 18px 16px 110px;
+    -webkit-font-smoothing: antialiased;
+  }
+  @media (min-width: 760px) { body { padding-bottom: 48px; } }
+
+  /* Header */
+  .top-header { margin-bottom: 14px; padding: 6px 4px; }
+  .top-header .logo { width: 46px; height: 46px; border-radius: 14px; background: var(--grad); box-shadow: 0 8px 24px rgba(var(--accent-dark-rgb),0.45); font-size: 22px; }
+  .top-header h2 { font-size: 16.5px; letter-spacing: -0.01em; }
+  .top-header > div:nth-child(2) { flex: 1; min-width: 0; }
+  .hdr-chip { font-size: 11.5px; font-weight: 700; padding: 6px 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--field); color: var(--muted); white-space: nowrap; }
+  .hdr-chip.on { color: #bbf7d0; border-color: rgba(52,211,153,0.45); background: rgba(52,211,153,0.1); }
+  .hdr-chip.private { color: #fde68a; border-color: rgba(251,191,36,0.45); background: rgba(251,191,36,0.1); }
+
+  /* Navigation: bottom bar kwenye simu, pill bar juu kwenye desktop */
+  .section-tabs {
+    position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 50;
+    margin: 0 auto; max-width: 720px;
+    background: rgba(20,22,30,0.88); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 6px;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.55);
+    overflow: visible; gap: 2px;
+  }
+  .section-tab { min-width: 0; padding: 8px 2px 7px; border-radius: 14px; font-size: 10.5px; letter-spacing: 0.01em; }
+  .section-tab .icon { font-size: 19px; margin-bottom: 3px; filter: grayscale(0.6); transition: filter .15s, transform .15s; }
+  .section-tab.active { background: var(--grad); box-shadow: 0 6px 18px rgba(var(--accent-dark-rgb),0.45); }
+  .section-tab.active .icon { filter: none; transform: translateY(-1px); }
+  @media (min-width: 760px) {
+    .section-tabs { position: sticky; top: 10px; left: auto; right: auto; bottom: auto; margin: 0 auto 20px; max-width: none; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+    .section-tab { font-size: 12px; padding: 10px 6px; cursor: pointer; }
+    .section-tab:not(.active):hover { background: rgba(255,255,255,0.05); color: var(--text); }
+  }
+
+  /* Cards */
+  .card { background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0) 40%), var(--card); border: 1px solid var(--border); padding: 24px 22px; box-shadow: 0 16px 40px rgba(0,0,0,0.35); }
+  @media (max-width: 480px) { .card { padding: 20px 16px; border-radius: 18px; } }
+  h1 { font-size: 18px; letter-spacing: -0.015em; }
+  p.sub { font-size: 13px; }
+  .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.09em; color: var(--purple-light); }
+
+  /* Fields */
+  select, textarea, input[type="file"], input[type="text"], input[type="password"] { border-radius: 12px; transition: border-color .15s, box-shadow .15s; }
+  select:focus, textarea:focus, input:focus { border-color: var(--purple); box-shadow: var(--ring); }
+  input[type="text"], input[type="password"], select, textarea { font-size: 15px; }
+
+  /* Buttons */
+  button { background: var(--grad); border-radius: 14px; box-shadow: 0 8px 20px rgba(var(--accent-dark-rgb),0.32); letter-spacing: 0.01em; }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:focus-visible { outline: none; box-shadow: var(--ring); }
+  button.secondary { background: rgba(var(--accent-rgb),0.06); border: 1px solid rgba(var(--accent-rgb),0.55); box-shadow: none; }
+  button.secondary:hover:not(:disabled) { background: rgba(var(--accent-rgb),0.14); }
+  button.ghost { box-shadow: none; }
+
+  /* Sub-tabs (Text/Picha, Settings nav, Deriv nav) */
+  .tabs, .settings-nav, .dv-tabs { background: var(--field); border: 1px solid var(--border); border-radius: 14px; padding: 4px; }
+  .tab, .settings-nav-item, .dv-tab { border-radius: 10px; }
+  .tab.active { background: var(--grad); }
+  .dv-tabs { overflow-x: auto; scrollbar-width: none; }
+  .dv-tabs::-webkit-scrollbar { display: none; }
+
+  /* Messages */
+  .msg { border-radius: 12px; }
+
+  /* Group lists */
+  .group-list { border-radius: 14px; scrollbar-width: thin; scrollbar-color: #343846 transparent; }
+  .group-row { padding: 12px 14px; transition: background .12s; }
+  .group-row input { accent-color: var(--purple); }
+  .group-list-actions span { padding: 4px 0; font-weight: 600; }
+  .gl-search { margin-bottom: 8px !important; padding: 10px 14px !important; font-size: 13.5px !important; border-radius: 999px !important; }
+
+  /* ── Toggles ── */
+  .tg-title { font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--purple-light); margin: 22px 2px 10px; opacity: 0.9; }
+  .tg-title:first-of-type { margin-top: 6px; }
+  .toggle-row {
+    background: var(--field); border: 1px solid var(--border); border-radius: 16px;
+    padding: 14px 16px; margin-bottom: 10px; gap: 14px; align-items: center;
+    transition: border-color .15s, background .15s;
+  }
+  .toggle-row:last-child { border-bottom: 1px solid var(--border); }
+  .toggle-row:has(input:checked) { border-color: rgba(var(--accent-rgb),0.45); background: linear-gradient(180deg, rgba(var(--accent-rgb),0.08), rgba(var(--accent-rgb),0.02)), var(--field); }
+  .toggle-row > div { min-width: 0; flex: 1; }
+  .toggle-label { display: block; font-size: 14px; font-weight: 600; line-height: 1.35; }
+  .toggle-hint { font-size: 12px; line-height: 1.5; margin-top: 3px; }
+  .toggle-hint.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .toggle-hint.clamp::after { content: ""; }
+  .toggle-hint.clamp:not(.open)  { }
+  .toggle-hint.open { -webkit-line-clamp: unset; display: block; }
+  .toggle-hint code { background: rgba(var(--accent-rgb),0.14); color: var(--purple-light); padding: 1px 6px; border-radius: 6px; font-size: 11.5px; }
+  .toggle-row:has(#tg_selfMode) { border-color: rgba(251,191,36,0.3); }
+  .toggle-row:has(#tg_selfMode input:checked), .toggle-row:has(#tg_selfMode:checked) { border-color: rgba(251,191,36,0.55); background: linear-gradient(180deg, rgba(251,191,36,0.07), rgba(251,191,36,0.01)), var(--field); }
+
+  .switch { width: 52px; height: 30px; }
+  .switch::after { content: ""; position: absolute; inset: -8px -6px; } /* eneo kubwa la kugusa */
+  .switch .slider { background: #232632; border: 1px solid #2f3342; border-radius: 30px; transition: background .22s, border-color .22s, box-shadow .22s; }
+  .switch .slider::before {
+    height: 24px; width: 24px; left: 2px; top: 2px; background: #8d92a3; border-radius: 50%;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    transition: transform .22s cubic-bezier(.4,1.4,.5,1), background .22s;
+  }
+  .switch input:checked + .slider { background: var(--grad); border-color: transparent; box-shadow: 0 0 0 1px rgba(var(--accent-rgb),0.4), 0 4px 14px rgba(var(--accent-dark-rgb),0.5); }
+  .switch input:checked + .slider::before { transform: translateX(22px); background: #fff; }
+  .switch input:active + .slider::before { width: 28px; }
+  .switch input:checked:active + .slider::before { transform: translateX(18px); }
+  .switch input:focus-visible + .slider { box-shadow: var(--ring); }
+  .switch input:disabled + .slider { opacity: 0.5; cursor: not-allowed; }
+  .toggle-row:has(#tg_selfMode) .switch input:checked + .slider { background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 4px 14px rgba(217,119,6,0.45); }
+
+  /* Muhtasari wa automation */
+  .auto-summary { background: var(--field); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; margin-bottom: 14px; }
+  .as-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .as-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .as-count { font-size: 15px; font-weight: 800; }
+  .as-bar { height: 6px; background: #232632; border-radius: 99px; overflow: hidden; }
+  .as-bar i { display: block; height: 100%; background: var(--grad); border-radius: 99px; transition: width .35s ease; }
+
+  .pill { padding: 6px 12px; }
+  .protect-block { border: 1px solid var(--border); border-radius: 16px; padding: 4px 14px 12px; margin-bottom: 12px; background: rgba(255,255,255,0.01); }
+  .protect-block .toggle-row { background: transparent; border: none; padding: 12px 0; margin: 0; }
+  .protect-block:last-of-type { border-bottom: 1px solid var(--border); }
+  .protect-block:has(.protectToggle:checked) { border-color: rgba(var(--accent-rgb),0.45); }
+  .af-rule-card { border-radius: 14px; }
+  .af-panel { border-top: 1px dashed #2f3342; }
+
+  .preview-card, .dv-box { border-radius: 14px; }
+  .dv-box { background: rgba(255,255,255,0.015); }
+  .dl-type-tabs .tab { border: 1px solid var(--border); background: var(--field); padding: 11px 6px; border-radius: 12px; }
+  .dl-type-tabs .tab.active { border-color: transparent; }
+
+  /* Desktop: toggles mbili kwa safu */
+  @media (min-width: 900px) {
+    #settingspane-automation .card { padding: 28px; }
+    #settingspane-automation .toggle-row { margin-bottom: 10px; }
+  }
+
+  /* ═══════════════ v3 THEME — professional layout + toggles zilizopangwa vizuri ═══════════════ */
+  :root { --surface: #11131a; --line: rgba(255,255,255,0.07); }
+  .wrap { max-width: 760px; }
+  @media (min-width: 980px) { .wrap { max-width: 940px; } }
+
+  /* Header kama hero card */
+  .top-header {
+    position: relative; overflow: hidden; gap: 14px; padding: 16px 18px; margin-bottom: 16px;
+    border-radius: 22px; border: 1px solid var(--line);
+    background: radial-gradient(420px 160px at 0% 0%, rgba(var(--accent-rgb),0.28), transparent 70%), linear-gradient(180deg, #181b25, #12141c);
+    box-shadow: 0 18px 44px rgba(0,0,0,0.4);
+  }
+  .top-header h2 { font-size: 15.5px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.25; }
+  .top-header p { font-size: 12px; margin-top: 3px; }
+  .hdr-chip { padding: 7px 12px; font-size: 11.5px; }
+
+  /* Group ya toggles = kadi moja yenye rows zilizotenganishwa */
+  .tg-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 4px; }
+  @media (min-width: 900px) { .tg-grid { grid-template-columns: 1fr 1fr; align-items: start; } }
+  .tg-group { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 0; overflow: hidden; }
+  .tg-group .tg-title { margin: 0; padding: 12px 14px 8px; font-size: 10.5px; opacity: 1; }
+
+  .tg-group .toggle-row,
+  .protect-block .toggle-row {
+    background: transparent; border: none; border-radius: 0; margin: 0;
+    padding: 13px 14px; gap: 12px; align-items: center;
+    border-top: 1px solid var(--line);
+  }
+  .tg-group .tg-title + .toggle-row { border-top: none; }
+  .tg-group .toggle-row:has(input:checked),
+  .tg-group .toggle-row:has(#tg_selfMode),
+  .tg-group .toggle-row:has(#tg_selfMode input:checked) { background: transparent; border-color: var(--line); }
+  .tg-group .toggle-row:has(input:checked) { background: linear-gradient(90deg, rgba(var(--accent-rgb),0.10), transparent 70%); }
+  .tg-group .toggle-row:has(#tg_selfMode:checked) { background: linear-gradient(90deg, rgba(245,158,11,0.12), transparent 70%); }
+  .tg-group .tg-title + .toggle-row:has(input) { border-top: none; }
+
+  /* Icon tile upande wa kushoto */
+  .tg-ico {
+    width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    border-radius: 12px; font-size: 18px; background: #1b1e29; border: 1px solid var(--line);
+    filter: grayscale(0.7); opacity: 0.8; transition: all .2s;
+  }
+  .toggle-row:has(input:checked) .tg-ico { filter: none; opacity: 1; background: rgba(var(--accent-rgb),0.16); border-color: rgba(var(--accent-rgb),0.4); }
+  .toggle-row:has(#tg_selfMode:checked) .tg-ico { background: rgba(245,158,11,0.16); border-color: rgba(245,158,11,0.45); }
+  .toggle-row .switch { margin-left: auto; }
+  .toggle-row .toggle-label { font-size: 14px; }
+  .toggle-row .toggle-hint { color: var(--muted); }
+
+  /* Switch iliyo thabiti: ukubwa mmoja kila mahali, knob katikati */
+  .switch { width: 50px; height: 28px; flex: 0 0 50px; }
+  .switch .slider { background: #262a38; border: 1px solid #343949; }
+  .switch .slider::before { width: 22px; height: 22px; left: 2px; top: 2px; }
+  .switch input:checked + .slider::before { transform: translateX(22px); }
+  .switch input:checked:active + .slider::before { transform: translateX(18px); }
+
+  /* Protection blocks */
+  .protect-block { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 2px 4px 8px; margin-bottom: 12px; }
+  .protect-block .toggle-row { border-top: none; }
+  .protect-block .protect-groups { padding: 4px 14px 6px; }
+  .protect-block:has(.protectToggle:checked) { border-color: rgba(var(--accent-rgb),0.45); background: linear-gradient(180deg, rgba(var(--accent-rgb),0.07), transparent 60%), var(--surface); }
+
+  /* Muhtasari + quick actions */
+  .auto-summary { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+  .as-bar { height: 8px; }
+  .as-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .as-actions button { flex: 1; width: auto; padding: 10px 12px; font-size: 12.5px; margin: 0; border-radius: 12px; }
+  .status-strip { margin-bottom: 18px; }
+
+  /* Cards + nav polish */
+  .card { border-color: var(--line); border-radius: 22px; }
+  h1 { font-size: 18.5px; font-weight: 800; }
+  .settings-nav, .dv-tabs, .tabs { background: var(--surface); border-color: var(--line); }
+  .section-tabs { border-color: var(--line); }
+  .group-list { background: var(--surface); border-color: var(--line); }
+  .group-row { border-bottom-color: var(--line); }
+  .group-row:hover { background: rgba(var(--accent-rgb),0.06); }
+  .af-rule-card { background: var(--surface); border-color: var(--line); }
+  @media (max-width: 480px) { .top-header { padding: 14px; border-radius: 20px; } .tg-ico { width: 34px; height: 34px; font-size: 16px; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  /* ═══════════════ v4 — THEMES, FONTS, RANGI ZA MAANDISHI, BACKGROUND ═══════════════ */
+  html[data-theme="gold"] { --purple:#f5b82e; --purple-light:#fde29a; --purple-dark:#b7791f; --grad:linear-gradient(135deg,#f5b82e 0%,#b7791f 100%); --ring:0 0 0 3px rgba(245,184,46,.38); --accent-rgb:245,184,46; --accent-dark-rgb:183,121,31; --accent2-rgb:255,122,40; --on-accent:#1b1203; --bg:#0a0804; --card:#15120a; --field:#0e0b06; --border:#2b2512; --surface:#120f08; --line:rgba(255,226,150,0.10); }
+  html[data-theme="emerald"] { --purple:#10b981; --purple-light:#6ee7b7; --purple-dark:#047857; --grad:linear-gradient(135deg,#10b981 0%,#047857 100%); --ring:0 0 0 3px rgba(16,185,129,.38); --accent-rgb:16,185,129; --accent-dark-rgb:4,120,87; --accent2-rgb:56,189,248; --on-accent:#03130c; --bg:#050b09; --card:#0f1613; --field:#0a100d; --border:#1c2a24; --surface:#0c1411; --line:rgba(167,243,208,0.09); }
+  html[data-theme="ocean"] { --purple:#38bdf8; --purple-light:#7dd3fc; --purple-dark:#0369a1; --grad:linear-gradient(135deg,#38bdf8 0%,#0369a1 100%); --ring:0 0 0 3px rgba(56,189,248,.38); --accent-rgb:56,189,248; --accent-dark-rgb:3,105,161; --accent2-rgb:139,92,246; --on-accent:#03121b; --bg:#050910; --card:#0f151f; --field:#0a0f17; --border:#1b2736; --surface:#0c121b; --line:rgba(186,230,253,0.09); }
+  html[data-theme="rose"] { --purple:#f43f5e; --purple-light:#fda4af; --purple-dark:#be123c; --grad:linear-gradient(135deg,#f43f5e 0%,#be123c 100%); --ring:0 0 0 3px rgba(244,63,94,.38); --accent-rgb:244,63,94; --accent-dark-rgb:190,18,60; --accent2-rgb:251,146,60; --on-accent:#fff; --bg:#0d0609; --card:#1a1015; --field:#12090d; --border:#2e1a22; --surface:#150c11; --line:rgba(254,205,211,0.09); }
+  html[data-theme="sunset"] { --purple:#fb923c; --purple-light:#fdba74; --purple-dark:#c2410c; --grad:linear-gradient(135deg,#fb923c 0%,#c2410c 100%); --ring:0 0 0 3px rgba(251,146,60,.38); --accent-rgb:251,146,60; --accent-dark-rgb:194,65,12; --accent2-rgb:244,63,94; --on-accent:#1a0a02; --bg:#0c0705; --card:#17110d; --field:#100b08; --border:#2c2018; --surface:#140e0a; --line:rgba(254,215,170,0.09); }
+
+  /* Font types */
+  html[data-font="poppins"] { --font: Poppins, "Segoe UI", sans-serif; }
+  html[data-font="outfit"]  { --font: Outfit, "Segoe UI", sans-serif; }
+  html[data-font="grotesk"] { --font: "Space Grotesk", "Segoe UI", sans-serif; }
+  html[data-font="elegant"] { --font: Inter, "Segoe UI", sans-serif; --font-head: "Playfair Display", Georgia, serif; }
+  html[data-font="mono"]    { --font: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  body { font-family: var(--font); }
+  button, input, select, textarea { font-family: inherit; }
+  h1, .top-header h2, .section-label, .tg-title, .as-count, .theme-sheet .ts-head b { font-family: var(--font-head); }
+  html[data-font="elegant"] h1, html[data-font="elegant"] .top-header h2 { letter-spacing: 0; font-weight: 700; }
+  html[data-font="mono"] body { font-size: 14px; }
+
+  /* Font colors */
+  html[data-tc="gold"]   { --text: #f7d980; }
+  html[data-tc="silver"] { --text: #d6dbe6; }
+  html[data-tc="mint"]   { --text: #a7f3d0; }
+  html[data-tc="sky"]    { --text: #bae6fd; }
+  html[data-tc="pink"]   { --text: #fbcfe8; }
+  html[data-tc="peach"]  { --text: #fed7aa; }
+  .toggle-label, h1, .top-header h2, .stat .n { color: var(--text); }
+
+  /* Maandishi kwenye rangi ya accent (contrast nzuri kwa gold n.k.) */
+  button { color: var(--on-accent); }
+  .section-tab.active, .tab.active, .settings-nav-item.active, .dv-tab.active { color: var(--on-accent); }
+
+  /* Background nzuri: mwanga wa rangi unaosogea polepole + dot grid */
+  body { background: var(--bg); position: relative; }
+  .bg-fx { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+  .bg-fx i { position: absolute; border-radius: 50%; will-change: transform; }
+  .bg-fx i:nth-child(1) { width: 85vmax; height: 85vmax; left: -35vmax; top: -40vmax; background: radial-gradient(circle, rgba(var(--accent-rgb),0.30), transparent 62%); animation: bgDrift1 26s ease-in-out infinite alternate; }
+  .bg-fx i:nth-child(2) { width: 75vmax; height: 75vmax; right: -35vmax; top: 18vh; background: radial-gradient(circle, rgba(var(--accent2-rgb),0.20), transparent 62%); animation: bgDrift2 32s ease-in-out infinite alternate; }
+  .bg-fx i:nth-child(3) { width: 70vmax; height: 70vmax; left: 5vmax; bottom: -45vmax; background: radial-gradient(circle, rgba(var(--accent-rgb),0.16), transparent 62%); animation: bgDrift1 38s ease-in-out infinite alternate-reverse; }
+  .bg-fx::after { content: ""; position: absolute; inset: 0; background-image: radial-gradient(rgba(255,255,255,0.07) 1px, transparent 1.2px); background-size: 28px 28px; -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 10%, transparent 80%); mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 10%, transparent 80%); }
+  @keyframes bgDrift1 { from { transform: translate3d(0,0,0) scale(1); } to { transform: translate3d(6vmax,5vmax,0) scale(1.12); } }
+  @keyframes bgDrift2 { from { transform: translate3d(0,0,0) scale(1.05); } to { transform: translate3d(-7vmax,-4vmax,0) scale(0.95); } }
+  .wrap { position: relative; z-index: 1; }
+
+  /* Kitufe cha 🎨 + sheet ya mwonekano */
+  .theme-btn { width: 40px; height: 40px; padding: 0; flex: 0 0 40px; border-radius: 13px; background: rgba(255,255,255,0.06); border: 1px solid var(--line); box-shadow: none; font-size: 18px; line-height: 1; color: var(--text); display: flex; align-items: center; justify-content: center; }
+  .theme-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb),0.18); filter: none; }
+  .theme-sheet { position: fixed; inset: 0; z-index: 10000; display: none; align-items: flex-end; justify-content: center; background: rgba(0,0,0,0.6); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+  .theme-sheet.open { display: flex; }
+  .ts-card { width: 100%; max-width: 520px; max-height: 88vh; overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 24px 24px 0 0; padding: 18px 18px 26px; box-shadow: 0 -20px 60px rgba(0,0,0,0.6); animation: fadeIn .2s ease; }
+  @media (min-width: 640px) { .theme-sheet { align-items: center; } .ts-card { border-radius: 24px; } }
+  .ts-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .ts-head b { font-size: 17px; }
+  .ts-x { width: 34px; height: 34px; padding: 0; border-radius: 10px; background: rgba(255,255,255,0.06); box-shadow: none; color: var(--text); font-size: 15px; }
+  .ts-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--purple-light); margin: 18px 2px 10px; }
+  .ts-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .ts-sw { width: auto; padding: 0; background: none; box-shadow: none; display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 600; min-width: 54px; }
+  .ts-sw .dot { width: 38px; height: 38px; border-radius: 50%; border: 2px solid transparent; box-shadow: 0 0 0 1px rgba(255,255,255,0.15) inset; transition: transform .15s, border-color .15s; }
+  .ts-sw.active .dot { border-color: #fff; transform: scale(1.1); }
+  .ts-sw.active { color: var(--text); }
+  .ts-font { width: auto; flex: 1 1 calc(50% - 5px); padding: 12px 10px; border-radius: 14px; background: var(--field); border: 1px solid var(--line); box-shadow: none; color: var(--text); font-size: 15px; text-align: center; }
+  .ts-font.active { border-color: var(--purple); background: rgba(var(--accent-rgb),0.14); }
+  .ts-reset { margin-top: 20px; background: transparent; border: 1px solid var(--line); box-shadow: none; color: var(--muted); }
 </style>
 </head>
 <body>
+<div class="bg-fx" aria-hidden="true"><i></i><i></i><i></i></div>
 <div class="wrap">
 
   <div class="top-header">
@@ -337,6 +634,8 @@
       <h2>V.I.P WHATSAPP FOR PRO!</h2>
       <p>Dhibiti whatsapp yako popote ulipo</p>
     </div>
+    <span class="hdr-chip" id="hdrMode" style="display:none"></span>
+    <button type="button" class="theme-btn" id="themeBtn" aria-label="Badilisha mwonekano" title="Mwonekano">🎨</button>
   </div>
 
   <div class="section-tabs">
@@ -497,68 +796,98 @@
       <h1>🔘 Vipengele vya Kiotomatiki</h1>
       <p class="sub">Washa au zima huduma hizi za bot kiotomatiki. Zinatumika kwa jumla (si group moja moja). Mabadiliko yanaanza kufanya kazi papo hapo.</p>
 
+      <div class="auto-summary" id="autoSummary">
+        <div class="as-top"><span class="as-label">Vipengele vilivyowashwa</span><span class="as-count" id="asCount">0 / 7</span></div>
+        <div class="as-bar"><i id="asBar" style="width:0%"></i></div>
+        <div class="as-actions">
+          <button type="button" class="ghost small" id="asAllOn">✅ Washa zote</button>
+          <button type="button" class="ghost small" id="asAllOff">⛔ Zima zote</button>
+        </div>
+      </div>
+
       <div class="status-strip">
         <span class="pill" id="pillMode"><span class="dot"></span><span id="pillModeText">Mode: ...</span></span>
         <span class="pill" id="pillTyping"><span class="dot"></span><span id="pillTypingText">Auto Typing: ...</span></span>
       </div>
 
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">🔒 Mode ya Bot: Private</span>
-          <div class="toggle-hint" id="modeHint">Washa = PRIVATE (wewe tu ndiye unaweza kutumia amri). Zima = PUBLIC (kila mtu anaweza). Sawa na amri ya <code>.mode</code>.</div>
+      <div class="tg-grid">
+        <div class="tg-group">
+          <div class="tg-title">Usalama wa Bot</div>
+          <div class="toggle-row">
+            <span class="tg-ico">🔒</span>
+            <div>
+              <span class="toggle-label">Mode ya Bot: Private</span>
+              <div class="toggle-hint" id="modeHint">Washa = PRIVATE (wewe tu ndiye unaweza kutumia amri). Zima = PUBLIC (kila mtu anaweza). Sawa na amri ya <code>.mode</code>.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_selfMode"><span class="slider"></span></label>
+          </div>
         </div>
-        <label class="switch"><input type="checkbox" id="tg_selfMode"><span class="slider"></span></label>
-      </div>
-
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">👁️ Auto View Status</span>
-          <div class="toggle-hint">Bot itaangalia (view) status za watu kiotomatiki</div>
+        <div class="tg-group">
+          <div class="tg-title">Status</div>
+          <div class="toggle-row">
+            <span class="tg-ico">👁️</span>
+            <div>
+              <span class="toggle-label">Auto View Status</span>
+              <div class="toggle-hint">Bot itaangalia (view) status za watu kiotomatiki</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_autoViewStatus"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="tg-ico">❤️</span>
+            <div>
+              <span class="toggle-label">Auto React Status</span>
+              <div class="toggle-hint">Bot itapenda/kureact status za watu kiotomatiki</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_autoReactStatus"><span class="slider"></span></label>
+          </div>
         </div>
-        <label class="switch"><input type="checkbox" id="tg_autoViewStatus"><span class="slider"></span></label>
-      </div>
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">❤️ Auto React Status</span>
-          <div class="toggle-hint">Bot itapenda/kureact status za watu kiotomatiki</div>
+        <div class="tg-group">
+          <div class="tg-title">Mazungumzo</div>
+          <div class="toggle-row">
+            <span class="tg-ico">⌨️</span>
+            <div>
+              <span class="toggle-label">Auto Typing</span>
+              <div class="toggle-hint">Bot itaonesha "inaandika..." kabla ya kujibu amri</div>
+              <div class="typing-preview" id="typingPreview">Bot inaandika <span class="typing-dots"><i></i><i></i><i></i></span></div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_autoTyping"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="tg-ico">🎙️</span>
+            <div>
+              <span class="toggle-label">Auto Recording</span>
+              <div class="toggle-hint">Bot itaonesha "inarekodi sauti..." unapotuma ujumbe</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_autoRecording"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="tg-ico">😊</span>
+            <div>
+              <span class="toggle-label">Auto React Messages</span>
+              <div class="toggle-hint">Bot itareact kila ujumbe unaotumwa kwake</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_autoReactMessages"><span class="slider"></span></label>
+          </div>
         </div>
-        <label class="switch"><input type="checkbox" id="tg_autoReactStatus"><span class="slider"></span></label>
-      </div>
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">⌨️ Auto Typing</span>
-          <div class="toggle-hint">Bot itaonesha "inaandika..." kabla ya kujibu amri</div>
-          <div class="typing-preview" id="typingPreview">Bot inaandika <span class="typing-dots"><i></i><i></i><i></i></span></div>
+        <div class="tg-group">
+          <div class="tg-title">Ujumbe &amp; Media</div>
+          <div class="toggle-row">
+            <span class="tg-ico">📤</span>
+            <div>
+              <span class="toggle-label">Auto Forward Messages</span>
+              <div class="toggle-hint">Peleka ujumbe kiotomatiki kutoka group moja kwenda nyingine, kufuatana na rules ulizoweka kwa amri ya WhatsApp <code>.autoforward</code> (tuma <code>.autoforward help</code> kwenye inbox ya bot yako kuziweka/kuzitazama). Zima huku ukitaka kusimamisha uforwardaji wote papo hapo bila kufuta rules zako.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_autoForwardMessages"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="tg-ico">👁️‍🗨️</span>
+            <div>
+              <span class="toggle-label">Auto View-Once</span>
+              <div class="toggle-hint">Fungua view-once (picha/video/sauti) kiotomatiki. Kwenye group inatumwa faragha kwenye inbox yako; kwenye DM inafunguliwa papo hapo.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="tg_autoViewOnce"><span class="slider"></span></label>
+          </div>
         </div>
-        <label class="switch"><input type="checkbox" id="tg_autoTyping"><span class="slider"></span></label>
-      </div>
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">🎙️ Auto Recording</span>
-          <div class="toggle-hint">Bot itaonesha "inarekodi sauti..." unapotuma ujumbe</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="tg_autoRecording"><span class="slider"></span></label>
-      </div>
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">😊 Auto React Messages</span>
-          <div class="toggle-hint">Bot itareact kila ujumbe unaotumwa kwake</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="tg_autoReactMessages"><span class="slider"></span></label>
-      </div>
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">📤 Auto Forward Messages</span>
-          <div class="toggle-hint">Peleka ujumbe kiotomatiki kutoka group moja kwenda nyingine, kufuatana na rules ulizoweka kwa amri ya WhatsApp <code>.autoforward</code> (tuma <code>.autoforward help</code> kwenye inbox ya bot yako kuziweka/kuzitazama). Zima huku ukitaka kusimamisha uforwardaji wote papo hapo bila kufuta rules zako.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="tg_autoForwardMessages"><span class="slider"></span></label>
-      </div>
-      <div class="toggle-row">
-        <div>
-          <span class="toggle-label">👁️‍🗨️ Auto View-Once</span>
-          <div class="toggle-hint">Fungua view-once (picha/video/sauti) kiotomatiki. Kwenye group inatumwa faragha kwenye inbox yako; kwenye DM inafunguliwa papo hapo.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="tg_autoViewOnce"><span class="slider"></span></label>
       </div>
 
       <div class="msg" id="autoMsgBox"></div>
@@ -600,7 +929,8 @@
 
       <div class="protect-block" data-feature="antiGroupMention">
         <div class="toggle-row">
-          <span class="toggle-label">🚫 Anti Group Mention</span>
+          <span class="tg-ico">🚫</span>
+          <span class="toggle-label">Anti Group Mention</span>
           <label class="switch"><input type="checkbox" class="protectToggle"><span class="slider"></span></label>
         </div>
         <div class="protect-groups" style="display:none;">
@@ -618,7 +948,8 @@
 
       <div class="protect-block" data-feature="antiPromo">
         <div class="toggle-row">
-          <span class="toggle-label">📵 Anti Promo</span>
+          <span class="tg-ico">📵</span>
+          <span class="toggle-label">Anti Promo</span>
           <label class="switch"><input type="checkbox" class="protectToggle"><span class="slider"></span></label>
         </div>
         <div class="protect-groups" style="display:none;">
@@ -636,7 +967,8 @@
 
       <div class="protect-block" data-feature="antiLink">
         <div class="toggle-row">
-          <span class="toggle-label">🔗 Anti Link</span>
+          <span class="tg-ico">🔗</span>
+          <span class="toggle-label">Anti Link</span>
           <label class="switch"><input type="checkbox" class="protectToggle"><span class="slider"></span></label>
         </div>
         <div class="protect-groups" style="display:none;">
@@ -802,6 +1134,45 @@
     </div>
   </div>
 
+</div>
+
+<div class="theme-sheet" id="themeSheet" role="dialog" aria-label="Mwonekano">
+  <div class="ts-card">
+    <div class="ts-head"><b>🎨 Mwonekano</b><button type="button" class="ts-x" id="themeClose" aria-label="Funga">✕</button></div>
+
+    <div class="ts-label">Rangi ya Design</div>
+    <div class="ts-row">
+      <button type="button" class="ts-sw" data-key="theme" data-v="violet"><span class="dot" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9)"></span>Violet</button>
+      <button type="button" class="ts-sw" data-key="theme" data-v="gold"><span class="dot" style="background:linear-gradient(135deg,#f9c74f,#b7791f)"></span>Gold</button>
+      <button type="button" class="ts-sw" data-key="theme" data-v="emerald"><span class="dot" style="background:linear-gradient(135deg,#34d399,#047857)"></span>Emerald</button>
+      <button type="button" class="ts-sw" data-key="theme" data-v="ocean"><span class="dot" style="background:linear-gradient(135deg,#38bdf8,#0369a1)"></span>Ocean</button>
+      <button type="button" class="ts-sw" data-key="theme" data-v="rose"><span class="dot" style="background:linear-gradient(135deg,#fb7185,#be123c)"></span>Rose</button>
+      <button type="button" class="ts-sw" data-key="theme" data-v="sunset"><span class="dot" style="background:linear-gradient(135deg,#fdba74,#c2410c)"></span>Sunset</button>
+    </div>
+
+    <div class="ts-label">Aina ya Font</div>
+    <div class="ts-row">
+      <button type="button" class="ts-font" data-key="font" data-v="inter" style="font-family:Inter,sans-serif">Inter</button>
+      <button type="button" class="ts-font" data-key="font" data-v="poppins" style="font-family:Poppins,sans-serif">Poppins</button>
+      <button type="button" class="ts-font" data-key="font" data-v="outfit" style="font-family:Outfit,sans-serif">Outfit</button>
+      <button type="button" class="ts-font" data-key="font" data-v="grotesk" style="font-family:'Space Grotesk',sans-serif">Space Grotesk</button>
+      <button type="button" class="ts-font" data-key="font" data-v="elegant" style="font-family:'Playfair Display',serif">Elegant</button>
+      <button type="button" class="ts-font" data-key="font" data-v="mono" style="font-family:'JetBrains Mono',monospace">Mono</button>
+    </div>
+
+    <div class="ts-label">Rangi ya Maandishi</div>
+    <div class="ts-row">
+      <button type="button" class="ts-sw" data-key="tc" data-v=""><span class="dot" style="background:#f4f4f8"></span>Kawaida</button>
+      <button type="button" class="ts-sw" data-key="tc" data-v="gold"><span class="dot" style="background:#f7d980"></span>Dhahabu</button>
+      <button type="button" class="ts-sw" data-key="tc" data-v="silver"><span class="dot" style="background:#d6dbe6"></span>Fedha</button>
+      <button type="button" class="ts-sw" data-key="tc" data-v="mint"><span class="dot" style="background:#a7f3d0"></span>Mint</button>
+      <button type="button" class="ts-sw" data-key="tc" data-v="sky"><span class="dot" style="background:#bae6fd"></span>Sky</button>
+      <button type="button" class="ts-sw" data-key="tc" data-v="pink"><span class="dot" style="background:#fbcfe8"></span>Pinki</button>
+      <button type="button" class="ts-sw" data-key="tc" data-v="peach"><span class="dot" style="background:#fed7aa"></span>Peach</button>
+    </div>
+
+    <button type="button" class="ts-reset" id="themeReset">↩️ Rudisha Default</button>
+  </div>
 </div>
 
 <script>
@@ -2113,6 +2484,113 @@
     });
     document.querySelector('.section-tab[data-section="deriv"]').addEventListener('click', () => load().then(loadOverview));
     if (params.get('section') === 'deriv') load().then(loadOverview);
+  })();
+</script>
+
+<script>
+  /* v2 — nyongeza za UI tu (hazigusi logic ya settings/API) */
+  (function () {
+    // Chip ya Mode kwenye header, inafuata pill ya Mode
+    var chip = document.getElementById('hdrMode');
+    var modeTxt = document.getElementById('pillModeText');
+    function syncChip() {
+      if (!chip || !modeTxt) return;
+      var t = modeTxt.textContent || '';
+      if (/PRIVATE/i.test(t)) { chip.className = 'hdr-chip private'; chip.textContent = '🔒 Private'; chip.style.display = ''; }
+      else if (/PUBLIC/i.test(t)) { chip.className = 'hdr-chip on'; chip.textContent = '🌍 Public'; chip.style.display = ''; }
+    }
+
+    // Muhtasari: vipengele vingapi vimewashwa
+    var IDS = ['autoViewStatus','autoReactStatus','autoTyping','autoRecording','autoReactMessages','autoForwardMessages','autoViewOnce'];
+    function updateSummary() {
+      var on = 0;
+      IDS.forEach(function (id) { var el = document.getElementById('tg_' + id); if (el && el.checked) on++; });
+      var c = document.getElementById('asCount'), b = document.getElementById('asBar');
+      if (c) c.textContent = on + ' / ' + IDS.length;
+      if (b) b.style.width = Math.round(on / IDS.length * 100) + '%';
+    }
+    IDS.forEach(function (id) { var el = document.getElementById('tg_' + id); if (el) el.addEventListener('change', updateSummary); });
+    if (modeTxt) new MutationObserver(function () { syncChip(); updateSummary(); }).observe(modeTxt, { childList: true, characterData: true, subtree: true });
+    syncChip(); updateSummary();
+
+    // Maelezo marefu ya toggles: kunja mistari 2, bonyeza kupanua
+    document.querySelectorAll('.toggle-hint').forEach(function (h) {
+      if ((h.textContent || '').length > 110) {
+        h.classList.add('clamp');
+        h.title = 'Bonyeza kusoma yote';
+        h.addEventListener('click', function () { h.classList.toggle('open'); });
+      }
+    });
+
+    // Search ya groups kwenye kila orodha ya groups
+    function attachSearch(list) {
+      if (!list || list.dataset.searchAttached) return;
+      list.dataset.searchAttached = '1';
+      var inp = document.createElement('input');
+      inp.type = 'text'; inp.className = 'gl-search'; inp.placeholder = '🔍 Tafuta group...'; inp.autocomplete = 'off';
+      list.parentNode.insertBefore(inp, list);
+      function apply() {
+        var q = inp.value.trim().toLowerCase();
+        list.querySelectorAll('.group-row').forEach(function (r) {
+          r.style.display = (!q || (r.textContent || '').toLowerCase().indexOf(q) !== -1) ? '' : 'none';
+        });
+      }
+      inp.addEventListener('input', apply);
+      new MutationObserver(function () { if (inp.value) apply(); }).observe(list, { childList: true });
+    }
+    document.querySelectorAll('#sGroupList, #bGroupList, [data-list]').forEach(attachSearch);
+  })();
+</script>
+
+<script>
+  /* v3 — Washa/Zima zote: inabadilisha toggles zote za automation kisha inaita
+     'change' MOJA tu, na saveAutomation() iliyopo inatuma kila kitu kwa request moja. */
+  (function () {
+    var IDS = ['autoViewStatus','autoReactStatus','autoTyping','autoRecording','autoReactMessages','autoForwardMessages','autoViewOnce'];
+    function setAll(on) {
+      var first = null;
+      IDS.forEach(function (id) {
+        var el = document.getElementById('tg_' + id);
+        if (!el) return;
+        el.checked = on;
+        if (!first) first = el;
+      });
+      if (first) first.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof updateAutoIndicators === 'function') updateAutoIndicators();
+    }
+    var on = document.getElementById('asAllOn'), off = document.getElementById('asAllOff');
+    if (on) on.addEventListener('click', function () { setAll(true); });
+    if (off) off.addEventListener('click', function () { if (confirm('Zima vipengele vyote vya kiotomatiki?')) setAll(false); });
+  })();
+</script>
+
+<script>
+  /* v4 — chaguo la mwonekano (theme / font / rangi ya maandishi). Linahifadhiwa kwenye browser tu. */
+  (function () {
+    var root = document.documentElement, KEY = 'dashLook';
+    var look = {};
+    try { look = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) {}
+    var sheet = document.getElementById('themeSheet');
+    function apply() {
+      ['theme', 'font', 'tc'].forEach(function (k) {
+        if (look[k]) root.setAttribute('data-' + k, look[k]); else root.removeAttribute('data-' + k);
+      });
+      sheet.querySelectorAll('[data-key]').forEach(function (b) {
+        var cur = look[b.dataset.key] || (b.dataset.key === 'theme' ? 'violet' : b.dataset.key === 'font' ? 'inter' : '');
+        b.classList.toggle('active', b.dataset.v === cur);
+      });
+    }
+    function save() { try { localStorage.setItem(KEY, JSON.stringify(look)); } catch (e) {} }
+    sheet.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-key]');
+      if (b) { look[b.dataset.key] = b.dataset.v; save(); apply(); return; }
+      if (e.target === sheet) sheet.classList.remove('open');
+    });
+    document.getElementById('themeBtn').addEventListener('click', function () { sheet.classList.add('open'); });
+    document.getElementById('themeClose').addEventListener('click', function () { sheet.classList.remove('open'); });
+    document.getElementById('themeReset').addEventListener('click', function () { look = {}; save(); apply(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') sheet.classList.remove('open'); });
+    apply();
   })();
 </script>
 </body>
