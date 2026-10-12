@@ -4,6 +4,13 @@
  * Inahifadhi (backup) env vars za Railway ndani ya Turso, na kuzirudisha
  * kiotomatiki pale zinapokosekana (mfano ukihamia account mpya ya Railway).
  *
+ * UGUNDUZI WA KIOTOMATIKI: env var YOYOTE mpya unayoweka Railway
+ * (jina la HERUFI KUBWA, mfano ABLINER_API_KEY) inahifadhiwa yenyewe — HAKUNA
+ * haja ya kuhariri code. Zinazorukwa ni za mfumo tu (PATH, PORT, RAILWAY_*,
+ * NODE_*, *_PATH n.k.) na siri-msingi (TURSO_*, TOKENVAULT_KEY,
+ * ADMIN_SESSION_SECRET) ambazo haziwezi kuhifadhiwa Turso kwa sababu
+ * zinahitajika KUFIKIA/KUFUNGUA Turso yenyewe. Hizo zinapatikana kwenye export.
+ *
  * Inafanya kazi KILA bot inapoanza (kupitia start.js, kabla ya index.js):
  *   1) Env var ipo kwenye Railway  -> inahifadhiwa Turso (inasasishwa ikibadilika).
  *   2) Env var HAIPO kwenye Railway lakini ipo Turso -> inarudishwa kwenye process.env.
@@ -26,22 +33,30 @@
 const crypto = require('crypto');
 const cfg = require('./pairingConfig');
 
-// Env vars za "mipangilio/siri" tu — si za mfumo (PORT, NODE_ENV, TMP, n.k.)
-// wala TURSO_* (hizo zinahitajika ili kufikia Turso kwanza).
-const EXACT_KEYS = new Set([
-  'GROQ_API_KEY', 'GROQ_MODEL', 'TAVILY_API_KEY', 'RAPIDAPI_KEY',
-  'REMINDER_SECRET', 'BACKUP_SECRET', 'BACKUP_RECIPIENT',
-  'PAIR_NUMBER', 'BOT_NAME', 'ALLOWED_ORIGIN', 'FAMILY_SITE_URL',
-  'UPDATE_ZIP_URL', 'CUSTOM_PAIRING_CODE',
+// Zinazorukwa (haziingii Turso wala export ya kawaida):
+//  - mfumo/build: PATH, PORT, RAILWAY_*, NODE_*, NIXPACKS_*, PUPPETEER_*, n.k.
+//  - zinazoelekeza path za container: *_PATH, *_DIR, *_HOME, *_ROOT
+//  - siri-msingi: TURSO_* (zinahitajika kufikia Turso kwanza), TOKENVAULT_KEY,
+//    ADMIN_SESSION_SECRET (ndiyo key ya kusimba nakala — isingeweza kujirudisha yenyewe)
+const NEVER_EXACT = new Set([
+  'PATH', 'HOME', 'PWD', 'OLDPWD', 'SHLVL', 'HOSTNAME', 'USER', 'LOGNAME', 'SHELL',
+  'LANG', 'LANGUAGE', 'TERM', 'TMP', 'TEMP', 'TMPDIR', 'PORT', 'CI', 'DEBIAN_FRONTEND',
+  'LD_LIBRARY_PATH', 'ENV_SYNC_DELETE', 'TOKENVAULT_KEY', 'ADMIN_SESSION_SECRET',
 ]);
-const PREFIXES = [
-  'AUTO_TRADE_', 'DERIV_', 'POCKET_', 'TWELVE_DATA_', 'MANSA_',
-  'NEWS_', 'FOREX_', 'PREDICTIONS_', 'MESSAGE_STORE_', 'SESSION_',
+const NEVER_PREFIXES = [
+  'RAILWAY_', 'RAILPACK_', 'NIXPACKS_', 'NIX_', 'NODE_', 'NPM_', 'YARN_', 'PNPM_', 'BUN_', 'MISE_',
+  'PUPPETEER_', 'PLAYWRIGHT_', 'LC_', 'XDG_', 'KUBERNETES_', 'TURSO_',
 ];
+const NEVER_SUFFIXES = ['_PATH', '_DIR', '_HOME', '_ROOT'];
+const MAX_VALUE_LEN = 20000;
 const SYNC_TIMEOUT_MS = 10000;
 
 function isSyncable(name) {
-  return EXACT_KEYS.has(name) || PREFIXES.some((p) => name.startsWith(p));
+  if (!/^[A-Z][A-Z0-9_]*$/.test(name)) return false; // herufi kubwa tu (inaruka npm_*, _, n.k.)
+  if (NEVER_EXACT.has(name)) return false;
+  if (NEVER_PREFIXES.some((p) => name.startsWith(p))) return false;
+  if (NEVER_SUFFIXES.some((x) => name.endsWith(x))) return false;
+  return true;
 }
 
 function deriveKey() {
@@ -103,7 +118,7 @@ async function runSync({ query, env = process.env } = {}) {
   for (const name of Object.keys(env)) {
     if (!isSyncable(name) || toDelete.has(name)) continue;
     const value = env[name];
-    if (value === undefined || value === '') continue;
+    if (value === undefined || value === '' || String(value).length > MAX_VALUE_LEN) continue;
 
     let unchanged = false;
     if (stored.has(name)) {
@@ -120,6 +135,7 @@ async function runSync({ query, env = process.env } = {}) {
 
   // 2) Turso -> process.env (kwa zile zisizopo kwenye Railway)
   for (const [name, blob] of stored.entries()) {
+    if (!isSyncable(name)) continue;
     if (env[name] !== undefined && env[name] !== '') continue;
     try {
       env[name] = decrypt(blob);
@@ -155,10 +171,10 @@ async function syncEnv(opts = {}) {
 
 // ── Export kwa mikono (Admin → "Pakua env vars") ─────────────────────────
 // Inajumuisha env zote za envSync PAMOJA na zile zisizohifadhiwa Turso kwa
-// makusudi (TOKENVAULT_KEY, TURSO_*), ili uweze kuzibandika kwenye Railway
+// makusudi (TOKENVAULT_KEY, ADMIN_SESSION_SECRET, TURSO_*), ili uweze kuzibandika kwenye Railway
 // (Variables → Raw Editor) ya account mpya. Faili hili lina SIRI — usiliweke
 // GitHub (hata private) wala usilishiriki.
-const EXPORT_EXTRA = ['TOKENVAULT_KEY', 'TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'];
+const EXPORT_EXTRA = ['TOKENVAULT_KEY', 'ADMIN_SESSION_SECRET', 'TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'];
 
 function quoteEnvValue(v) {
   const s = String(v);
@@ -177,7 +193,7 @@ function exportEnvText(env = process.env) {
     ...names.map((n) => `${n}=${quoteEnvValue(env[n])}`),
     '',
   ];
-  return { text: lines.join('\n'), names, missing: ['TOKENVAULT_KEY'].filter((n) => !env[n]) };
+  return { text: lines.join('\n'), names, missing: ['TOKENVAULT_KEY', 'ADMIN_SESSION_SECRET'].filter((n) => !env[n]) };
 }
 
 module.exports = { syncEnv, runSync, isSyncable, encrypt, decrypt, exportEnvText };

@@ -33,7 +33,7 @@ function isPlaceholder(v) {
 function assertConfigured() {
   if (isPlaceholder(API_KEY()) || isPlaceholder(WEBHOOK_SECRET())) {
     throw new Error(
-      'Abliner haijawekwa. Weka ABLINER_API_KEY na ABLINER_WEBHOOK_SECRET ndani ya pairing/pairingConfig.js'
+      'Abliner haijawekwa. Weka ABLINER_API_KEY na ABLINER_WEBHOOK_SECRET kwenye Railway Variables'
     );
   }
 }

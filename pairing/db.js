@@ -28,7 +28,7 @@ const cfg = require('./pairingConfig');
 
 if (!cfg.TURSO_DATABASE_URL || cfg.TURSO_DATABASE_URL.startsWith('WEKA_')) {
   console.warn(
-    '[db] TURSO_DATABASE_URL haijawekwa kwenye pairing/pairingConfig.js — database haitafanya kazi mpaka uiweke.'
+    '[db] TURSO_DATABASE_URL haijawekwa kwenye Railway Variables — database haitafanya kazi mpaka uiweke.'
   );
 }
 
