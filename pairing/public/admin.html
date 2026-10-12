@@ -320,6 +320,78 @@
     #detail { width: 100vw; }
     .content { padding: 14px 12px 60px; }
   }
+  /* ── Layout fixes: hakuna kitu kinachoelea / kutoka nje ya page ── */
+  html { overflow-x: hidden; }
+  body { overflow-x: hidden; min-width: 320px; }
+  button { text-align: center; line-height: 1.3; }
+  .topbar { flex-wrap: wrap; gap: 10px 14px; }
+  .topbar .brand { flex: 1 1 220px; min-width: 0; flex-wrap: wrap; row-gap: 2px; }
+  .topbar .brand strong { white-space: nowrap; }
+  .topbar .brand span.sub { margin-left: 0; white-space: nowrap; }
+  .top-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; flex: 0 1 auto; }
+  .top-actions button { white-space: nowrap; }
+  .content { width: 100%; }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .stat { min-width: 0; }
+  .stat .l { overflow-wrap: anywhere; line-height: 1.3; }
+  .toolbar > button { white-space: normal; flex: 0 1 auto; }
+  .chips { max-width: 100%; }
+  .table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); -webkit-overflow-scrolling: touch; }
+  .table-wrap table { border: none; border-radius: 0; table-layout: auto; min-width: 100%; }
+  tbody td { overflow-wrap: anywhere; word-break: normal; }
+  tbody td:first-child { min-width: 0; width: 100%; }
+  tbody td:nth-child(2), tbody td:nth-child(3), tbody td:nth-child(4) { white-space: nowrap; width: 1%; }
+  tbody td:last-child { color: var(--muted); text-align: right; }
+  .uname, .uphone { overflow-wrap: anywhere; }
+  .qr-card .qr-info { min-width: 0; overflow-wrap: anywhere; }
+  .qr-card img.qr-img, .qr-card .qr-empty { max-width: 100%; }
+  #detail { overflow-x: hidden; max-width: 100vw; }
+  #detail .dhead > div:first-child { min-width: 0; flex: 1; }
+  #detail h2, #dName { overflow-wrap: anywhere; }
+  .dname-row { flex-wrap: wrap; }
+  .dtabs { overflow-x: auto; scrollbar-width: none; }
+  .dtabs::-webkit-scrollbar { display: none; }
+  .dtab, .mtab { flex: 1 1 auto; white-space: nowrap; padding: 8px 10px; }
+  .kv { flex-wrap: wrap; }
+  .kv .k { flex-shrink: 0; }
+  .kv .v { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; word-break: normal; }
+  .linkbox { flex-wrap: nowrap; align-items: stretch; }
+  .linkbox input { min-width: 0; }
+  .linkbox button { flex-shrink: 0; white-space: nowrap; }
+  .actrow { align-items: stretch; }
+  .actrow > button { flex: 1 1 140px; min-width: 0; white-space: normal; }
+  .actrow > input { margin-bottom: 0; min-width: 0; }
+  .actrow > span { flex: 1 1 100%; }
+  #dDerivState, #dDvStakeInfo { overflow-wrap: anywhere; }
+  #dSendBtn { width: 100%; white-space: normal; }
+  .group-row { min-width: 0; }
+  .group-row .gn { min-width: 0; overflow-wrap: anywhere; }
+  .group-row .gc { flex-shrink: 0; white-space: nowrap; }
+  .group-row .glink-box input { min-width: 0; }
+  .group-row .glink-box button { flex-shrink: 0; }
+  .lookup-card > div:last-child { min-width: 0; overflow-wrap: anywhere; }
+  .bc-row > div:first-child { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+  .section-label { overflow-wrap: anywhere; line-height: 1.4; }
+  .toast { overflow-wrap: anywhere; }
+  input[type="file"] { padding: 8px; }
+
+  @media (max-width: 640px) {
+    .topbar { padding: 12px; }
+    .top-actions { flex: 1 1 100%; justify-content: flex-start; }
+    .top-actions button { flex: 1 1 auto; }
+    .toolbar { align-items: stretch; }
+    .toolbar > button { flex: 1 1 calc(50% - 8px); display: flex; align-items: center; justify-content: center; }
+    .toolbar input[type="text"] { flex-basis: 100%; }
+    .chips { flex: 1 1 100%; }
+    .actrow > button { flex-basis: 100%; }
+    .actrow > input { flex: 1 1 calc(50% - 8px) !important; min-width: 0 !important; }
+    thead th, tbody td { padding: 10px 8px; }
+    #detail { padding: 14px 12px 40px; }
+    .dtabs { gap: 2px; padding: 3px; }
+    .dtab, .mtab { padding: 8px 3px; font-size: 10px; }
+    #dMediaTypeTabs .mtab, #dSendModeTabs .mtab { white-space: normal; }
+    #loginCard { margin-top: 6vh; margin-left: 12px; margin-right: 12px; padding: 32px 22px 26px; }
+  }
 </style>
 </head>
 <body>
@@ -344,10 +416,12 @@
       <strong>MR. IT MEDIATOR · OPS CONSOLE</strong>
       <span class="sub" id="clock"></span>
     </div>
+    <div class="top-actions">
     <button class="ghost" onclick="location.href='fxtrading.html'">📈 FX Trading</button>
     <button class="ghost" onclick="location.href='pocketoption.html'">💹 Pocket Option</button>
     <button class="ghost" onclick="downloadEnvVars()">🔑 Pakua env vars</button>
     <button class="ghost" onclick="logout()">Toka</button>
+    </div>
   </div>
 
   <div class="content">
@@ -383,12 +457,14 @@
       <button class="ghost" onclick="loadUsers()">↻ Refresh</button>
     </div>
 
+    <div class="table-wrap">
     <table>
       <thead>
         <tr><th>Namba</th><th>Hali</th><th>Muda</th><th></th></tr>
       </thead>
       <tbody id="userRows"></tbody>
     </table>
+    </div>
   </div>
 </div>
 
