@@ -729,6 +729,21 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
       }
 
+      // ── Admin: pakua env vars (.env) kwa ajili ya kuhamia Railway mpya ──
+      // Thamani haziandikwi kwenye logs; majibu yanarudisha faili kama text.
+      if (req.method === 'GET' && req.url === '/api/admin/env-export') {
+        const { exportEnvText } = require('./envSync');
+        const out = exportEnvText(process.env);
+        console.log(`[envExport] admin amepakua ${out.names.length} env vars (majina tu kwenye log).`);
+        return sendJson(res, 200, {
+          ok: true,
+          filename: `railway-env-${new Date().toISOString().slice(0, 10)}.env`,
+          content: out.text,
+          count: out.names.length,
+          missing: out.missing,
+        });
+      }
+
       // ── Admin: ruhusa ya commands za forex kwa pairing bots ────────────────
       // GET = hali (all + grants + commands). POST { action: 'grant'|'revoke'|'grant_all'|'revoke_all', phone? }
       if (req.url.split('?')[0] === '/api/admin/forex-access') {

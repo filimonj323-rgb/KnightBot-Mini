@@ -153,4 +153,31 @@ async function syncEnv(opts = {}) {
   }
 }
 
-module.exports = { syncEnv, runSync, isSyncable, encrypt, decrypt };
+// ── Export kwa mikono (Admin → "Pakua env vars") ─────────────────────────
+// Inajumuisha env zote za envSync PAMOJA na zile zisizohifadhiwa Turso kwa
+// makusudi (TOKENVAULT_KEY, TURSO_*), ili uweze kuzibandika kwenye Railway
+// (Variables → Raw Editor) ya account mpya. Faili hili lina SIRI — usiliweke
+// GitHub (hata private) wala usilishiriki.
+const EXPORT_EXTRA = ['TOKENVAULT_KEY', 'TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'];
+
+function quoteEnvValue(v) {
+  const s = String(v);
+  if (/^[A-Za-z0-9_@%+=:,.\/-]*$/.test(s)) return s;
+  return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n') + '"';
+}
+
+function exportEnvText(env = process.env) {
+  const names = Object.keys(env)
+    .filter((n) => env[n] !== undefined && env[n] !== '' && (isSyncable(n) || EXPORT_EXTRA.includes(n)))
+    .sort();
+  const lines = [
+    '# Railway env vars — imetengenezwa ' + new Date().toISOString(),
+    '# SIRI: usiweke GitHub wala usishiriki. Bandika kwenye Railway → Variables → Raw Editor.',
+    '',
+    ...names.map((n) => `${n}=${quoteEnvValue(env[n])}`),
+    '',
+  ];
+  return { text: lines.join('\n'), names, missing: ['TOKENVAULT_KEY'].filter((n) => !env[n]) };
+}
+
+module.exports = { syncEnv, runSync, isSyncable, encrypt, decrypt, exportEnvText };
