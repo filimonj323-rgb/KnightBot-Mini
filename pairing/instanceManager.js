@@ -2307,6 +2307,12 @@ async function restoreAllInstances() {
   let restored = 0;
   for (const [phoneNumber, sessionFolder] of candidates) {
     try {
+      // Ruka namba ambayo tayari inaunganishwa/imeunganishwa kwenye process hii
+      // — inafanya restoreAllInstances() kuwa salama kuitwa tena kwa mkono
+      // (admin: POST /api/admin/restore-bots) bila kufungua socket mbili.
+      const live = instances.get(phoneNumber);
+      if (live && (live.status === 'connected' || live.status === 'connecting')) continue;
+
       if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder, { recursive: true });
 
       const sessionId = pairingSessionId(phoneNumber);

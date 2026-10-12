@@ -725,6 +725,15 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 401, { ok: false, error: 'Session imeisha au si sahihi. Login tena.' });
       }
 
+      // ── Admin: rudisha bots za wateja kutoka Turso kwa mkono ──────────────
+      // Inaita restoreAllInstances() (ile ile ya boot). Inaruka namba
+      // zilizoko hewani tayari, kwa hiyo ni salama kuitumia mara nyingi.
+      if (req.method === 'POST' && req.url === '/api/admin/restore-bots') {
+        console.log('[pairing] admin ameomba restore-bots kwa mkono...');
+        restoreAllInstances().catch((e) => console.error('[pairing] restore-bots imeshindwa:', e && e.stack ? e.stack : e));
+        return sendJson(res, 200, { ok: true, message: 'Urejeshaji umeanza. Angalia logs: "[pairing] auto-reconnect: X/Y zimeanzishwa".' });
+      }
+
       if (req.method === 'GET' && req.url === '/api/admin/users') {
         return sendJson(res, 200, { ok: true, users: await adminListUsers(), trialDays: require('./userStore').TRIAL_DAYS });
       }
