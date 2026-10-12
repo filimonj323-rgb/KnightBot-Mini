@@ -3,8 +3,23 @@
  */
 
 const yts = require('yt-search');
+const axios = require('axios');
 const APIs = require('../../utils/api');
 const config = require('../../config');
+
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '6302dd380amsh9115a6be5092cf2p1ca0e9jsn757c120ac58a';
+
+// youtubei.js ni ESM-only → import() yenye cache. Inaiga mteja wa YouTube TV
+// (kama mtu anayetazama kupitia TV) ili kupunguza kuzuiwa kwa "bot check".
+let _ytiPromise = null;
+function getInnertube() {
+  if (!_ytiPromise) {
+    _ytiPromise = import('youtubei.js')
+      .then(({ Innertube }) => Innertube.create({ retrieve_player: true }))
+      .catch((e) => { _ytiPromise = null; throw e; });
+  }
+  return _ytiPromise;
+}
 
 module.exports = {
   name: 'ytvideo',
@@ -117,32 +132,117 @@ module.exports = {
         });
       }
 
-      // Jaribu njia ya moja kwa moja KWANZA (bila API ya tatu, hivyo
-      // haiwezi kukwama kwa "402 Payment Required" kutoka Okatsu/Yupra/
-      // EliteProTech). Ikishindwa (YouTube wakati mwingine ina-block server
-      // IPs), inarudi kwenye mfuatano wa awali wa APIs bila kubadilika.
+      const MAX_BYTES_YTI = 45 * 1024 * 1024; // kikomo salama cha RAM
+
+      // Hatua 2: youtubei.js ikijifanya mteja wa TV (bila API ya tatu).
+      async function downloadYoutubeiTV(url) {
+        const id = (url.match(/(?:youtu\.be\/|v=|shorts\/)([a-zA-Z0-9_-]{11})/) || [])[1];
+        if (!id) throw new Error('Video ID haipatikani');
+        const yt = await getInnertube();
+        const stream = await yt.download(id, {
+          type: 'video+audio',
+          quality: 'best',
+          format: 'mp4',
+          client: 'TV',
+        });
+        const reader = stream.getReader();
+        const chunks = [];
+        let total = 0;
+        let timedOut = false;
+        const timer = setTimeout(() => { timedOut = true; reader.cancel().catch(() => {}); }, 90000);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            total += value.length;
+            if (total > MAX_BYTES_YTI) {
+              await reader.cancel().catch(() => {});
+              throw new Error('Video ni kubwa mno kwa njia ya moja kwa moja');
+            }
+            chunks.push(Buffer.from(value));
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+        if (timedOut) throw new Error('youtubei timeout');
+        const buf = Buffer.concat(chunks);
+        if (buf.length < 10000) throw new Error('Buffer ndogo mno');
+        return buf;
+      }
+
+      // Hatua ya mwisho: RapidAPI youtube-mp36 — inatoa AUDIO (MP3) tu, si video.
+      async function downloadMp36Audio(url) {
+        const id = (url.match(/(?:youtu\.be\/|v=|shorts\/)([a-zA-Z0-9_-]{11})/) || [])[1];
+        if (!id) throw new Error('Video ID haipatikani');
+        const headers = { 'x-rapidapi-key': RAPIDAPI_KEY, 'x-rapidapi-host': 'youtube-mp36.p.rapidapi.com' };
+        let link = null;
+        for (let i = 0; i < 8 && !link; i++) {
+          if (i > 0) await new Promise(r => setTimeout(r, 5000));
+          const res = await axios.get('https://youtube-mp36.p.rapidapi.com/dl', { params: { id }, headers, timeout: 30000 });
+          link = res.data?.link || null;
+          if (!link && res.data?.status !== 'processing') break;
+        }
+        if (!link) throw new Error('Hakuna link kutoka RapidAPI');
+        const r = await axios.get(link, { responseType: 'arraybuffer', timeout: 60000, maxContentLength: MAX_BYTES_YTI });
+        const buf = Buffer.from(r.data);
+        if (buf.length < 1000) throw new Error('Audio ndogo mno');
+        return buf;
+      }
+
+      // Mfuatano: ytdl → youtubei (TV) → APIs za zamani → audio ya youtube-mp36.
+      // Kila hatua inaandika kosa lake kwenye log ili tuone ipi inashindwa.
       let videoBuffer = null;
       let videoData = null;
-      try {
-        videoBuffer = await downloadDirectYtdl(videoUrl);
-      } catch (eDirect) {
-        try {
-          videoData = await APIs.getEliteProTechVideoByUrl(videoUrl);
-        } catch (e1) {
-          try {
-            videoData = await APIs.getYupraVideoByUrl(videoUrl);
-          } catch (e2) {
-            videoData = await APIs.getOkatsuVideoByUrl(videoUrl);
-          }
+      let audioBuffer = null;
+      const errors = [];
+
+      try { videoBuffer = await downloadDirectYtdl(videoUrl); }
+      catch (e) { errors.push('ytdl: ' + (e?.message || e)); console.error('[VIDEO] ytdl failed:', e?.message || e); }
+
+      if (!videoBuffer) {
+        try { videoBuffer = await downloadYoutubeiTV(videoUrl); }
+        catch (e) { errors.push('youtubei-TV: ' + (e?.message || e)); console.error('[VIDEO] youtubei TV failed:', e?.message || e); }
+      }
+
+      if (!videoBuffer) {
+        const apiSteps = [
+          ['EliteProTech', () => APIs.getEliteProTechVideoByUrl(videoUrl)],
+          ['Yupra', () => APIs.getYupraVideoByUrl(videoUrl)],
+          ['Okatsu', () => APIs.getOkatsuVideoByUrl(videoUrl)],
+        ];
+        for (const [name, fn] of apiSteps) {
+          try { videoData = await fn(); if (videoData?.download) break; videoData = null; }
+          catch (e) { errors.push(name + ': ' + (e?.message || e)); console.error('[VIDEO] ' + name + ' failed:', e?.message || e); }
         }
       }
 
-      // Send video directly using the download URL
+      if (!videoBuffer && !videoData) {
+        try { audioBuffer = await downloadMp36Audio(videoUrl); }
+        catch (e) { errors.push('youtube-mp36: ' + (e?.message || e)); console.error('[VIDEO] mp36 failed:', e?.message || e); }
+      }
+
+      const finalTitle = ((videoData && videoData.title) || videoTitle || 'video');
+
+      if (audioBuffer) {
+        await sock.sendMessage(chatId, {
+          text: '⚠️ Video imeshindikana kwa sasa (YouTube imezuia server). Nakutumia *audio* badala yake.'
+        }, { quoted: msg });
+        return await sock.sendMessage(chatId, {
+          audio: audioBuffer,
+          mimetype: 'audio/mpeg',
+          fileName: `${finalTitle.replace(/[^\w\s-]/g, '')}.mp3`,
+        }, { quoted: msg });
+      }
+
+      if (!videoBuffer && !videoData) {
+        throw new Error('Njia zote zimeshindwa. ' + errors.join(' | '));
+      }
+
       await sock.sendMessage(chatId, {
         video: videoBuffer || { url: videoData.download },
         mimetype: 'video/mp4',
-        fileName: `${((videoData && videoData.title) || videoTitle || 'video').replace(/[^\w\s-]/g, '')}.mp4`,
-        caption: `*${(videoData && videoData.title) || videoTitle || 'Video'}*\n\n> *_Downloaded by ${instanceConfig.botName}_*`
+        fileName: `${finalTitle.replace(/[^\w\s-]/g, '')}.mp4`,
+        caption: `*${finalTitle}*\n\n> *_Downloaded by ${instanceConfig.botName}_*`
       }, { quoted: msg });
 
     } catch (error) {
