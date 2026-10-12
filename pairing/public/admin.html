@@ -418,6 +418,13 @@
   .ubody { min-width: 0; }
   .av { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; color: #04140b; background: linear-gradient(145deg, var(--accent), var(--accent-dim)); }
   .av { position: relative; overflow: hidden; }
+  .av.has-pp { cursor: zoom-in; }
+  .pp-modal { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 20px; }
+  .pp-modal img { max-width: min(92vw, 520px); max-height: 70vh; border-radius: 16px; object-fit: contain; background: #0b1a12; }
+  .pp-modal .pp-cap { color: #e8fff1; font-size: 14px; text-align: center; }
+  .pp-modal .pp-btns { display: flex; gap: 10px; }
+  .pp-modal button { padding: 10px 18px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; font-size: 14px; cursor: pointer; }
+  .pp-modal button.pp-save { background: linear-gradient(145deg, var(--accent), var(--accent-dim)); color: #04140b; border: none; font-weight: 700; }
   .av img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
   .av.offline, .av.disconnected, .av.error { background: linear-gradient(145deg, #3d5a48, #2a3f31); color: var(--text); }
   .av.pairing, .av.connecting { background: linear-gradient(145deg, var(--amber), #a8742b); }
@@ -859,7 +866,7 @@
     document.getElementById('userRows').innerHTML = list.map(u => `
       <tr onclick="openDetail('${u.phoneNumber}')">
         <td class="c-user"><div class="ucell">
-          <div class="av ${u.liveStatus}" data-phone="${u.phoneNumber}">${AVATARS[u.phoneNumber] ? `<img src="${escapeAttr(AVATARS[u.phoneNumber])}" referrerpolicy="no-referrer" loading="lazy" alt="" onerror="this.remove()" />` : ""}${escapeHtml((Array.from(userName(u) || '#')[0] || '#').toUpperCase())}</div>
+          <div class="av ${u.liveStatus}${AVATARS[u.phoneNumber] ? ' has-pp' : ''}" data-phone="${u.phoneNumber}"${AVATARS[u.phoneNumber] ? ` onclick="event.stopPropagation();openAvatar('${u.phoneNumber}')"` : ''}>${AVATARS[u.phoneNumber] ? `<img src="${escapeAttr(AVATARS[u.phoneNumber])}" referrerpolicy="no-referrer" loading="lazy" alt="" onerror="this.remove()" />` : ""}${escapeHtml((Array.from(userName(u) || '#')[0] || '#').toUpperCase())}</div>
           <div class="ubody">
             ${userName(u) ? `<div class="uname">${escapeHtml(userName(u))}</div>` : `<div class="uname noname">Jina halijapatikana</div>`}
             <div class="uphone">${u.phoneNumber}${fxAllowed(u.phoneNumber) ? ' <span title="Forex imeruhusiwa">💹</span>' : ''}</div>
@@ -1032,6 +1039,40 @@
     loadForexAccess().then(renderRows);
     loadDeriv();
     loadAvatars();
+  }
+
+  // Fungua picha ya mteja kubwa, na kitufe cha kuisave.
+  async function openAvatar(phone) {
+    const u = ALL_USERS.find(x => x.phoneNumber === phone);
+    const label = (u && userName(u)) || phone;
+    const m = document.createElement('div');
+    m.className = 'pp-modal';
+    m.innerHTML = '<div class="pp-cap">Inapakia…</div>';
+    const close = () => { if (m.dataset.url) URL.revokeObjectURL(m.dataset.url); m.remove(); };
+    m.addEventListener('click', (e) => { if (e.target === m) close(); });
+    document.body.appendChild(m);
+    try {
+      const res = await fetch(API_BASE + '/api/admin/avatar-image?phone=' + encodeURIComponent(phone), {
+        headers: ADMIN_TOKEN ? { Authorization: 'Bearer ' + ADMIN_TOKEN } : {},
+      });
+      if (!res.ok) throw new Error('Picha haipatikani');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      m.dataset.url = url;
+      const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+      m.innerHTML = '<img alt="" /><div class="pp-cap"></div><div class="pp-btns"><button class="pp-save">⬇ Save</button><button class="pp-close">Funga</button></div>';
+      m.querySelector('img').src = url;
+      m.querySelector('.pp-cap').textContent = label + ' · ' + phone;
+      m.querySelector('.pp-close').onclick = close;
+      m.querySelector('.pp-save').onclick = () => {
+        const a = document.createElement('a');
+        a.href = url; a.download = 'whatsapp-' + phone + '.' + ext;
+        document.body.appendChild(a); a.click(); a.remove();
+      };
+    } catch (e) {
+      m.innerHTML = '<div class="pp-cap">Imeshindwa kupakia picha.</div><div class="pp-btns"><button class="pp-close">Funga</button></div>';
+      m.querySelector('.pp-close').onclick = close;
+    }
   }
 
   // Picha za WhatsApp hupakiwa baada ya orodha kuonekana, ili isichelewe.
