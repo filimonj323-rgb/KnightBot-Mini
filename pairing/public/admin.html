@@ -376,6 +376,7 @@
 
     <div class="toolbar">
       <button class="ghost" onclick="downloadBackup()">⬇️ Backup Kamili</button>
+      <button class="ghost" id="restoreBotsBtn" onclick="restoreAllBots(this)">🔄 Rudisha Bots Zote</button>
       <button class="danger" onclick="resetAllSessions()">🗑️ Futa Sessions Zote Chakavu</button>
       <button class="ghost" id="fxAllBtn" onclick="toggleForexAll()">💹 Forex: —</button>
       <button class="ghost" id="dvKillBtn" onclick="toggleDerivKill()">📈 Deriv wateja: —</button>
@@ -537,13 +538,6 @@
     </div>
     <div id="dLookupResult"></div>
     <div class="toast" id="dLookupMsg"></div>
-
-    <div class="section-label">🔄 Rudisha Bots Zote (Turso)</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;">Inawasha tena bots za wateja wote waliolink kabla (session zao ziko Turso). Namba zilizo hewani tayari zinarukwa, kwa hiyo ni salama kubofya mara nyingi. Kila namba huchukua takriban sekunde 2.</div>
-    <div class="actrow" style="margin-top:0;">
-      <button onclick="dRestoreBots(this)">🔄 Rudisha Bots Zote</button>
-    </div>
-    <div class="toast" id="dRestoreMsg"></div>
   </div>
 
   <!-- Billing -->
@@ -926,6 +920,26 @@
       loadUsers();
     } catch (e) {
       alert('❌ ' + e.message);
+    }
+  }
+
+  // Inawasha tena bots za wateja wote waliolink kabla (session ziko Turso).
+  // Namba zilizo hewani zinarukwa upande wa seva — salama kubofya mara nyingi.
+  async function restoreAllBots(btn) {
+    if (!confirm('Hii itawasha tena bots za wateja wote waliolink kabla (kutoka Turso). Namba zilizo hewani zinarukwa. Endelea?')) return;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Inarudisha...';
+    try {
+      const data = await api('/api/admin/restore-bots', { method: 'POST' });
+      alert('✅ ' + (data.message || 'Urejeshaji umeanza.'));
+      // Bots zinaunganika moja baada ya nyingine (~1.5s kila moja).
+      setTimeout(() => { try { loadUsers(); } catch (_) {} }, 20000);
+    } catch (e) {
+      alert('❌ ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
     }
   }
 
@@ -1408,29 +1422,6 @@
   // "🔍 Angalia Namba" — sawa na command ya .getpp lakini kutoka dashboard:
   // jina, picha ya profile, na groups (miongoni mwa za bot hii) ambazo
   // namba husika ipo.
-  async function dRestoreBots(btn) {
-    const msg = document.getElementById('dRestoreMsg');
-    msg.className = 'toast';
-    msg.textContent = '';
-    if (!confirm('Hii itawasha tena bots za wateja wote waliolink kabla (kutoka Turso). Namba zilizo hewani zinarukwa. Endelea?')) return;
-
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Inarudisha...';
-    try {
-      const data = await api('/api/admin/restore-bots', { method: 'POST' });
-      showToast('dRestoreMsg', true, data.message || 'Urejeshaji umeanza.');
-      // Bots zinaunganika moja baada ya nyingine (~1.5s kila moja) —
-      // onyesha upya orodha baada ya muda kidogo.
-      setTimeout(() => { try { loadUsers(); } catch (_) {} }, 20000);
-    } catch (e) {
-      showToast('dRestoreMsg', false, e.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = originalText;
-    }
-  }
-
   async function dLookupNumber(btn) {
     const raw = document.getElementById('dLookupNumber').value.trim();
     document.getElementById('dLookupMsg').className = 'toast';
