@@ -1690,6 +1690,45 @@ async function adminListUsers() {
   }).sort((a, b) => b.pairedAt - a.pairedAt);
 }
 
+// Profile picture ya kila mteja (kutoka WhatsApp yenyewe) kwa admin dashboard.
+// Picha inachukuliwa kupitia socket ya bot ya mteja mwenyewe. URL za WhatsApp
+// huisha muda, kwa hiyo tunahifadhi kwa muda mfupi tu (kumbukumbu) ili
+// kuepuka kuomba WhatsApp mara nyingi.
+const AVATAR_TTL_MS = 30 * 60 * 1000;      // picha iliyopatikana: dakika 30
+const AVATAR_MISS_TTL_MS = 10 * 60 * 1000; // hakuna picha/faragha: dakika 10
+const avatarCache = new Map(); // phoneNumber -> { url|null, at }
+
+async function fetchAvatarFor(phoneNumber) {
+  const cached = avatarCache.get(phoneNumber);
+  if (cached && Date.now() - cached.at < (cached.url ? AVATAR_TTL_MS : AVATAR_MISS_TTL_MS)) return cached.url;
+  const inst = instances.get(phoneNumber);
+  if (!inst || !inst.sock || inst.status !== 'connected') return cached ? cached.url : null;
+  let url = null;
+  try {
+    const jid = inst.sock.user?.id
+      ? inst.sock.user.id.replace(/:\d+/, '')
+      : `${phoneNumber}@s.whatsapp.net`;
+    url = (await inst.sock.profilePictureUrl(jid, 'image')) || null;
+  } catch (e) { /* hana picha, au imefichwa kwa faragha */ }
+  avatarCache.set(phoneNumber, { url, at: Date.now() });
+  return url;
+}
+
+async function adminGetAvatars() {
+  const phones = Array.from(instances.keys());
+  const out = {};
+  const queue = phones.slice();
+  const worker = async () => {
+    while (queue.length) {
+      const ph = queue.shift();
+      const url = await fetchAvatarFor(ph);
+      if (url) out[ph] = url;
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  return out;
+}
+
 async function adminMarkPaid(phoneNumber, days, meta) {
   return userStore.markPaid(normalizePhoneNumber(phoneNumber), days, meta);
 }
@@ -2388,6 +2427,7 @@ module.exports = {
   removeAutoForwardRuleForToken,
   resendDashboardLink,
   adminListUsers,
+  adminGetAvatars,
   adminMarkPaid,
   adminExtendTrial,
   adminSetBlocked,

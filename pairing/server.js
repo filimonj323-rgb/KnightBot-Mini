@@ -47,6 +47,7 @@ const {
   sendToSelfChat,
   normalizePhoneNumber,
   adminListUsers,
+  adminGetAvatars,
   adminMarkPaid,
   adminExtendTrial,
   adminSetBlocked,
@@ -732,6 +733,10 @@ async function handlePairingRequest(req, res) {
         console.log('[pairing] admin ameomba restore-bots kwa mkono...');
         restoreAllInstances().catch((e) => console.error('[pairing] restore-bots imeshindwa:', e && e.stack ? e.stack : e));
         return sendJson(res, 200, { ok: true, message: 'Urejeshaji umeanza. Angalia logs: "[pairing] auto-reconnect: X/Y zimeanzishwa".' });
+      }
+
+      if (req.method === 'GET' && req.url === '/api/admin/avatars') {
+        return sendJson(res, 200, { ok: true, avatars: await adminGetAvatars() });
       }
 
       if (req.method === 'GET' && req.url === '/api/admin/users') {
