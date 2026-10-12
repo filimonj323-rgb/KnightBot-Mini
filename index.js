@@ -1003,7 +1003,7 @@ cleanupPuppeteerCache();
   // ya reminder, na kurudisha bots za wateja waliopaired kabla. Haisubiriwi
   // (no await ya block) ili kuchelewa kwake kusiathiri muunganiko wa bot kuu.
   initPairingServer().catch(err => {
-    console.error('❌ Pairing server imeshindwa kuanza:', err && err.message ? err.message : err);
+    console.error('❌ Pairing server imeshindwa kuanza:', err && err.stack ? err.stack : err);
   });
 })();
 
