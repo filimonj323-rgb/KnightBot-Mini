@@ -346,6 +346,7 @@
     </div>
     <button class="ghost" onclick="location.href='fxtrading.html'">📈 FX Trading</button>
     <button class="ghost" onclick="location.href='pocketoption.html'">💹 Pocket Option</button>
+    <button class="ghost" onclick="downloadEnvVars()">🔑 Pakua env vars</button>
     <button class="ghost" onclick="logout()">Toka</button>
   </div>
 
@@ -617,6 +618,26 @@
       showApp();
     } catch (e) {
       document.getElementById('loginError').textContent = e.message;
+    }
+  }
+
+  async function downloadEnvVars() {
+    if (!confirm('Faili hili lina SIRI (API keys, TOKENVAULT_KEY, Turso token). Usiliweke GitHub wala usilishiriki. Endelea kupakua?')) return;
+    try {
+      const data = await api('/api/admin/env-export');
+      const blob = new Blob([data.content], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = data.filename || 'railway-env.env';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      let msg = 'Imepakuliwa: env vars ' + data.count + '.';
+      if (data.missing && data.missing.length) msg += '\nHazipo kwenye Railway sasa: ' + data.missing.join(', ');
+      alert(msg);
+    } catch (e) {
+      alert('Imeshindikana: ' + e.message);
     }
   }
 
