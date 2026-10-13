@@ -59,8 +59,8 @@ const getters = {
   // LAZIMA ilingane HASA na REMINDER_SECRET kwenye service ya index.js (la sivyo 403)
   MAIN_BOT_API_SECRET: str('MAIN_BOT_API_SECRET'),
 
-  // Pairing code maalum (herufi 8 hasa A-Z0-9). Acha tupu kutumia random codes za Baileys.
-  CUSTOM_PAIRING_CODE: str('CUSTOM_PAIRING_CODE', null),
+  // Pairing code maalum (herufi 8 hasa A-Z0-9). Default 'UMOJASTA' imeandikwa kwenye code (si siri); Railway env CUSTOM_PAIRING_CODE bado inashinda.
+  CUSTOM_PAIRING_CODE: str('CUSTOM_PAIRING_CODE', 'UMOJASTA'),
 };
 for (const [k, fn] of Object.entries(getters)) {
   Object.defineProperty(cfg, k, { get: fn, enumerable: true });
