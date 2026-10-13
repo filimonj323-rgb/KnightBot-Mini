@@ -587,6 +587,7 @@ async function _startBot() {
       console.warn(`⚠️ customPairingCode ("${config.customPairingCode}") si sahihi — inahitajika herufi 8 hasa (A-Z, 0-9). Kutumia random code badala yake.`);
     }
 
+    console.log(`📲 Naomba pairing code kwa namba ${pairNumber.slice(0, 5)}****${pairNumber.slice(-2)} (${process.env.PAIR_NUMBER ? 'Railway PAIR_NUMBER' : 'config.pairNumber'}) — notification ya WhatsApp inaenda kwenye namba hii.`);
     pairingCodeRequested = true; // zuia jaribio lolote lijalo la startBot() (reconnect) lisiombe code nyingine
     setTimeout(() => {
       if (state.creds.registered) return; // ime-link tayari kabla hatujafika hapa — usiombe code bure
@@ -699,6 +700,22 @@ async function _startBot() {
 
       if (statusCode !== DisconnectReason.loggedOut) {
         setTimeout(() => startBot(), 3000);
+        return;
+      }
+
+      // Session ambayo HAIJAWAHI kulinkiwa (registered=false) lakini ina creds.me
+      // — hii ni masalio ya pairing code iliyoisha muda (408) bila kuingizwa.
+      // WhatsApp inaikataa kwa 401 kila mara, kwa hiyo kujaribu tena mara 4
+      // (sekunde 10 kila moja) ni kupoteza muda tu. Ifute mara moja na uombe
+      // pairing code MPYA (=> notification mpya kwenye WhatsApp ya simu).
+      if (statusCode === DisconnectReason.loggedOut && !state.creds.registered) {
+        console.log('🔁 Pairing code ya awali imeisha bila kuingizwa — nafuta session tupu na kuomba code MPYA...');
+        pairingCodeRequested = false;
+        global.__loggedOutCount = 0;
+        global.mainQR = null;
+        deleteSession(sessionId)
+          .catch((e) => console.error('❌ Imeshindwa kufuta session tupu:', e.message))
+          .finally(() => setTimeout(() => startBot(), 2000));
         return;
       }
 
