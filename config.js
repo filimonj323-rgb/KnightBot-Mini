@@ -19,6 +19,13 @@ module.exports = {
     // Weka null kutumia random code ya WhatsApp badala yake.
     customPairingCode: 'UMOJASTA',
 
+    // Namba ya WhatsApp ya bot kuu (bila + wala 0 mwanzoni) — ndiyo inayopokea
+    // notification ya "Enter code to link" bot ikiwa imetoka (logout).
+    // Imeandikwa kwenye code (si siri) ili isitegemee Railway env. Railway
+    // variable PAIR_NUMBER bado inashinda ukiiweka. Badilisha hapa kama bot
+    // inatumia namba tofauti na ya owner.
+    pairNumber: '255623647378',
+
     // Sticker Configuration
     packname: 'MR.IT MEDIATOR',
 

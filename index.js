@@ -575,7 +575,8 @@ async function _startBot() {
   // wakati huo huo — hivyo pairing code iliyotolewa ilikuwa tayari
   // "chakavu" (imepitwa na hali mpya ya connection) kufikia mtumiaji
   // anapoiandika kwenye simu, na kusababisha "couldn't link a device".
-  if (process.env.PAIR_NUMBER && !state.creds.registered && !pairingCodeRequested) {
+  const pairNumber = String(process.env.PAIR_NUMBER || config.pairNumber || '').replace(/[^0-9]/g, '');
+  if (pairNumber && !state.creds.registered && !pairingCodeRequested) {
     // Herufi 8 hasa (A-Z, 0-9) ndizo tu WhatsApp inazokubali kama custom
     // code — sawa na uthibitisho unaotumika kwenye pairing/instanceManager.js.
     // Isipokidhi hilo, tunarudi kwenye random code ya WhatsApp badala ya
@@ -589,7 +590,7 @@ async function _startBot() {
     pairingCodeRequested = true; // zuia jaribio lolote lijalo la startBot() (reconnect) lisiombe code nyingine
     setTimeout(() => {
       if (state.creds.registered) return; // ime-link tayari kabla hatujafika hapa — usiombe code bure
-      sock.requestPairingCode(process.env.PAIR_NUMBER, customCode || undefined)
+      sock.requestPairingCode(pairNumber, customCode || undefined)
         .then((rawCode) => {
           const code = rawCode.match(/.{1,4}/g).join('-');
           console.log('\n\n🔑🔑🔑 PAIRING CODE: ' + code + ' 🔑🔑🔑');
@@ -659,7 +660,7 @@ async function _startBot() {
     if (qr) {
       console.log('\n\n📱 Scan this QR code with WhatsApp (njia mbadala ya pairing code):\n');
       qrcode.generate(qr, { small: true });
-      if (process.env.PAIR_NUMBER) {
+      if (process.env.PAIR_NUMBER || config.pairNumber) {
         console.log('👉 Au tumia PAIRING CODE iliyotolewa hapo juu — chagua njia inayokufanyia kazi.\n');
       }
       // QR ya Railway logs ni ngumu ku-scan (imebanwa kwenye log viewer) —
