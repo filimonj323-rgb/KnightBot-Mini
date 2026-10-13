@@ -91,16 +91,21 @@ if not SSID:
 import logging
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
-# pocketoptionapi_async inatumia loguru na inachapisha DEBUG kwa kila tick ya bei
-# (maelfu ya mistari kwa dakika). Weka INFO kupunguza kelele kwenye logs.
-# Ukihitaji debug: weka env POCKET_LOG_LEVEL=DEBUG.
-try:
-    import sys
-    from loguru import logger as _loguru
-    _loguru.remove()
-    _loguru.add(sys.stderr, level=os.environ.get("POCKET_LOG_LEVEL", "INFO").upper())
-except Exception:
-    pass
+# pocketoptionapi_async inatumia loguru na inachapisha INFO/SUCCESS kwa kila
+# candle batch na tick ya bei (maelfu ya mistari). Tunaonyesha WARNING na
+# ERROR tu (matatizo halisi). Maktaba pia inaweza kuweka upya handlers zake
+# wakati client inaundwa/inaunganishwa, kwa hiyo _quiet_loguru() inaitwa tena
+# baada ya hapo. Ukihitaji zaidi: weka env POCKET_LOG_LEVEL=INFO (au DEBUG).
+def _quiet_loguru():
+    try:
+        import sys
+        from loguru import logger as _loguru
+        _loguru.remove()
+        _loguru.add(sys.stderr, level=os.environ.get("POCKET_LOG_LEVEL", "WARNING").upper())
+    except Exception:
+        pass
+
+_quiet_loguru()
 
 app = Flask(__name__)
 
@@ -152,8 +157,10 @@ async def _connect_client():
         client = AsyncPocketOptionClient(SSID, is_demo=IS_DEMO, enable_logging=True)
     except TypeError:
         client = AsyncPocketOptionClient(SSID, is_demo=IS_DEMO)
+    _quiet_loguru()
     try:
         ok = await client.connect()
+        _quiet_loguru()
     except Exception:
         print("❌ [pocket_bridge] connect() imetoa exception:\n" + traceback.format_exc())
         raise
@@ -720,7 +727,7 @@ def debug_history():
 
 if __name__ == "__main__":
     print(f"🌐 [pocket_bridge] Inaanza kwenye port {PORT} (demo={IS_DEMO})")
-    if os.environ.get("POCKET_DEBUG_LIB", "true").strip().lower() != "false":
+    if os.environ.get("POCKET_DEBUG_LIB", "false").strip().lower() != "false":
         try:
             print("===== POCKET_LIB_DIAG BEGIN =====")
             print(_lib_diagnostics())
