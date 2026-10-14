@@ -429,9 +429,30 @@ async function getOpenPositionsLive() {
   );
 }
 
+// Deriv inahitaji contract_id kama NAMBA (integer). Dashboard hutuma kama
+// maandishi ("123456") kupitia JSON/onclick, na hapo "sell" hukataliwa kwa
+// "Input validation failed" — ndiyo sababu ya kushindwa kufunga kwa mkono.
+function toContractId(contractId) {
+  const n = Number(String(contractId).trim());
+  if (!Number.isSafeInteger(n) || n <= 0) throw new Error(`contract_id si sahihi: "${contractId}"`);
+  return n;
+}
+
 async function closeContract(contractId) {
-  const res = await send({ sell: contractId, price: 0 }); // price:0 = kubali bei ya soko
-  return res.sell; // { contract_id, sold_for, transaction_id, ... } — HAINA "profit"!
+  const id = toContractId(contractId);
+  let lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await send({ sell: id, price: 0 }); // price:0 = kubali bei ya soko
+      return res.sell; // { contract_id, sold_for, transaction_id, ... } — HAINA "profit"!
+    } catch (err) {
+      lastErr = err;
+      // Jaribu mara ya pili TU kwa matatizo ya muunganisho/muda, si kwa kukataliwa na Deriv.
+      if (!/muda|timeout|connect|socket|closed|ws/i.test(String(err.message))) break;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
+  throw lastErr;
 }
 
 // Inabadilisha Stop Loss/Take Profit ya contract iliyo WAZI TAYARI, bila
@@ -467,7 +488,7 @@ async function updateContractLimits(contractId, { stopLoss, takeProfit } = {}) {
   }
 
   try {
-    const res = await send({ contract_update: 1, contract_id: contractId, limit_order: limitOrder });
+    const res = await send({ contract_update: 1, contract_id: toContractId(contractId), limit_order: limitOrder });
     return res.contract_update;
   } catch (err) {
     // Sawa na placeMultiplier(): Deriv inaweza kukataa thamani mpya kwa
@@ -534,7 +555,7 @@ async function closeAll() {
 }
 
 async function getContractDetails(contractId) {
-  const res = await send({ proposal_open_contract: 1, contract_id: contractId });
+  const res = await send({ proposal_open_contract: 1, contract_id: toContractId(contractId) });
   return res.proposal_open_contract;
 }
 
