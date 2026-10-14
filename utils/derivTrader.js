@@ -576,6 +576,13 @@ async function getClosedContractFromHistory(contractId) {
   return rows.find((t) => String(t.contract_id) === String(contractId)) || null;
 }
 
+// Transactions zilizofungwa (chanzo cha ukweli cha Deriv) — hutumika kujaza
+// faida/hasara ya trades zilizofungwa kwa mkono, na SL/TP, au wakati bot ilikuwa imezimwa.
+async function getProfitTable(limit = 100) {
+  const res = await send({ profit_table: 1, description: 1, limit: Math.max(1, Math.min(500, Number(limit) || 100)), sort: 'DESC' });
+  return res.profit_table?.transactions || [];
+}
+
 // ─────────────────────────────────────────────
 // Candles za kihistoria (OHLC) kutoka Deriv — mbadala wa Twelve Data kwa
 // signal ili bei ya signal iwe ileile ya trade. Umbo la matokeo ni LILELILE
@@ -648,6 +655,7 @@ module.exports = {
   updateContractLimits,
   getContractDetails,
   getClosedContractFromHistory,
+  getProfitTable,
   closeContract,
   closeContractWithPnL,
   closeAll,

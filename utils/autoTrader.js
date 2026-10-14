@@ -93,6 +93,7 @@ const {
   updateContractLimits,
   getContractDetails,
   getClosedContractFromHistory,
+  getProfitTable,
   ALLOWED_MULTIPLIERS,
   toDerivSymbol,
   MIN_STAKE_USD,
@@ -398,7 +399,7 @@ async function dbMarkTradeClosed(contractId, { closedAt, sellPrice, profit }) {
   try {
     await fxTradesDb.initSchema();
     await fxTradesDb.query(
-      `UPDATE fx_auto_trades SET closedAt = ?, sellPrice = ?, profit = ? WHERE contractId = ?`,
+      `UPDATE fx_auto_trades SET closedAt = ?, sellPrice = COALESCE(?, sellPrice), profit = COALESCE(?, profit) WHERE contractId = ?`,
       [closedAt, Number.isFinite(sellPrice) ? sellPrice : null, Number.isFinite(profit) ? profit : null, contractId]
     );
   } catch (err) {
@@ -440,7 +441,70 @@ function bucketFor(strength) {
  * Historia ya trade zilizofungwa (mpya kwanza) kwa ajili ya tab ya
  * "History" kwenye fxtrading.html.
  */
+// Inajaza/kurekebisha historia ya owner kutoka profit_table ya Deriv: trades zilizofungwa
+// kwa mkono (dashboard/.fxclose/Deriv app), kwa SL/TP, au wakati bot imezimwa, ambazo
+// hazikurekodiwa au zilirekodiwa bila faida (profit = NULL). Throttle: mara moja kwa sekunde 20.
+let lastReconcileAt = 0;
+let reconcileRunning = false;
+async function reconcileHistoryFromDeriv(force = false) {
+  if (reconcileRunning || (!force && Date.now() - lastReconcileAt < 20000)) return;
+  reconcileRunning = true;
+  try {
+    const txs = await getProfitTable(100);
+    if (!txs.length) return;
+    await fxTradesDb.initSchema();
+    const ids = txs.map((t) => String(t.contract_id));
+    const existing = await fxTradesDb.query(
+      `SELECT contractId, closedAt, profit, ownerPhone FROM fx_auto_trades WHERE contractId IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    const byId = new Map((existing.rows || []).map((r) => [String(r.contractId), r]));
+    for (const t of txs) {
+      const id = String(t.contract_id);
+      const buy = Number(t.buy_price);
+      const sell = Number(t.sell_price);
+      if (!Number.isFinite(buy) || !Number.isFinite(sell)) continue;
+      const profit = Number(t.profit);
+      const pl = Number.isFinite(profit) ? profit : sell - buy;
+      const row = byId.get(id);
+      if (row) {
+        if (row.ownerPhone) continue; // trade ya mteja — si ya owner
+        if (row.closedAt === null || row.closedAt === undefined) continue; // poller itaifunga na kutuma notification
+        if (row.profit === null || row.profit === undefined) {
+          await fxTradesDb.query('UPDATE fx_auto_trades SET sellPrice = ?, profit = ? WHERE contractId = ?', [sell, pl, id]);
+        }
+        continue;
+      }
+      const m = /^(MULTUP|MULTDOWN)_FRX([A-Z]{6})_/i.exec(String(t.shortcode || ''));
+      if (!m) continue; // si multiplier ya forex
+      const code = m[2].toUpperCase();
+      await fxTradesDb.query(
+        `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, openedAt, closedAt, sellPrice, profit)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(contractId) DO NOTHING`,
+        [id, code, 'frx' + code, m[1].toUpperCase() === 'MULTUP' ? 'BUY' : 'SELL', buy, buy,
+          (Number(t.purchase_time) || 0) * 1000, (Number(t.sell_time) || 0) * 1000 || Date.now(), sell, pl]
+      );
+    }
+    lastReconcileAt = Date.now();
+  } catch (err) {
+    console.error('[autoTrader] reconcileHistoryFromDeriv imeshindwa:', err.message);
+  } finally {
+    reconcileRunning = false;
+  }
+}
+
+// Dashboard/command ikifunga trade kwa mkono — rekodi faida mara moja (poller isiiandike NULL baadaye).
+async function recordClosedFromDashboard(contractId, { profit, soldFor } = {}) {
+  await dbMarkTradeClosed(String(contractId), {
+    closedAt: Date.now(),
+    sellPrice: Number(soldFor),
+    profit: Number(profit),
+  });
+  lastReconcileAt = 0; // historia ijazwe upya (kama trade haikuwa kwenye DB)
+}
+
 async function getTradeHistory(limit = 200) {
+  await reconcileHistoryFromDeriv();
   await fxTradesDb.initSchema();
   const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
   const result = await fxTradesDb.query(
@@ -464,6 +528,7 @@ async function getTradeHistory(limit = 200) {
 
 async function getWinRateStats() {
   try {
+    await reconcileHistoryFromDeriv();
     await fxTradesDb.initSchema();
     const result = await fxTradesDb.query(
       `SELECT signalStrength, profit FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL`
@@ -1590,6 +1655,8 @@ module.exports = {
   placeManualTrade,
   getWinRateStats,
   getTradeHistory,
+  recordClosedFromDashboard,
+  reconcileHistoryFromDeriv,
   PAIRS,
   STRENGTH_THRESHOLD,
   openAutoTrades,
