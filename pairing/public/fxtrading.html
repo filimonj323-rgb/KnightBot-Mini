@@ -129,6 +129,20 @@
     #positionsBox td.row-actions::before { content: none; }
     #positionsBox td.row-actions button { flex: 1; padding: 10px; }
   }
+  .table-wrap > table { min-width: 520px; }
+  @media (max-width: 640px) {
+    #positionsBox .table-wrap > table, #signalsWrap > table { min-width: 0; }
+    #signalsWrap table, #signalsWrap tbody, #signalsWrap tr, #signalsWrap td { display: block; width: 100%; }
+    #signalsWrap thead { display: none; }
+    #signalsWrap tr { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; background: rgba(255,255,255,0.015); }
+    #signalsWrap td { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); padding: 7px 0; text-align: right; white-space: normal; }
+    #signalsWrap td::before { content: attr(data-label); color: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; text-align: left; flex: 0 0 auto; }
+    #signalsWrap td.sig-pair { font-size: 15px; justify-content: flex-start; }
+    #signalsWrap td.sig-pair::before { content: none; }
+    #signalsWrap td.sig-act { border-bottom: none; padding-bottom: 2px; }
+    #signalsWrap td.sig-act::before { content: none; }
+    #signalsWrap td.sig-act button { width: 100%; padding: 10px; }
+  }
   .modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; padding: 16px; }
   .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 100%; max-width: 340px; }
   .modal-box p { margin: 0 0 16px; font-size: 13px; line-height: 1.5; }
@@ -657,11 +671,11 @@
   }
   function tfCell(s) {
     const t = s && s.trends;
-    if (!t) return '<td class="muted">—</td>';
+    if (!t) return '<td data-label="1h · 4h · 1d" class="muted">—</td>';
     const gate = s.gated
       ? ` <span class="muted" title="Gate imezuia trade: timeframe kubwa inapinga 1h">⛔${s.gated === 'DAILY' ? '1d' : '4h'}</span>`
       : '';
-    return `<td style="font-size:12px; white-space:nowrap;">1h ${tfArrow(t.h1)} · 4h ${tfArrow(t.h4)} · 1d ${tfArrow(t.d1)}${gate}</td>`;
+    return `<td data-label="1h · 4h · 1d" style="font-size:12px;">1h ${tfArrow(t.h1)} · 4h ${tfArrow(t.h4)} · 1d ${tfArrow(t.d1)}${gate}</td>`;
   }
   function notesTitle(s) {
     const txt = (s && s.notes ? s.notes : []).join('\n').replace(/"/g, '&quot;');
@@ -673,34 +687,34 @@
       const s = signalState[code];
       let mid;
       if (!s) {
-        mid = `<td colspan="4" class="muted">Bado hujaangaliwa</td>`;
+        mid = `<td colspan="4" class="muted" data-label="Hali">Bado hujaangaliwa</td>`;
       } else if (s.loading) {
-        mid = `<td colspan="4" class="muted">⏳ Inaangalia...</td>`;
+        mid = `<td colspan="4" class="muted" data-label="Hali">⏳ Inaangalia...</td>`;
       } else if (s.error) {
-        mid = `<td colspan="4" class="muted">❌ ${s.error}</td>`;
+        mid = `<td colspan="4" class="muted" data-label="Hali">❌ ${s.error}</td>`;
       } else {
         const rawNote = s.gated && s.rawDirection
           ? ` <span class="muted" style="font-size:11px;">(1h: ${s.rawDirection})</span>`
           : '';
         mid = `
-          <td${notesTitle(s)}>${directionBadge(s.direction)}${rawNote}</td>
-          <td>${s.strength}%</td>
+          <td data-label="Signal"${notesTitle(s)}>${directionBadge(s.direction)}${rawNote}</td>
+          <td data-label="Strength">${s.strength}%</td>
           ${tfCell(s)}
-          <td class="muted" style="font-size:11px;">${timeAgo(s.checkedAt)}</td>
+          <td data-label="Ilipoangaliwa" class="muted" style="font-size:11px;">${timeAgo(s.checkedAt)}</td>
         `;
       }
       return `<tr>
-        <td><strong>${code}</strong></td>
+        <td class="sig-pair"><strong>${code}</strong></td>
         ${mid}
-        <td><button onclick="checkSignal('${code}')">🔍 Angalia</button></td>
+        <td class="sig-act"><button onclick="checkSignal('${code}')">🔍 Angalia</button></td>
       </tr>`;
     }).join('');
 
     document.getElementById('signalsBox').innerHTML = `
-      <table>
+      <div class="table-wrap" id="signalsWrap"><table>
         <thead><tr><th>Jozi</th><th>Signal</th><th>Strength</th><th>1h · 4h · 1d</th><th>Ilipoangaliwa</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
-      </table>
+      </table></div>
       <div class="muted" style="margin-top:8px; font-size:11px;">
         ${(fxInfo.pairs && fxInfo.pairs.length ? fxInfo.pairs : FX_PAIRS).join('/')} zinaangaliwa kiotomatiki na Auto-Trader ${fxInfo.intervalMin ? `kila dakika ${fxInfo.intervalMin}` : 'mara kwa mara'}${dataSourceLabel() ? ` (chanzo: ${dataSourceLabel()})` : ''}.
         Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.<br>
