@@ -1118,11 +1118,19 @@ async function handlePairingRequest(req, res) {
         const symbol = FX_SYMBOL_MAP[code];
         if (!symbol) return sendJson(res, 400, { ok: false, error: `Jozi "${code}" haitambuliki.` });
 
+        // Cache ya dakika 25 kwa kila jozi — dashboard inajisasisha kila dakika 30 yenyewe,
+        // hivyo kufungua ukurasa mara nyingi hakuongezi gharama za API. ?force=1 inapita cache.
+        if (!global.__fxSignalCache) global.__fxSignalCache = new Map();
+        const cached = global.__fxSignalCache.get(code);
+        if (cached && query.get('force') !== '1' && Date.now() - cached.checkedAt < 25 * 60 * 1000) {
+          return sendJson(res, 200, cached);
+        }
+
         // daily:true => dashboard inaonyesha signal ileile ambayo auto-trader
         // ingeitumia (gate ya 4h + 1day), ili uamue trade ya mkono kwa data sawa.
         const snapshot = await fetchForexSnapshot(symbol, DEFAULT_INTERVAL, { daily: true });
         const sig = computeSignal(snapshot);
-        return sendJson(res, 200, {
+        const payload = {
           ok: true,
           code,
           direction: sig.direction,
@@ -1135,7 +1143,9 @@ async function handlePairingRequest(req, res) {
           price: snapshot.price,
           atr: snapshot.atr,
           checkedAt: Date.now(),
-        });
+        };
+        global.__fxSignalCache.set(code, payload);
+        return sendJson(res, 200, payload);
       }
 
       // ── Group la signals + matokeo (profit/loss) — Deriv & Pocket Option ──
