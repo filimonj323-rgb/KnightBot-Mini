@@ -19,7 +19,7 @@
     --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; width: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+  html, body { min-height: 100%; width: 100%; margin: 0; overflow-x: clip; -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
     font-family: var(--mono);
@@ -52,16 +52,16 @@
 
   /* App inajaza screen nzima: header juu (haisogei), maudhui yanasogea ndani ya eneo lake tu —
      hakuna tena ukurasa kuelea/kuteleza pembeni au juu-chini nje ya screen. */
-  #app { display: none; flex-direction: column; height: 100vh; height: 100dvh; width: 100%; overflow: hidden; }
+  #app { display: none; width: 100%; min-height: 100vh; }
   #loginCard { max-width: min(380px, calc(100% - 24px)); }
-  .sticky-head { position: relative; flex: 0 0 auto; z-index: 20; background: rgba(5,16,10,0.96); backdrop-filter: blur(8px);
+  .sticky-head { position: sticky; top: 0; z-index: 20; background: rgba(5,16,10,0.96); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border); }
   .topbar { display: flex; align-items: center; justify-content: space-between; padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px; gap: 8px;
     border-bottom: 1px solid var(--border); background: rgba(11,27,18,0.7); }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-  .content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+  .content { width: 100%; overflow-x: clip;
     padding: 18px max(20px, calc((100% - 1080px) / 2)) calc(40px + env(safe-area-inset-bottom, 0px)); }
   .brand { min-width: 0; } .brand strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card { max-width: 100%; overflow-wrap: anywhere; }
@@ -143,6 +143,19 @@
     #signalsWrap td.sig-act::before { content: none; }
     #signalsWrap td.sig-act button { width: 100%; padding: 10px; }
   }
+  /* Signals — kadi zinazofunguka (kichwa: jozi + BUY/SELL + strength) */
+  .sg-card { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; background: rgba(255,255,255,0.015); overflow: hidden; }
+  .sg-card.open { border-color: var(--accent-dim); }
+  .sg-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .sg-pair { font-size: 14px; flex: 0 0 auto; min-width: 70px; }
+  .sg-sig { flex: 1; display: flex; align-items: center; gap: 10px; justify-content: flex-end; min-width: 0; font-size: 13px; }
+  .sg-str { color: var(--muted); font-size: 12px; }
+  .sg-chev { color: var(--muted); font-size: 10px; flex: 0 0 auto; }
+  .sg-body { padding: 4px 14px 14px; border-top: 1px solid var(--border); }
+  .sg-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; text-align: right; }
+  .sg-k { color: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; text-align: left; flex: 0 0 auto; }
+  .sg-notes { margin: 8px 0 0; padding-left: 16px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .sg-btn { width: 100%; margin-top: 12px; padding: 10px; }
   .modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; padding: 16px; }
   .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 100%; max-width: 340px; }
   .modal-box p { margin: 0 0 16px; font-size: 13px; line-height: 1.5; }
@@ -682,39 +695,51 @@
     return txt ? ` title="${txt}"` : '';
   }
 
+  const openSignals = new Set(); // kadi zilizofunguliwa — zibaki wazi hata baada ya refresh
+
+  function toggleSignal(code) {
+    if (openSignals.has(code)) openSignals.delete(code); else openSignals.add(code);
+    renderSignals();
+  }
+
   function renderSignals() {
-    const rows = FX_PAIRS.map((code) => {
+    const cards = FX_PAIRS.map((code) => {
       const s = signalState[code];
-      let mid;
+      const isOpen = openSignals.has(code);
+      let head; // upande wa kulia wa kichwa cha kadi: signal + strength
+      let body = '';
       if (!s) {
-        mid = `<td colspan="4" class="muted" data-label="Hali">Bado hujaangaliwa</td>`;
+        head = '<span class="muted">Bado hujaangaliwa</span>';
       } else if (s.loading) {
-        mid = `<td colspan="4" class="muted" data-label="Hali">⏳ Inaangalia...</td>`;
+        head = '<span class="muted">⏳ Inaangalia...</span>';
       } else if (s.error) {
-        mid = `<td colspan="4" class="muted" data-label="Hali">❌ ${s.error}</td>`;
+        head = '<span class="muted">❌ Hitilafu</span>';
+        body += `<div class="sg-row"><span class="sg-k">Hitilafu</span><span>${s.error}</span></div>`;
       } else {
-        const rawNote = s.gated && s.rawDirection
-          ? ` <span class="muted" style="font-size:11px;">(1h: ${s.rawDirection})</span>`
-          : '';
-        mid = `
-          <td data-label="Signal"${notesTitle(s)}>${directionBadge(s.direction)}${rawNote}</td>
-          <td data-label="Strength">${s.strength}%</td>
-          ${tfCell(s)}
-          <td data-label="Ilipoangaliwa" class="muted" style="font-size:11px;">${timeAgo(s.checkedAt)}</td>
-        `;
+        head = `${directionBadge(s.direction)}<span class="sg-str">${s.strength}%</span>`;
+        const rawNote = s.gated && s.rawDirection ? ` <span class="muted">(1h: ${s.rawDirection})</span>` : '';
+        const t = s.trends;
+        const gate = s.gated ? ` <span class="muted">⛔${s.gated === 'DAILY' ? '1d' : '4h'}</span>` : '';
+        body += `<div class="sg-row"><span class="sg-k">Signal</span><span>${directionBadge(s.direction)}${rawNote}</span></div>`;
+        body += `<div class="sg-row"><span class="sg-k">Strength</span><span>${s.strength}%</span></div>`;
+        if (t) body += `<div class="sg-row"><span class="sg-k">1h · 4h · 1d</span><span>1h ${tfArrow(t.h1)} · 4h ${tfArrow(t.h4)} · 1d ${tfArrow(t.d1)}${gate}</span></div>`;
+        body += `<div class="sg-row"><span class="sg-k">Ilipoangaliwa</span><span class="muted">${timeAgo(s.checkedAt)}</span></div>`;
+        const notes = (s.notes || []).map((n) => `<li>${String(n).replace(/</g, '&lt;')}</li>`).join('');
+        if (notes) body += `<ul class="sg-notes">${notes}</ul>`;
       }
-      return `<tr>
-        <td class="sig-pair"><strong>${code}</strong></td>
-        ${mid}
-        <td class="sig-act"><button onclick="checkSignal('${code}')">🔍 Angalia</button></td>
-      </tr>`;
+      body += `<button class="sg-btn" onclick="checkSignal('${code}')">🔍 Angalia upya</button>`;
+      return `<div class="sg-card${isOpen ? ' open' : ''}">
+        <div class="sg-head" onclick="toggleSignal('${code}')">
+          <strong class="sg-pair">${code}</strong>
+          <span class="sg-sig">${head}</span>
+          <span class="sg-chev">${isOpen ? '▲' : '▼'}</span>
+        </div>
+        ${isOpen ? `<div class="sg-body">${body}</div>` : ''}
+      </div>`;
     }).join('');
 
     document.getElementById('signalsBox').innerHTML = `
-      <div class="table-wrap" id="signalsWrap"><table>
-        <thead><tr><th>Jozi</th><th>Signal</th><th>Strength</th><th>1h · 4h · 1d</th><th>Ilipoangaliwa</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
+      ${cards}
       <div class="muted" style="margin-top:8px; font-size:11px;">
         ${(fxInfo.pairs && fxInfo.pairs.length ? fxInfo.pairs : FX_PAIRS).join('/')} zinaangaliwa kiotomatiki na Auto-Trader ${fxInfo.intervalMin ? `kila dakika ${fxInfo.intervalMin}` : 'mara kwa mara'}${dataSourceLabel() ? ` (chanzo: ${dataSourceLabel()})` : ''}.
         Jozi nyingine bonyeza "Angalia" — huchukua sekunde chache.<br>
@@ -1388,7 +1413,7 @@
 
   function showApp() {
     document.getElementById('loginCard').style.display = 'none';
-    document.getElementById('app').style.display = 'flex';
+    document.getElementById('app').style.display = 'block';
     renderLiveBar();
     renderSignals(); // jedwali tupu mara moja, kabla ya refresh ya kwanza
     renderCalendarFilters();
@@ -1405,7 +1430,9 @@
     // (calendar: cache dakika 15 upande wa server; predictions: cache dakika
     // ~20 + Groq call; stats: inabadilika tu trade ikifungwa) — kila dakika 1
     // kwenye dashboard inatosha, hakuna sababu ya sekunde 5.
-    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); refreshStats(); refreshHistory(); }, 60000);
+    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); refreshStats(); }, 60000);
+    if (window._histTimer) clearInterval(window._histTimer);
+    window._histTimer = setInterval(refreshHistory, 15000); // faida/hasara ya trades zilizofungwa — sasisha mara nyingi
   }
 
   if (ADMIN_TOKEN) showApp();
