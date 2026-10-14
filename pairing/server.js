@@ -1077,6 +1077,7 @@ async function handlePairingRequest(req, res) {
         const body = await readJsonBody(req);
         if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
         const result = await derivTrader.closeContractWithPnL(body.contract_id);
+        await autoTrader.recordClosedFromDashboard(body.contract_id, { profit: result?.profit, soldFor: result?.sold_for }).catch(() => {});
 
         const profit = Number(result?.profit);
         notifyOwnerWA(
@@ -1093,6 +1094,9 @@ async function handlePairingRequest(req, res) {
       // Funga TRADES ZOTE zilizo wazi mara moja ("panic button").
       if (req.method === 'POST' && req.url === '/api/admin/fx/close-all') {
         const results = await derivTrader.closeAll();
+        for (const r of results) {
+          if (r.ok) await autoTrader.recordClosedFromDashboard(r.contract_id, { profit: r.profit, soldFor: r.r?.sold_for }).catch(() => {});
+        }
         const totalProfit = results
           .filter((r) => r.ok && Number.isFinite(r.profit))
           .reduce((sum, r) => sum + r.profit, 0);
