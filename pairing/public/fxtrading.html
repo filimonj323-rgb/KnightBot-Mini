@@ -2,7 +2,7 @@
 <html lang="sw">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>FX Trading — Mr. IT MEDIATOR</title>
 <style>
   :root {
@@ -19,7 +19,7 @@
     --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
+  html, body { height: 100%; width: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
     font-family: var(--mono);
@@ -50,15 +50,21 @@
   button.ghost { background: transparent; border-color: var(--border); color: var(--muted); }
   .error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 14px; }
 
-  #app { display: none; min-height: 100vh; }
-  .sticky-head { position: sticky; top: 0; z-index: 20; background: rgba(5,16,10,0.96); backdrop-filter: blur(8px);
+  /* App inajaza screen nzima: header juu (haisogei), maudhui yanasogea ndani ya eneo lake tu —
+     hakuna tena ukurasa kuelea/kuteleza pembeni au juu-chini nje ya screen. */
+  #app { display: none; flex-direction: column; height: 100vh; height: 100dvh; width: 100%; overflow: hidden; }
+  #loginCard { max-width: min(380px, calc(100% - 24px)); }
+  .sticky-head { position: relative; flex: 0 0 auto; z-index: 20; background: rgba(5,16,10,0.96); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border); }
-  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px;
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: calc(12px + env(safe-area-inset-top, 0px)) 20px 12px; gap: 8px;
     border-bottom: 1px solid var(--border); background: rgba(11,27,18,0.7); }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
-  .content { padding: 18px 20px 60px; max-width: 1080px; margin: 0 auto; }
+  .content { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+    padding: 18px max(20px, calc((100% - 1080px) / 2)) calc(40px + env(safe-area-inset-bottom, 0px)); }
+  .brand { min-width: 0; } .brand strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card { max-width: 100%; overflow-wrap: anywhere; }
 
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 18px; }
   .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px 14px; }
@@ -108,10 +114,25 @@
   .toast.error { display: block; background: rgba(255,85,102,0.1); color: var(--red); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-  @media (max-width: 560px) { .grid2, .grid3 { grid-template-columns: 1fr; } .content { padding: 14px 12px 60px; } }
+  @media (max-width: 560px) { .grid2, .grid3 { grid-template-columns: 1fr; } .content { padding: 14px 12px calc(40px + env(safe-area-inset-bottom, 0px)); } }
   .row-actions { display: flex; gap: 6px; }
   .row-actions button { padding: 6px 10px; font-size: 11px; width: auto; }
   .row-actions button.save { background: var(--accent); color: #041008; border-color: var(--accent); }
+  @media (max-width: 640px) {
+    #positionsBox table, #positionsBox tbody, #positionsBox tr, #positionsBox td { display: block; width: 100%; }
+    #positionsBox thead { display: none; }
+    #positionsBox tr { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; background: rgba(255,255,255,0.015); }
+    #positionsBox td { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); padding: 7px 0; text-align: right; }
+    #positionsBox td:last-child { border-bottom: none; }
+    #positionsBox td::before { content: attr(data-label); color: var(--muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; text-align: left; }
+    #positionsBox td.row-actions { display: flex; }
+    #positionsBox td.row-actions::before { content: none; }
+    #positionsBox td.row-actions button { flex: 1; padding: 10px; }
+  }
+  .modal-back { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 100%; max-width: 340px; }
+  .modal-box p { margin: 0 0 16px; font-size: 13px; line-height: 1.5; }
+  .modal-box .grid2 button { padding: 11px; }
   .sltp-edit { display: flex; gap: 4px; }
   .sltp-edit input { width: 62px; padding: 5px 6px; font-size: 11px; }
   .muted { color: var(--muted); }
@@ -260,6 +281,7 @@
           <button class="danger" onclick="closeAll()">🛑 Funga Zote</button>
         </div>
         <div id="positionsBox"></div>
+        <div class="toast" id="posToast"></div>
       </div>
 
       <div class="card">
@@ -418,6 +440,37 @@
   let calendarEvents = [];
   let calFilter = 'all'; // all | high | upcoming
 
+  let actionBusy = false;      // kufunga trade kunaendelea — usifute jedwali
+  let editingContract = null;  // SL/TP inahaririwa — usifute inputs kila sekunde 5
+
+  function posToast(msg, ok) {
+    const el = document.getElementById('posToast');
+    if (!el) return;
+    el.className = 'toast ' + (ok ? 'success' : 'error');
+    el.textContent = msg;
+    clearTimeout(posToast._t);
+    posToast._t = setTimeout(() => { el.className = 'toast'; }, ok ? 6000 : 12000);
+  }
+
+  // confirm() ya browser mara nyingi huzuiwa (simu/webview) na kufanya "Funga"
+  // ionekane haifanyi kitu — tumia dirisha la ndani ya ukurasa.
+  function askConfirm(message, okLabel) {
+    return new Promise((resolve) => {
+      const back = document.createElement('div');
+      back.className = 'modal-back';
+      back.innerHTML = '<div class="modal-box"><p></p><div class="grid2"><button class="ghost" data-r="0">Ghairi</button><button class="danger" data-r="1"></button></div></div>';
+      back.querySelector('p').textContent = message;
+      back.querySelector('[data-r="1"]').textContent = okLabel || 'Ndiyo, funga';
+      back.addEventListener('click', (e) => {
+        const r = e.target.getAttribute && e.target.getAttribute('data-r');
+        if (r === null && e.target !== back) return;
+        back.remove();
+        resolve(r === '1');
+      });
+      document.body.appendChild(back);
+    });
+  }
+
   async function api(path, opts = {}) {
     const res = await fetch(API_BASE + path, {
       ...opts,
@@ -427,8 +480,9 @@
         ...(opts.headers || {}),
       },
     });
-    const data = await res.json();
-    if (!res.ok || data.ok === false) throw new Error(data.error || 'Hitilafu');
+    let data = {};
+    try { data = await res.json(); } catch (_) { /* si JSON */ }
+    if (!res.ok || data.ok === false) throw new Error(data.error || ('Hitilafu ' + res.status));
     return data;
   }
 
@@ -853,16 +907,16 @@
       const slTxt = Number.isFinite(Number(slAmt)) ? `$${fmt(Math.abs(Number(slAmt)))}` : '—';
       const tpTxt = Number.isFinite(Number(tpAmt)) ? `$${fmt(Math.abs(Number(tpAmt)))}` : '—';
       return `<tr data-contract-id="${p.contract_id}">
-        <td>${pairFromContract(p)}</td>
-        <td class="${dirClass}">${dirLabel}</td>
-        <td>$${fmt(p.buy_price)}</td>
-        <td>${fmtTradeDate(p.purchase_time || p.date_start)}</td>
-        <td>$${fmt(p.bid_price)}</td>
-        <td class="${plClass}">${pl >= 0 ? '+' : ''}$${fmt(pl)}</td>
-        <td class="sltp-cell" data-sl="${Number.isFinite(Number(slAmt)) ? Math.abs(Number(slAmt)) : ''}" data-tp="${Number.isFinite(Number(tpAmt)) ? Math.abs(Number(tpAmt)) : ''}">${slTxt}/${tpTxt}</td>
+        <td data-label="Jozi">${pairFromContract(p)}</td>
+        <td data-label="Mwelekeo" class="${dirClass}">${dirLabel}</td>
+        <td data-label="Stake">$${fmt(p.buy_price)}</td>
+        <td data-label="Tarehe">${fmtTradeDate(p.purchase_time || p.date_start)}</td>
+        <td data-label="Thamani Sasa">$${fmt(p.bid_price)}</td>
+        <td data-label="P/L (Live)" class="${plClass}">${pl >= 0 ? '+' : ''}$${fmt(pl)}</td>
+        <td data-label="SL / TP" class="sltp-cell" data-sl="${Number.isFinite(Number(slAmt)) ? Math.abs(Number(slAmt)) : ''}" data-tp="${Number.isFinite(Number(tpAmt)) ? Math.abs(Number(tpAmt)) : ''}">${slTxt}/${tpTxt}</td>
         <td class="row-actions">
           <button class="ghost" onclick="startEditLimits('${p.contract_id}')">✏️ Hariri</button>
-          <button class="danger" onclick="closeOne('${p.contract_id}')">Funga</button>
+          <button class="danger" data-close="${p.contract_id}" onclick="closeOne('${p.contract_id}', this)">Funga</button>
         </td>
       </tr>`;
     }).join('');
@@ -881,6 +935,7 @@
   function startEditLimits(contractId) {
     const row = document.querySelector(`tr[data-contract-id="${contractId}"]`);
     if (!row) return;
+    editingContract = contractId;
     const cell = row.querySelector('.sltp-cell');
     const sl = cell.dataset.sl || '';
     const tp = cell.dataset.tp || '';
@@ -892,9 +947,11 @@
     `;
     row.querySelector('.row-actions').innerHTML = `
       <button class="save" onclick="saveLimits('${contractId}')">💾 Hifadhi</button>
-      <button class="ghost" onclick="refresh()">Ghairi</button>
+      <button class="ghost" onclick="cancelEditLimits()">Ghairi</button>
     `;
   }
+
+  function cancelEditLimits() { editingContract = null; refresh(); }
 
   async function saveLimits(contractId) {
     const slInput = document.getElementById(`edSL-${contractId}`);
@@ -910,6 +967,7 @@
         method: 'POST',
         body: JSON.stringify({ contract_id: contractId, stop_loss, take_profit }),
       });
+      editingContract = null;
       refresh();
     } catch (e) {
       alert('❌ ' + e.message);
@@ -924,7 +982,7 @@
       lastOkAt = Date.now();
       renderLiveBar();
       renderAutoTrader(data.autoTrade);
-      renderPositions(data.positions);
+      if (!actionBusy && !editingContract) renderPositions(data.positions);
 
       // Auto-trader tayari ina signal ya EURUSD/GBPUSD/USDJPY (bila gharama
       // ya ziada ya API) — itumie kujaza jedwali la Signals moja kwa moja.
@@ -945,23 +1003,43 @@
     }
   }
 
-  async function closeOne(contractId) {
-    if (!confirm('Una uhakika unataka kufunga trade hii?')) return;
+  async function closeOne(contractId, btn) {
+    if (actionBusy) return;
+    if (!(await askConfirm('Una uhakika unataka kufunga trade hii?'))) return;
+    actionBusy = true;
+    if (btn) { btn.disabled = true; btn.textContent = 'Inafunga…'; }
     try {
-      await api('/api/admin/fx/close', { method: 'POST', body: JSON.stringify({ contract_id: contractId }) });
-      refresh();
+      const data = await api('/api/admin/fx/close', { method: 'POST', body: JSON.stringify({ contract_id: contractId }) });
+      const pl = Number(data?.result?.profit);
+      posToast(Number.isFinite(pl) ? `✅ Trade imefungwa. ${pl >= 0 ? 'Faida' : 'Hasara'}: $${Math.abs(pl).toFixed(2)}` : '✅ Trade imefungwa.', true);
     } catch (e) {
-      alert('Imeshindwa kufunga: ' + e.message);
+      posToast('❌ Imeshindwa kufunga: ' + e.message, false);
+    } finally {
+      actionBusy = false;
+      refresh();
+      try { refreshStats(); refreshHistory(); } catch (_) {}
     }
   }
 
   async function closeAll() {
-    if (!confirm('Una uhakika unataka kufunga TRADE ZOTE zilizo wazi?')) return;
+    if (actionBusy) return;
+    if (!(await askConfirm('Una uhakika unataka kufunga TRADE ZOTE zilizo wazi?', 'Ndiyo, funga zote'))) return;
+    actionBusy = true;
+    document.querySelectorAll('#positionsBox button').forEach((b) => { b.disabled = true; });
     try {
-      await api('/api/admin/fx/close-all', { method: 'POST' });
-      refresh();
+      const data = await api('/api/admin/fx/close-all', { method: 'POST' });
+      const results = data.results || [];
+      const okN = results.filter((r) => r.ok).length;
+      const bad = results.filter((r) => !r.ok);
+      if (!results.length) posToast('ℹ️ Hakuna trade iliyo wazi ya kufunga.', true);
+      else if (!bad.length) posToast(`✅ Trade ${okN} zimefungwa.`, true);
+      else posToast(`⚠️ Zilizofungwa: ${okN}/${results.length}.\nZilizoshindwa: ` + bad.map((r) => `${r.contract_id} (${r.error})`).join('; '), false);
     } catch (e) {
-      alert('Imeshindwa kufunga zote: ' + e.message);
+      posToast('❌ Imeshindwa kufunga zote: ' + e.message, false);
+    } finally {
+      actionBusy = false;
+      refresh();
+      try { refreshStats(); refreshHistory(); } catch (_) {}
     }
   }
 
@@ -1296,7 +1374,7 @@
 
   function showApp() {
     document.getElementById('loginCard').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
+    document.getElementById('app').style.display = 'flex';
     renderLiveBar();
     renderSignals(); // jedwali tupu mara moja, kabla ya refresh ya kwanza
     renderCalendarFilters();
