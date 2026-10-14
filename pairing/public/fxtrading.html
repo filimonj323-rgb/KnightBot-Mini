@@ -739,6 +739,7 @@
     }).join('');
 
     document.getElementById('signalsBox').innerHTML = `
+      <div class="muted" style="font-size:11px; margin-bottom:10px;">🔄 Inajisasisha kiotomatiki kila dakika 30${signalsRefreshing ? ' — inaangalia sasa...' : nextSignalAt ? ' · ijayo ' + new Date(nextSignalAt).toLocaleTimeString('sw-TZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Dar_es_Salaam' }) : ''}</div>
       ${cards}
       <div class="muted" style="margin-top:8px; font-size:11px;">
         ${(fxInfo.pairs && fxInfo.pairs.length ? fxInfo.pairs : FX_PAIRS).join('/')} zinaangaliwa kiotomatiki na Auto-Trader ${fxInfo.intervalMin ? `kila dakika ${fxInfo.intervalMin}` : 'mara kwa mara'}${dataSourceLabel() ? ` (chanzo: ${dataSourceLabel()})` : ''}.
@@ -748,11 +749,39 @@
     `;
   }
 
+  // ── Signals kiotomatiki: jozi zote, kila dakika 30, bila kubonyeza "Angalia" ──
+  const SIGNAL_REFRESH_MS = 30 * 60 * 1000;
+  let nextSignalAt = null;
+  let signalsRefreshing = false;
+
+  async function refreshAllSignals() {
+    if (signalsRefreshing) return;
+    signalsRefreshing = true;
+    for (const code of FX_PAIRS) {
+      try {
+        const data = await api('/api/admin/fx/signal?pair=' + encodeURIComponent(code));
+        signalState[code] = {
+          direction: data.direction, strength: data.strength, notes: data.notes,
+          rawDirection: data.rawDirection, rawStrength: data.rawStrength,
+          gated: data.gated, trends: data.trends, checkedAt: data.checkedAt, loading: false,
+        };
+      } catch (e) {
+        // Weka hitilafu tu kama hakuna signal ya zamani ya kuonyesha.
+        if (!signalState[code] || !signalState[code].direction) signalState[code] = { error: e.message, loading: false };
+      }
+      renderSignals();
+      await new Promise((r) => setTimeout(r, 700)); // upole kwa API — jozi moja baada ya nyingine
+    }
+    signalsRefreshing = false;
+    nextSignalAt = Date.now() + SIGNAL_REFRESH_MS;
+    renderSignals();
+  }
+
   async function checkSignal(code) {
     signalState[code] = { ...(signalState[code] || {}), loading: true, error: null };
     renderSignals();
     try {
-      const data = await api('/api/admin/fx/signal?pair=' + encodeURIComponent(code));
+      const data = await api('/api/admin/fx/signal?pair=' + encodeURIComponent(code) + '&force=1');
       signalState[code] = {
         direction: data.direction, strength: data.strength, notes: data.notes,
         rawDirection: data.rawDirection, rawStrength: data.rawStrength,
@@ -1423,6 +1452,9 @@
     refreshPredictions();
     refreshStats();
     refreshHistory();
+    refreshAllSignals();
+    if (window._sigTimer) clearInterval(window._sigTimer);
+    window._sigTimer = setInterval(refreshAllSignals, SIGNAL_REFRESH_MS);
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(refresh, 5000); // "live" — bei/positions kila sekunde 5
     if (slowPollTimer) clearInterval(slowPollTimer);
