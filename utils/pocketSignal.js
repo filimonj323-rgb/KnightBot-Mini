@@ -208,7 +208,11 @@ function htfTrend(candles) {
 //   • 5m inakubali, 15m tulivu/haipatikani   -> expiry 3m
 // Sheria haichaguliwi kwa kuangalia matokeo; dashboard (Kwa expiry / Kwa MTF) ndiyo
 // inayoamua kama 3m na 5m zinashinda kweli.
-const mtfOn = () => String(process.env.POCKET_MTF || 'false').toLowerCase() === 'true';
+// Default SASA: IMEWASHWA. Zima kwa POCKET_MTF=false.
+const mtfOn = () => String(process.env.POCKET_MTF || 'true').toLowerCase() !== 'false';
+// STRICT (default): trend ya 1m, 5m NA 15m lazima zikubaliane na mwelekeo; expiry = 5m (timeframe ya
+// chini ya 15m). Ukiweka POCKET_MTF_STRICT=false: 15m tulivu inaruhusiwa na expiry inashuka hadi 3m.
+const mtfStrict = () => String(process.env.POCKET_MTF_STRICT || 'true').toLowerCase() !== 'false';
 const MTF_MIN_STRENGTH = () => Number(process.env.POCKET_MTF_MIN_STRENGTH || 50);
 const MTF_CACHE_MS = 45 * 1000;
 const mtfCache = new Map(); // `${pair}|${tf}` -> { at, trend }
@@ -246,9 +250,15 @@ async function realTrend(pair, tfSec, count) {
 }
 
 /** Sheria ya expiry. m5/m15: 'UP'|'DOWN'|'FLAT'|null. */
-function mtfDecision(direction, m5, m15) {
+function mtfDecision(direction, m5, m15, m1 = undefined, strict = false) {
   const want = direction === 'BUY' ? 'UP' : 'DOWN';
   const opp = direction === 'BUY' ? 'DOWN' : 'UP';
+  if (strict) {
+    if (m1 !== undefined && m1 !== want) return { ok: false, reason: m1 === opp ? '1m inapinga' : '1m haina mwelekeo wazi' };
+    if (m5 !== want) return { ok: false, reason: m5 === opp ? '5m inapinga' : m5 == null ? '5m haipatikani' : '5m haina mwelekeo wazi' };
+    if (m15 !== want) return { ok: false, reason: m15 === opp ? '15m inapinga' : m15 == null ? '15m haipatikani' : '15m haina mwelekeo wazi' };
+    return { ok: true, expirySec: 300, level: 'all' };
+  }
   if (m5 === opp) return { ok: false, reason: '5m inapinga' };
   if (m15 === opp) return { ok: false, reason: '15m inapinga' };
   if (m5 !== want) return { ok: false, reason: m5 == null ? '5m haipatikani' : '5m haina mwelekeo wazi' };
@@ -424,8 +434,9 @@ async function analyzePair(pair, timeframeSec = 60, opts = {}) {
     if (mtfOn() && v.direction !== 'NEUTRAL' && v.strength >= MTF_MIN_STRENGTH()) {
       const [r5, r15] = await Promise.all([realTrend(p, 300, 60), realTrend(p, 900, 40)]);
       const m5 = r5 ?? htf; // 5m halisi ikikosekana, tumia ya kujumlisha kutoka 1m
-      const dec = mtfDecision(v.direction, m5, r15);
-      mtf = { m5, m15: r15, m5Source: r5 ? 'real' : 'resampled', level: dec.level || null, reason: dec.reason || null };
+      const m1 = trendFromCloses(candles.map((c) => Number(c.close)).filter(Number.isFinite));
+      const dec = mtfDecision(v.direction, m5, r15, m1, mtfStrict());
+      mtf = { m1, m5, m15: r15, m5Source: r5 ? 'real' : 'resampled', level: dec.level || null, reason: dec.reason || null };
       if (!dec.ok) {
         mtfBlocked = true;
         console.log(`[posignal] ${p} 1m: ${v.direction} imezuiwa na MTF — ${dec.reason} (5m=${m5} 15m=${r15})`);
