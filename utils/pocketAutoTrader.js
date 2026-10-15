@@ -58,6 +58,9 @@ const DEFAULT_BLOCKED = Object.freeze([
   // win rate ya chini kwa trades nyingi
   'EURNZD_otc', 'USDCHF', 'XAUUSD_otc', 'EURHUF_otc', '#AAPL_otc', '#BA_otc', 'EURUSD_otc',
   'AUDUSD_otc', '#FB_otc', 'CHFJPY_otc', 'EURCHF_otc', 'NZDUSD_otc',
+  // hasara kubwa kwa trades nyingi (History 2026-10-15, trades 1,307) — pitia upya baada ya trades 100+ kwa kila jozi
+  'XPDUSD_otc', '#MCD_otc', 'CHFNOK_otc', 'E35EUR_otc', 'CADJPY_otc', 'NASUSD', 'NASUSD_otc',
+  '#TSLA_otc', 'JPN225_otc', 'EURGBP_otc', 'GBPUSD_otc',
 ]);
 
 const DEFAULTS = Object.freeze({
@@ -101,6 +104,10 @@ const recentOrderErrors = []; // { at, pair, dir, msg, scope } — mpya kwanza, 
 let pauseDetail = null;
 const pairCooldown = new Map(); // normPair -> { pair, until }
 const PAIR_COOLDOWN_MS = 30 * 60000;
+// Trades nyingi kwa candle moja kwa mwelekeo uleule ni bet MOJA iliyorudiwa (jozi zinahusiana) —
+// hasara zinakuja kwa makundi. Kikomo: POCKET_AUTO_MAX_PER_CANDLE (default 2 kwa mwelekeo mmoja).
+const MAX_PER_CANDLE = Math.max(1, parseInt(process.env.POCKET_AUTO_MAX_PER_CANDLE || '', 10) || 2);
+const candleDirCount = new Map(); // `${candleTime}|${direction}` -> idadi
 const GLOBAL_ERR_RE = /econn|enotfound|etimedout|fetch failed|socket|network|ssid|not connected|haijaunganishwa|unauthori|forbidden|session|login|auth/i;
 const PAIR_ERR_RE = /closed|not available|unavailable|not found|not open|not tradable|inactive|disabled|haipo kwenye|haipatikani|haikuthibitisha|timeout waiting|payout|invalid (asset|symbol|pair)|asset|market/i;
 const isPairLevelError = (msg) => !GLOBAL_ERR_RE.test(String(msg)) && PAIR_ERR_RE.test(String(msg));
@@ -563,6 +570,12 @@ async function considerSignal(r) {
     }
   }
 
+  // 3b) Kikomo cha trades za mwelekeo uleule kwa candle moja
+  const cdKey = `${r.candleTime}|${r.direction}`;
+  if ((candleDirCount.get(cdKey) || 0) >= MAX_PER_CANDLE) {
+    return skip(r, `tayari trades ${MAX_PER_CANDLE} ${r.direction === 'BUY' ? 'UP' : 'DOWN'} kwa candle hii`, 'blocked');
+  }
+
   // 4) Ukaguzi wa haraka (sync)
   const quick = canOpenNew();
   if (!quick.ok) return skip(r, quick.reason, null);
@@ -585,6 +598,8 @@ async function considerSignal(r) {
   const pos = { pair: r.pair, key, direction: r.direction, stake: cfg.stake, strength: r.strength, openedAt: Date.now() };
   positions.set(resKey, pos);
   tradesToday++;
+  candleDirCount.set(cdKey, (candleDirCount.get(cdKey) || 0) + 1);
+  if (candleDirCount.size > 200) candleDirCount.delete(candleDirCount.keys().next().value);
   signalTracker.record(r, cfg.dryRun ? 'dry' : 'autotrade');
 
   const arrow = r.direction === 'BUY' ? '🟢 UP (BUY) ⬆️' : '🔴 DOWN (SELL) ⬇️';
@@ -593,6 +608,7 @@ async function considerSignal(r) {
   if (cfg.dryRun) {
     positions.delete(resKey);
     tradesToday--;
+    candleDirCount.set(cdKey, Math.max(0, (candleDirCount.get(cdKey) || 1) - 1));
     stats.dry++;
     console.log(`[pocketAuto] DRY ${r.pair} ${r.direction} ${r.strength}%`);
     logEvent('dry', `${r.pair} ${r.direction} ${r.strength}% (dry-run)`);
@@ -608,6 +624,7 @@ async function considerSignal(r) {
       amount: cfg.stake,
       expirySeconds: r.expirySec,
       source: 'auto',
+      strength: r.strength,
     });
     positions.delete(resKey);
     positions.set(String(res.orderId), pos);
@@ -635,6 +652,7 @@ async function considerSignal(r) {
   } catch (err) {
     positions.delete(resKey);
     tradesToday--;
+    candleDirCount.set(cdKey, Math.max(0, (candleDirCount.get(cdKey) || 1) - 1));
     stats.failed++;
     const errMsg = String((err && err.message) || err);
     const pairLevel = isPairLevelError(errMsg);
