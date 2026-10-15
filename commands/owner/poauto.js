@@ -60,7 +60,8 @@ function helpText() {
     `• backtest <%> • dry <on|off>\n\n` +
     `*Jozi zisizotradiwa:*\n` +
     `• *.poauto blocked* • *.poauto block <jozi>* • *.poauto unblock <jozi>*\n` +
-    `• *.poauto block reset* (default) • *.poauto block clear* (futa zote)\n\n` +
+    `• *.poauto block reset* (default) • *.poauto block clear* (futa zote)\n` +
+    `• *.poauto hours 19-23,4* (zima saa, EAT) • *.poauto hours* • *.poauto hours off*\n\n` +
     `Mfano: *.poauto stake 2*\n_Anza na DEMO + *.poauto dry on* kuona signals bila kufungua trade._`
   );
 }
@@ -164,6 +165,32 @@ module.exports = {
     if (action === 'blocked') {
       const b = auto.getStatus().blockedPairs || [];
       return reply(b.length ? `🚫 *Jozi zisizotradiwa (${b.length})*\n\n${b.join(', ')}\n\n_Ondoa: .poauto unblock <jozi> • Rudisha default: .poauto block reset_` : 'ℹ️ Hakuna jozi iliyoondolewa — jozi zote zinatradiwa.');
+    }
+
+    // Saa zisizotradiwa (EAT): ".poauto hours" (onyesha) | ".poauto hours 19-23,4" (weka) | ".poauto hours off" (futa)
+    if (action === 'hours') {
+      const cur = (auto.getStatus().blockedHours || []);
+      const raw = args.slice(1).join(' ').trim().toLowerCase();
+      if (!raw) {
+        return reply(cur.length
+          ? `⏰ *Saa zisizotradiwa (EAT):* ${cur.join(', ')}\n\n_Badilisha: .poauto hours 19-23,4 • Futa: .poauto hours off_`
+          : 'ℹ️ Hakuna saa iliyozimwa — bot inatrade saa zote.\n_Weka: .poauto hours 19-23,4_');
+      }
+      let hours = [];
+      if (!/^(off|clear|none|futa)$/.test(raw)) {
+        for (const part of raw.split(/[\s,;]+/).filter(Boolean)) {
+          const m = /^(\d{1,2})(?:-(\d{1,2}))?$/.exec(part);
+          if (!m) return reply(`❌ "${part}" si sahihi. Mfano: .poauto hours 19-23,4 (saa 0-23, EAT; 22-2 inavuka usiku wa manane)`);
+          const from = Number(m[1]), to = m[2] === undefined ? from : Number(m[2]);
+          if (from > 23 || to > 23) return reply('❌ Saa lazima ziwe 0-23.');
+          for (let h = from; ; h = (h + 1) % 24) { hours.push(h); if (h === to) break; }
+        }
+      }
+      const r = await auto.setBlockedHours(hours);
+      if (!r.ok) return reply(`❌ ${r.error}`);
+      return reply(r.hours.length
+        ? `⏰ *Saa zisizotradiwa (EAT):* ${r.hours.join(', ')}\n_Trade mpya hazifunguliwi saa hizi; zilizo wazi zinaendelea. Imehifadhiwa kwenye database._`
+        : '✅ Saa zote zimeruhusiwa tena.');
     }
 
     if (action === 'block' || action === 'unblock') {
