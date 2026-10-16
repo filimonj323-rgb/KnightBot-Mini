@@ -7,6 +7,7 @@ const config = require('../../config');
 const { downloadContentFromMessage } = global.__baileys;
 const { sendButtons } = require('gifted-btns');
 const pendingGroupStatus = require('../../utils/pendingGroupStatus');
+const { sendGroupStatus } = require('../../utils/groupStatusVideo');
 
 const PURPLE_COLOR = '#9C27B0';
 // Kikomo cha rows kwenye orodha ya button - epuka ujumbe mkubwa mno
@@ -22,7 +23,8 @@ async function postGroupStatus(sock, jid, content) {
   if (payload.text && !payload.backgroundColor) {
     payload.backgroundColor = PURPLE_COLOR;
   }
-  return sock.sendMessage(jid, payload);
+  // Video ndefu inakatwa vipande na kutumwa kwa mfuatano (utils/groupStatusVideo.js)
+  return sendGroupStatus(sock, jid, payload);
 }
 
 // Helper: pakua media iliyo-quote (reply) kwenye DM — image au video —
@@ -694,9 +696,10 @@ module.exports = {
         }
 
         try {
-          await postGroupStatus(sock, groupId, buildPayload());
+          const sent = await postGroupStatus(sock, groupId, buildPayload());
           const meta = await sock.groupMetadata(groupId);
-          return extra.reply(`✅ Group status imetumwa kwenye *${meta.subject}*!`);
+          return extra.reply(`✅ Group status imetumwa kwenye *${meta.subject}*!` +
+            (sent?.parts > 1 ? `\n✂️ Video ilikatwa vipande *${sent.parts}*.` : ''));
         } catch (e) {
           return extra.reply(`❌ Imeshindwa kutuma group status: ${e.message}`);
         }
