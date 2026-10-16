@@ -501,8 +501,8 @@ async function handlePairingRequest(req, res) {
 
     if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/groupstatus')) {
       const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/groupstatus', ''));
-      // 30MB cap — enough for a typical status image/video as base64.
-      const body = await readJsonBody(req, 30 * 1e6);
+      // 80MB cap — video ndefu (itakatwa vipande na server) inahitaji nafasi zaidi ya base64.
+      const body = await readJsonBody(req, 80 * 1e6);
       const result = await postGroupStatusForToken(token, body);
       return sendJson(res, 200, { ok: true, ...result });
     }
@@ -915,8 +915,8 @@ async function handlePairingRequest(req, res) {
         }
 
         if (action === 'group-status' && req.method === 'POST') {
-          // 30MB cap for base64 image/video/audio, same as the customer dashboard route.
-          const body = await readJsonBody(req, 30 * 1e6);
+          // 80MB cap kwa base64 image/video/audio (video ndefu itakatwa vipande na server).
+          const body = await readJsonBody(req, 80 * 1e6);
           const result = await adminPostGroupStatus(phone, body);
           return sendJson(res, 200, { ok: true, ...result });
         }
