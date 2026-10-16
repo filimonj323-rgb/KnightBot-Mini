@@ -2,6 +2,7 @@ const { downloadContentFromMessage } = global.__baileys;
 const { PassThrough } = require('stream');
 const ffmpeg = require('fluent-ffmpeg');
 const groupStatusGuard = require('../../utils/groupStatusGuard');
+const { sendGroupStatus, splitVideoForStatus } = require('../../utils/groupStatusVideo');
 
 // Same pattern used by sticker.js / song.js in this project: point fluent-ffmpeg
 // (and baileys' own internal thumbnail/waveform generation, which shells out to
@@ -127,11 +128,19 @@ module.exports = {
         if (!buf) return extra.reply('❌ Could not download video');
 
         try {
-          await groupStatus(sock, from, {
+          // Video ndefu inakatwa vipande automatically (utils/groupStatusVideo.js)
+          const parts = await splitVideoForStatus(buf);
+          if (parts.length > 1) {
+            await extra.reply(`✂️ Video ni ndefu — imekatwa vipande *${parts.length}*. Inatuma kwa mfuatano...`);
+          }
+          const r = await sendGroupStatus(sock, from, {
             video: buf,
             caption: caption || '',
+            groupStatus: true,
           });
-          return extra.reply('✅ Video group status posted!');
+          return extra.reply(r.parts > 1
+            ? `✅ Video group status posted! (vipande ${r.parts})`
+            : '✅ Video group status posted!');
         } catch (e) {
           console.error('groupstatus video error:', e);
           return extra.reply('❌ Failed to post video group status: ' + (e.message || e));
