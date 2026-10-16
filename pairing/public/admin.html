@@ -1453,7 +1453,8 @@
         method: 'POST', body: JSON.stringify(body),
       });
       const label = CURRENT_SENDMODE === 'status' ? 'Status imetumwa' : 'Imetumwa';
-      showToast('dGroupsMsg', true, `${label}: ${data.success} zimefanikiwa, ${data.failed} zimeshindwa.`);
+      showToast('dGroupsMsg', true, `${label}: ${data.success} zimefanikiwa, ${data.failed} zimeshindwa.` +
+        (CURRENT_SENDMODE === 'status' && data.parts > 1 ? ` (video ilikatwa vipande ${data.parts})` : ''));
     } catch (e) {
       showToast('dGroupsMsg', false, e.message);
     } finally {

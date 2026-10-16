@@ -1399,7 +1399,8 @@
       if (!data.ok) {
         showMsg(msgBox, false, '❌ ' + (data.error || 'Hitilafu imetokea.'));
       } else {
-        showMsg(msgBox, true, `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total}`);
+        showMsg(msgBox, true, `✅ Imetumwa! Imefanikiwa: ${data.success}/${data.total}` +
+          (data.parts > 1 ? ` — video ilikatwa vipande ${data.parts}` : ''));
         textInput.value = '';
         mediaInput.value = '';
         captionInput.value = '';
