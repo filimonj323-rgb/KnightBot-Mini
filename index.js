@@ -622,6 +622,9 @@ async function _startBot() {
     if (type !== 'notify' && type !== 'append') return;
     for (const msg of messages) {
       if (!msg.message || !msg.key?.id || !msg.key?.remoteJid) continue;
+      // Okoa Turso "rows written": usihifadhi ujumbe wa watu wengine kwenye groups.
+      // Retry/poll zinahitaji ujumbe wa bot yenyewe (fromMe) na DM tu.
+      if (msg.key.remoteJid.endsWith('@g.us') && !msg.key.fromMe) continue;
       saveMessageForRetry(sessionId, msg.key, msg.message).catch(() => {});
     }
   });
