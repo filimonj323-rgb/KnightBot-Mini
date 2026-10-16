@@ -27,7 +27,7 @@ if (!process.env.FFMPEG_PATH) {
   } catch { /* tumia ffmpeg ya system */ }
 }
 
-const MAX_SECONDS = Math.max(5, Number(process.env.GROUPSTATUS_MAX_SECONDS) || 60);
+const MAX_SECONDS = Math.max(5, Number(process.env.GROUPSTATUS_MAX_SECONDS) || 90);
 const MAX_PARTS = Math.max(1, Number(process.env.GROUPSTATUS_MAX_PARTS) || 20);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
