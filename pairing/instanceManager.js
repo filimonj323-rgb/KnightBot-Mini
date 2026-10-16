@@ -15,6 +15,7 @@ const os = require('os');
 const crypto = require('crypto');
 const axios = require('axios');
 const NodeCache = require('node-cache');
+const { sendGroupStatus, splitVideoForStatus } = require('../utils/groupStatusVideo');
 
 // Random status-reaction emoji pool — mirrors handler.js's
 // setupAutoStatusViewer() (STATUS_REACTIONS / randomReaction()) so every
@@ -1204,6 +1205,11 @@ async function postGroupStatusForToken(token, { groupIds, text, caption, imageBa
 
   payload.groupStatus = true;
 
+  // Video ndefu inakatwa vipande MARA MOJA hapa (utils/groupStatusVideo.js);
+  // kosa (mf. video ndefu mno) linaonekana kwenye dashboard badala ya kufichwa.
+  let videoParts = 1;
+  if (payload.video) videoParts = (await splitVideoForStatus(payload.video)).length;
+
   const targets = groupIds.includes('all')
     ? Object.keys(await inst.sock.groupFetchAllParticipating())
     : groupIds;
@@ -1218,7 +1224,7 @@ async function postGroupStatusForToken(token, { groupIds, text, caption, imageBa
       // been consumed) — reusing the same object reference across multiple
       // sendMessage() calls meant only the first group got a real status;
       // every group after that received it as a normal message instead.
-      await inst.sock.sendMessage(gid, { ...payload });
+      await sendGroupStatus(inst.sock, gid, payload);
       success++;
       if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
     } catch (e) {
@@ -1226,7 +1232,7 @@ async function postGroupStatusForToken(token, { groupIds, text, caption, imageBa
     }
   }
 
-  return { success, failed, total: targets.length };
+  return { success, failed, total: targets.length, parts: videoParts };
 }
 
 /**
@@ -2091,6 +2097,11 @@ async function adminPostGroupStatus(rawPhoneNumber, { groupIds, text, caption, i
 
   payload.groupStatus = true;
 
+  // Video ndefu inakatwa vipande MARA MOJA hapa (utils/groupStatusVideo.js);
+  // kosa (mf. video ndefu mno) linaonekana kwenye dashboard badala ya kufichwa.
+  let videoParts = 1;
+  if (payload.video) videoParts = (await splitVideoForStatus(payload.video)).length;
+
   const targets = groupIds.includes('all')
     ? Object.keys(await inst.sock.groupFetchAllParticipating())
     : groupIds;
@@ -2103,14 +2114,14 @@ async function adminPostGroupStatus(rawPhoneNumber, { groupIds, text, caption, i
       // building the message (uploads media, strips groupStatus once
       // consumed), so reusing one object across sends only works for the
       // first group. Same fix as postGroupStatusForToken() above.
-      await inst.sock.sendMessage(gid, { ...payload });
+      await sendGroupStatus(inst.sock, gid, payload);
       success++;
       if (targets.length > 1) await new Promise(r => setTimeout(r, 1500));
     } catch (e) {
       failed++;
     }
   }
-  return { success, failed, total: targets.length };
+  return { success, failed, total: targets.length, parts: videoParts };
 }
 
 
