@@ -132,6 +132,7 @@ module.exports = {
           `• .gm groupstatus 1,3,5 <text> — Tuma kwa groups kadhaa (namba zenye comma)\n` +
           `• .gm groupstatus chagua <text> — Bot inaleta vitufe vya kuchagua group\n` +
           `• .gm autoreact <groupId|all> on/off [bot|all] — Auto react\n` +
+          `• .gm left <namba|groupId|all> — Orodha ya walioondoka (siku 30)\n` +
           `• .gm restore <groupId|all> [namba] — Rudisha walioondoka\n` +
           `• .gm leave <groupId> — Bot itoke group\n\n` +
           `💡 GroupId mfano: *120363xxxxxxxx@g.us*\n` +
@@ -868,6 +869,58 @@ module.exports = {
           (failedNumbers.length > 0
             ? `\n\n⚠️ Walioshindwa:\n${failedNumbers.map(n => `• ${n}`).join('\n')}`
             : '')
+        );
+      }
+
+      // ══════════════════════════════════════
+      // LEFT - Orodha ya walioondoka/kutolewa (groups ambazo bot ni admin)
+      // ══════════════════════════════════════
+      if (opt === 'left') {
+        let groupId = args[1];
+        if (!groupId) {
+          return extra.reply(
+            '❌ Tumia:\n' +
+            '.gm left <namba|groupId> — walioondoka kwenye group moja\n' +
+            '.gm left all — muhtasari wa groups zote\n\n' +
+            'ℹ️ Inarekodi tu kwenye groups ambazo bot ni admin, na kwa walioondoka baada ya feature hii kuwekwa. Rekodi hukaa siku 30.'
+          );
+        }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
+
+        const database = require('../../database');
+        const fmtDate = (ts) => new Date(ts).toLocaleString('en-GB', {
+          timeZone: 'Africa/Dar_es_Salaam', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
+        });
+
+        // ── Muhtasari wa groups zote ──
+        if (groupId.toLowerCase() === 'all') {
+          const allGroups = await sock.groupFetchAllParticipating();
+          const rows = [];
+          let total = 0;
+          Object.values(allGroups).forEach((g, i) => {
+            const n = Object.keys(database.getLeftMembers(g.id)).length;
+            if (n > 0) { rows.push(`${i + 1}. *${g.subject}* — ${n}`); total += n; }
+          });
+          if (rows.length === 0) return extra.reply('ℹ️ Hakuna aliyeondoka kwenye groups zozote (siku 30 zilizopita).');
+          return extra.reply(
+            `📋 *Walioondoka — Groups Zote*\n\n${rows.join('\n')}\n\n` +
+            `👥 Jumla: *${total}*\n💡 Maelezo: *.gm left <namba>*`
+          );
+        }
+
+        const meta = await sock.groupMetadata(groupId);
+        const left = database.getLeftMembers(groupId);
+        const entries = Object.entries(left).sort((a, b) => b[1] - a[1]); // wapya kwanza
+        if (entries.length === 0) {
+          return extra.reply(`ℹ️ Hakuna aliyeondoka kwenye *${meta.subject}* (siku 30 zilizopita).`);
+        }
+
+        const MAX_SHOW = 80;
+        const lines = entries.slice(0, MAX_SHOW).map(([jid, ts], i) => `${i + 1}. ${jid.split('@')[0]} — ${fmtDate(ts)}`);
+        return extra.reply(
+          `📋 *Walioondoka — ${meta.subject}*\n\n${lines.join('\n')}` +
+          (entries.length > MAX_SHOW ? `\n\n...na wengine ${entries.length - MAX_SHOW}` : '') +
+          `\n\n👥 Jumla: *${entries.length}*\n💡 Kurudisha: *.gm restore ${args[1]}*`
         );
       }
 
