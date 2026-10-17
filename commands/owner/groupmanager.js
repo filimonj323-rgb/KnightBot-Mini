@@ -121,6 +121,7 @@ module.exports = {
           `• .gm mute <groupId> on/off\n\n` +
           `*Members*\n` +
           `• .gm add <groupId> <namba> [namba2 ...] — Ongeza members\n` +
+          `• .gm autoadd <groupId> on|off — Bot ijaze group kiotomatiki usiku\n` +
           `• .gm kick <groupId> <namba>\n` +
           `• .gm promote <groupId> <namba>\n` +
           `• .gm demote <groupId> <namba>\n\n` +
@@ -377,7 +378,86 @@ module.exports = {
       }
 
       // ══════════════════════════════════════
-      // KICK - Toa member
+      // AUTOADD - Bot iongeze watu kiotomatiki (usiku)
+      // ══════════════════════════════════════
+      if (opt === 'autoadd') {
+        const database = require('../../database');
+        const autoAdd = require('../../utils/autoAdd');
+        if (sock !== global.currentSock) return extra.reply('❌ Feature hii inapatikana kwa bot kuu tu.');
+
+        const first = args[1]?.toLowerCase();
+        if (!first || first === 'help') {
+          return extra.reply(
+            '👥 *AUTO-ADD* — bot inaongeza watu kutoka groups zake nyingine kwenda group lengwa, polepole usiku.\n\n' +
+            '• .gm autoadd <group> on [idadi kwa siku] — washa (default 10)\n' +
+            '• .gm autoadd <group> off — zima\n' +
+            '• .gm autoadd <group> limit <idadi> — badilisha idadi kwa siku\n' +
+            '• .gm autoadd <group> window <kuanzia> <hadi> — masaa 0-23 (EAT). Mfano: *window 0 5* = 00:00–05:00\n' +
+            '• .gm autoadd <group> now — jaribu kuongeza mmoja sasa hivi\n' +
+            '• .gm autoadd status — hali ya groups zote\n\n' +
+            '🕛 Default: *saa 6 usiku (00:00) hadi 05:00* EAT, mmoja kila dakika 15–35.\n' +
+            'ℹ️ Bot lazima iwe admin kwenye group lengwa. Walioondoka wenyewe hawaongezwi tena.'
+          );
+        }
+        if (first === 'status') return extra.reply(await autoAdd.statusText(sock));
+
+        let groupId;
+        try { groupId = await resolveGroupId(sock, args[1]); } catch (e) { return extra.reply(`❌ ${e.message}`); }
+        const action = args[2]?.toLowerCase();
+        const all = database.getAutoAddAll();
+        const cfg = all[groupId] || { ...autoAdd.DEFAULTS };
+        const meta = await sock.groupMetadata(groupId);
+        const hh = (h) => String(h).padStart(2, '0') + ':00';
+        const save = () => { all[groupId] = cfg; database.saveAutoAddAll(all); };
+        const clampPerDay = (v) => Math.max(1, Math.min(autoAdd.MAX_PER_DAY_CAP, Math.floor(Number(v))));
+
+        if (action === 'on') {
+          if (args[3] !== undefined) {
+            if (!Number.isFinite(Number(args[3])) || Number(args[3]) < 1) return extra.reply('❌ Idadi si sahihi. Mfano: .gm autoadd 3 on 10');
+            cfg.perDay = clampPerDay(args[3]);
+          }
+          cfg.enabled = true;
+          cfg.windowKey = null; // quota ianze upya
+          save();
+          return extra.reply(
+            `✅ Auto-add *IMEWASHWA* kwa *${meta.subject}*\n\n` +
+            `👥 Watu ${cfg.perDay} kwa siku, kutoka groups mbalimbali (random)\n` +
+            `🕛 ${hh(cfg.startHour)}–${hh(cfg.endHour)} EAT\n\n` +
+            `⚠️ Bot lazima iwe admin kwenye group hili. Jaribu: *.gm autoadd ${args[1]} now*`
+          );
+        }
+        if (action === 'off') {
+          cfg.enabled = false;
+          save();
+          return extra.reply(`🔴 Auto-add imezimwa kwa *${meta.subject}*.`);
+        }
+        if (action === 'limit') {
+          if (!Number.isFinite(Number(args[3])) || Number(args[3]) < 1) return extra.reply('❌ Tumia: .gm autoadd <group> limit <idadi>');
+          cfg.perDay = clampPerDay(args[3]);
+          save();
+          return extra.reply(`✅ *${meta.subject}*: watu ${cfg.perDay} kwa siku.`);
+        }
+        if (action === 'window') {
+          const s = Number(args[3]), e = Number(args[4]);
+          if (![s, e].every((n) => Number.isInteger(n) && n >= 0 && n <= 23)) {
+            return extra.reply('❌ Tumia: .gm autoadd <group> window <kuanzia> <hadi> (masaa 0-23)\nMfano: *window 0 5* = 00:00–05:00 (saa 6 usiku hadi saa 11 alfajiri)');
+          }
+          cfg.startHour = s; cfg.endHour = e; cfg.windowKey = null;
+          save();
+          return extra.reply(`✅ *${meta.subject}*: dirisha ni ${hh(s)}–${hh(e)} EAT.`);
+        }
+        if (action === 'now') {
+          await extra.reply('⏳ Inajaribu kuongeza mmoja sasa hivi...');
+          const r = await autoAdd.runOnce(sock, groupId, cfg, {});
+          cfg.lastRun = Date.now(); cfg.lastResult = r.msg;
+          save();
+          return extra.reply(r.ok ? `✅ ${r.msg}` : `⚠️ ${r.msg}`);
+        }
+        return extra.reply('❌ Chagua: on | off | limit | window | now\nAu .gm autoadd status');
+      }
+
+      // ══════════════════════════════════════
+      // ADD - Ongeza members
       // ══════════════════════════════════════
       if (opt === 'add') {
         let groupId = args[1];
