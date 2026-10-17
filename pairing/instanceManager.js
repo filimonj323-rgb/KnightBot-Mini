@@ -9,6 +9,7 @@
  * This file is standalone and does not touch index.js / the main bot at all.
  */
 
+const qrImage = require('qrcode'); // kwa QR ya dashboard (njia mbadala ya pairing code)
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -467,6 +468,8 @@ function getInstanceStatus(phoneNumber) {
     phoneNumber: inst.phoneNumber,
     status: inst.status, // 'pairing' | 'connecting' | 'connected' | 'disconnected' | 'error'
     pairingCode: inst.pairingCode || null,
+    mode: inst.mode || 'code', // 'code' | 'qr'
+    qr: inst.mode === 'qr' ? (inst.qr || null) : null, // data URL ya picha ya QR (inabadilika kila sekunde chache)
     error: inst.error || null,
     dashboardToken: inst.token || null,
   };
@@ -662,6 +665,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
 
   const { state, saveCreds } = await useTursoAuthState(sessionId);
   captureWaName(phoneNumber, state.creds?.me?.name); // jina la WhatsApp (kama tayari lipo kwenye session)
+  // Session iliyokwisha kulinkiwa (mteja wa zamani) haihitaji ukaguzi wa "namba ya QR" — usiiguse.
+  if (state.creds.registered) record.awaitingFirstLink = false;
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -701,9 +706,37 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   sock.ev.on('creds.update', (u) => captureWaName(phoneNumber, u?.me?.name));
 
   sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+
+    // QR mode TU: hifadhi picha ya QR ya sasa (Baileys inaibadilisha kila sekunde chache).
+    // Pairing-code mode inapuuza `qr` kabisa, kama ilivyokuwa.
+    if (qr && record.mode === 'qr' && !record.stopped) {
+      qrImage.toDataURL(qr, { margin: 1, scale: 8 })
+        .then((dataUrl) => { record.qr = dataUrl; record.qrAt = Date.now(); record.status = 'pairing'; })
+        .catch((e) => console.error(`[pairing:${phoneNumber}] imeshindwa kutengeneza QR image:`, e.message));
+    }
 
     if (connection === 'open') {
+      // Ulinzi wa QR: namba iliyoscan LAZIMA iwe ile iliyowekwa kwenye fomu. Settings, trial na
+      // malipo vinafungwa kwa namba hiyo; kuruhusu namba tofauti kungechanganya akaunti za wateja
+      // (na kuruhusu mtu kuscan QR ya namba isiyo yake).
+      if (record.mode === 'qr' && record.awaitingFirstLink) {
+        const rawId = String(sock.user?.id || '');
+        const linked = rawId.split(':')[0].split('@')[0].replace(/\D/g, '');
+        if (!rawId.endsWith('@lid') && linked && linked !== phoneNumber) {
+          console.warn(`[pairing:${phoneNumber}] QR imescaniwa na namba tofauti (${linked}) — inakataliwa.`);
+          record.stopped = true; // zuia auto-reconnect
+          record.status = 'error';
+          record.qr = null;
+          record.error = `Umescan kwa namba ${linked}, lakini uliweka ${phoneNumber}. Weka namba ile ile unayotumia WhatsApp kisha uscan tena.`;
+          try { await sock.logout(); } catch (e) { try { sock.end(undefined); } catch (_) {} }
+          fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
+          deleteDbSession(sessionId).catch((err) => console.error(`[pairing:${phoneNumber}] imeshindwa kufuta session ya QR iliyokataliwa:`, err.message));
+          return;
+        }
+        record.awaitingFirstLink = false;
+      }
+      record.qr = null;
       record.status = 'connected';
       record.pairingCode = null;
       record.reconnectAttempts = 0;
@@ -781,7 +814,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
 
       // Cap retries so a persistently failing link doesn't hammer WhatsApp
       // and trip their rate limit ("connection closed" repeatedly).
-      if (record.reconnectAttempts > 6) {
+      if (record.reconnectAttempts > (record.mode === 'qr' ? 3 : 6)) {
+        record.qr = null;
         record.status = 'error';
         record.error = 'Imeshindwa kuunganisha baada ya majaribio kadhaa. Bofya "Pata Pairing Code" tena baada ya dakika chache.';
         instances.delete(phoneNumber);
@@ -1018,7 +1052,10 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   // reconnect is what causes both "code sometimes doesn't show" and
   // "reaches the closed limit" (WhatsApp treats repeated pairing-code
   // requests as abuse and starts closing/blocking the socket).
-  if (!state.creds.registered && !isReconnect) {
+  if (!state.creds.registered && !isReconnect && record.mode === 'qr') {
+    // QR mode: hakuna pairing code — QR inakuja kupitia connection.update (hapo juu).
+    record.status = 'pairing';
+  } else if (!state.creds.registered && !isReconnect) {
     try {
       // Baileys needs the underlying WebSocket handshake with WhatsApp to
       // fully settle before it will accept a pairing-code request. Asking
@@ -1061,8 +1098,9 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
  * WhatsApp connection completes asynchronously afterwards; poll
  * getInstanceStatus() to see when status becomes 'connected'.
  */
-async function createOrPairInstance(rawPhoneNumber) {
+async function createOrPairInstance(rawPhoneNumber, opts = {}) {
   await ensureBaileysBridge();
+  const mode = opts && opts.mode === 'qr' ? 'qr' : 'code'; // 'qr' = njia mbadala ya pairing code
 
   const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
   if (!phoneNumber || phoneNumber.length < 9) {
@@ -1071,11 +1109,31 @@ async function createOrPairInstance(rawPhoneNumber) {
 
   const existing = instances.get(phoneNumber);
   if (existing && existing.status === 'connected') {
-    return { phoneNumber, status: 'connected', pairingCode: null };
+    return { phoneNumber, status: 'connected', pairingCode: null, mode: existing.mode || 'code', qr: null };
   }
-  if (existing && existing.status === 'pairing' && existing.pairingCode) {
-    // Already mid-pairing — return the same code instead of starting over.
-    return { phoneNumber, status: 'pairing', pairingCode: existing.pairingCode };
+  if (existing && existing.status === 'pairing' && (existing.mode || 'code') === mode) {
+    if (mode === 'code' && existing.pairingCode) {
+      // Already mid-pairing — return the same code instead of starting over.
+      return { phoneNumber, status: 'pairing', pairingCode: existing.pairingCode, mode, qr: null };
+    }
+    if (mode === 'qr') {
+      // Tayari inasubiri QR — rudisha QR ya sasa (inaweza kuwa null kwa sekunde chache za kwanza).
+      return { phoneNumber, status: 'pairing', pairingCode: null, mode, qr: existing.qr || null };
+    }
+  }
+  if (existing && existing.status === 'connecting' && mode === 'qr') {
+    // Mteja wa zamani (session tayari ina creds) anaunganishwa upya — usiunde socket ya pili kwa creds zilezile.
+    return { phoneNumber, status: 'connecting', pairingCode: null, mode: existing.mode || 'code', qr: null };
+  }
+  if (existing && existing.status === 'pairing' && (existing.mode || 'code') !== mode) {
+    // Mteja amebadilisha njia (code <-> QR) katikati ya pairing. Session hii HAIJAWAHI kulinkiwa
+    // (status 'pairing' = bado haijakamilika), kwa hiyo ni salama kuifunga na kuanza upya.
+    // Wateja waliokwisha kuunganishwa hawafiki hapa (status 'connected'/'connecting').
+    existing.stopped = true;
+    try { existing.sock && existing.sock.end(undefined); } catch (e) { /* already closed — fine */ }
+    instances.delete(phoneNumber);
+    fs.rmSync(path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber)), { recursive: true, force: true });
+    await deleteDbSession(pairingSessionId(phoneNumber));
   }
 
   const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
@@ -1086,6 +1144,9 @@ async function createOrPairInstance(rawPhoneNumber) {
     sock: null,
     status: 'pairing',
     pairingCode: null,
+    mode,
+    qr: null,
+    awaitingFirstLink: mode === 'qr', // ukaguzi wa namba ya QR (angalia connection 'open')
     error: null,
     createdAt: Date.now(),
     reconnectAttempts: 0,
@@ -1095,7 +1156,15 @@ async function createOrPairInstance(rawPhoneNumber) {
 
   await connectInstance(phoneNumber, sessionFolder, record, false);
 
-  return { phoneNumber, status: record.status, pairingCode: record.pairingCode };
+  if (mode === 'qr') {
+    // Subiri QR ya kwanza (hadi sekunde 10) ili dashboard iipate mara moja.
+    const until = Date.now() + 10000;
+    while (!record.qr && record.status !== 'error' && record.status !== 'connected' && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  return { phoneNumber, status: record.status, pairingCode: record.pairingCode, mode, qr: record.qr || null, error: record.error || null };
 }
 
 /**

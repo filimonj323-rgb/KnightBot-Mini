@@ -396,7 +396,7 @@ async function handlePairingRequest(req, res) {
   try {
     if (req.method === 'POST' && req.url === '/api/pair') {
       const body = await readJsonBody(req);
-      const result = await createOrPairInstance(body.phoneNumber);
+      const result = await createOrPairInstance(body.phoneNumber, { mode: body.mode === 'qr' ? 'qr' : 'code' });
       return sendJson(res, 200, { ok: true, ...result });
     }
 
