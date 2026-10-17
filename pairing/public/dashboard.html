@@ -622,6 +622,34 @@
   .ts-font { width: auto; flex: 1 1 calc(50% - 5px); padding: 12px 10px; border-radius: 14px; background: var(--field); border: 1px solid var(--line); box-shadow: none; color: var(--text); font-size: 15px; text-align: center; }
   .ts-font.active { border-color: var(--purple); background: rgba(var(--accent-rgb),0.14); }
   .ts-reset { margin-top: 20px; background: transparent; border: 1px solid var(--line); box-shadow: none; color: var(--muted); }
+
+  /* ── Kadi ya muunganisho wa bot + QR ───────────────────────────── */
+  .conn-card { background: var(--card); border: 1px solid var(--line, var(--border)); border-radius: 22px; padding: 14px 16px; margin: 0 0 16px; box-shadow: 0 12px 32px rgba(0,0,0,0.25); }
+  .conn-card[hidden] { display: none; }
+  .conn-head { display: flex; align-items: center; gap: 12px; }
+  .conn-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex-shrink: 0; box-shadow: 0 0 0 4px rgba(141,146,163,0.18); }
+  .conn-card[data-state="connected"] .conn-dot { background: var(--success); box-shadow: 0 0 0 4px rgba(52,211,153,0.2); }
+  .conn-card[data-state="pairing"] .conn-dot, .conn-card[data-state="connecting"] .conn-dot { background: #fbbf24; box-shadow: 0 0 0 4px rgba(251,191,36,0.2); animation: connPulse 1.4s ease-in-out infinite; }
+  .conn-card[data-state="disconnected"] .conn-dot, .conn-card[data-state="error"] .conn-dot { background: var(--error); box-shadow: 0 0 0 4px rgba(248,113,113,0.2); }
+  @keyframes connPulse { 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .conn-dot { animation: none !important; } }
+  .conn-title { flex: 1; min-width: 0; line-height: 1.3; }
+  .conn-title b { display: block; font-size: 14px; }
+  .conn-title small { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conn-card button.small { width: auto; flex-shrink: 0; margin: 0; }
+  .conn-body { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line, var(--border)); display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+  .conn-body[hidden] { display: none; }
+  .conn-qrbox { background: #fff; padding: 10px; border-radius: 16px; width: 232px; height: 232px; display: flex; align-items: center; justify-content: center; }
+  .conn-qrbox[hidden] { display: none; }
+  .conn-qrbox img { width: 212px; height: 212px; display: block; }
+  .conn-qrbox img[hidden] { display: none; }
+  .conn-qr-ph { color: #555; font-size: 13px; padding: 0 12px; line-height: 1.5; }
+  .conn-note { font-size: 12.5px; color: var(--muted); line-height: 1.7; max-width: 340px; text-align: left; }
+  .conn-note b { color: var(--text); }
+  .conn-msg { font-size: 12.5px; color: var(--error); }
+  .conn-msg:empty { display: none; }
+  .conn-card .conn-start { width: 100%; max-width: 340px; }
+  .conn-card .conn-start[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -636,6 +664,26 @@
     </div>
     <span class="hdr-chip" id="hdrMode" style="display:none"></span>
     <button type="button" class="theme-btn" id="themeBtn" aria-label="Badilisha mwonekano" title="Mwonekano">🎨</button>
+  </div>
+
+  <!-- Kadi ya muunganisho: hali ya bot + QR ya namba -->
+  <div class="conn-card" id="connCard" data-state="loading" hidden>
+    <div class="conn-head">
+      <span class="conn-dot"></span>
+      <div class="conn-title">
+        <b id="connTitle">Inakagua muunganisho...</b>
+        <small id="connNum"></small>
+      </div>
+    </div>
+    <div class="conn-body" id="connBody" hidden>
+      <div class="conn-qrbox">
+        <img id="connQr" alt="QR Code" hidden />
+        <div class="conn-qr-ph" id="connQrPh">Inatengeneza QR...</div>
+      </div>
+      <div class="conn-note" id="connNote"></div>
+      <div class="conn-msg" id="connMsg"></div>
+      <button type="button" class="conn-start" id="connStart" hidden>Tengeneza QR ya kuunganisha</button>
+    </div>
   </div>
 
   <div class="section-tabs">
@@ -1187,6 +1235,98 @@
 
   const params = new URLSearchParams(window.location.search);
   const token = params.get('token');
+
+
+  // ---------- Muunganisho wa bot + QR ya kulinki ----------
+  (function () {
+    const card = document.getElementById('connCard');
+    if (!card || !token) return;
+    const el = (id) => document.getElementById(id);
+    const title = el('connTitle'), num = el('connNum'), body = el('connBody');
+    const qrBox = card.querySelector('.conn-qrbox');
+    const qrImg = el('connQr'), qrPh = el('connQrPh'), note = el('connNote'), msg = el('connMsg'), startBtn = el('connStart');
+    const base = () => API_BASE + '/api/dashboard/' + encodeURIComponent(token) + '/connection';
+
+    let timer = null, busy = false;
+
+    const LINK_STEPS =
+      '1. Fungua WhatsApp kwenye simu yenye namba hii<br/>' +
+      '2. Nenda <b>Settings → Linked Devices</b><br/>' +
+      '3. Bonyeza <b>Link a Device</b> kisha <b>scan</b> QR hii<br/>' +
+      '<span>QR inabadilika yenyewe — scan ile inayoonekana sasa.</span>';
+
+    function setQr(src, placeholder) {
+      if (src) { qrImg.src = src; qrImg.hidden = false; qrPh.hidden = true; }
+      else { qrImg.hidden = true; qrPh.hidden = false; qrPh.textContent = placeholder || 'Inatengeneza QR...'; }
+    }
+
+    function render(d) {
+      card.hidden = false;
+      const st = d.status || 'disconnected';
+      card.dataset.state = st;
+      num.textContent = (d.phoneNumber ? '+' + d.phoneNumber : '') + (d.waName ? ' • ' + d.waName : '');
+      msg.textContent = '';
+      qrBox.hidden = (st === 'disconnected' || st === 'error');
+
+      if (st === 'connected') {
+        // Imeunganishwa: hali + namba tu, hakuna QR.
+        title.textContent = 'Bot imeunganishwa';
+        startBtn.hidden = true;
+        body.hidden = true;
+      } else if (st === 'pairing' && d.qr) {
+        title.textContent = 'Bot haijaunganishwa — scan QR';
+        startBtn.hidden = true;
+        note.innerHTML = LINK_STEPS;
+        setQr(d.qr);
+        body.hidden = false;
+      } else if (st === 'pairing' || st === 'connecting') {
+        title.textContent = st === 'connecting' ? 'Inaunganisha tena...' : 'Inatengeneza QR...';
+        startBtn.hidden = true;
+        note.innerHTML = '';
+        setQr(null, 'Tafadhali subiri sekunde chache...');
+        body.hidden = false;
+      } else { // disconnected | error
+        title.textContent = 'Bot haijaunganishwa';
+        startBtn.hidden = false;
+        startBtn.disabled = busy;
+        note.innerHTML = 'Bonyeza kitufe hapa chini upate QR, kisha uiscan kwa WhatsApp ya namba hii.';
+        setQr(null, 'QR itaonekana hapa.');
+        if (d.error) msg.textContent = d.error;
+        body.hidden = false;
+      }
+    }
+
+    async function refresh() {
+      clearTimeout(timer);
+      let d = null;
+      try {
+        const res = await fetch(base());
+        const data = await res.json();
+        if (data && data.ok) d = data;
+      } catch (e) { /* jaribu tena kwenye mzunguko ujao */ }
+      if (d) render(d);
+      const wait = !d ? 5000 : d.status === 'connected' ? 30000 : (d.status === 'pairing' && d.qr) ? 2500 : 4000;
+      timer = setTimeout(() => { if (!document.hidden) refresh(); else timer = setTimeout(refresh, wait); }, wait);
+    }
+
+    startBtn.addEventListener('click', async () => {
+      busy = true; startBtn.disabled = true; msg.textContent = '';
+      setQr(null, 'Inatengeneza QR...');
+      try {
+        const res = await fetch(base() + '/qr', { method: 'POST' });
+        const data = await res.json();
+        if (!data.ok) msg.textContent = data.error || 'Imeshindwa kutengeneza QR. Jaribu tena.';
+        else if (data.error) msg.textContent = data.error;
+      } catch (e) {
+        msg.textContent = 'Imeshindwa kuwasiliana na server. Jaribu tena.';
+      } finally {
+        busy = false; startBtn.disabled = false;
+        refresh();
+      }
+    });
+
+    refresh();
+  })();
 
   // ---------- Top-level section switching ----------
   function openSection(name) {

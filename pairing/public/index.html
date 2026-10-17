@@ -2,190 +2,389 @@
 <html lang="sw">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Unganisha WhatsApp Bot</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#060b17" />
+<meta name="description" content="Mr. IT MEDIATOR WhatsApp Bot. Weka namba yako, pata pairing code au QR, na uunganishe bot yako kwa dakika moja." />
+<title>Mr. IT MEDIATOR WhatsApp Bot</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2319e3c1'/%3E%3Ctext x='32' y='42' font-size='28' font-family='Arial' font-weight='900' text-anchor='middle' fill='%23060b17'%3EIT%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
+  @property --a { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
   :root {
-    --purple: #9C27B0;
-    --purple-dark: #6a1b7a;
-    --bg: #0f1115;
-    --card: #171a21;
-    --text: #f2f2f5;
-    --muted: #9a9fae;
+    --night: #060b17;
+    --deep: #0b1226;
+    --glass: rgba(255,255,255,.055);
+    --glass-2: rgba(255,255,255,.09);
+    --line: rgba(255,255,255,.12);
+    --text: #eef3ff;
+    --muted: #93a0c0;
+    --lime: #a3ff7a;
+    --aqua: #19e3c1;
+    --blue: #3b5bff;
+    --amber: #ffcf5a;
+    --danger: #ff7a8a;
+    --grad: linear-gradient(120deg, var(--lime), var(--aqua));
+    --head: "Unbounded", "Trebuchet MS", system-ui, sans-serif;
+    --body: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; }
   body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    padding: 20px;
+    min-height: 100vh; min-height: 100dvh;
+    font-family: var(--body); color: var(--text); background: var(--night);
+    line-height: 1.55; overflow-x: hidden; -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
   }
-  .card {
-    background: var(--card);
-    border-radius: 16px;
-    padding: 32px 28px;
-    max-width: 420px;
-    width: 100%;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+  :focus-visible { outline: 3px solid rgba(25,227,193,.75); outline-offset: 3px; border-radius: 10px; }
+
+  /* Aurora */
+  .aurora { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .aurora i { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .5; will-change: transform; }
+  .aurora i:nth-child(1) { width: 52vmax; height: 52vmax; left: -14vmax; top: -18vmax; background: var(--blue); animation: drift1 22s ease-in-out infinite alternate; }
+  .aurora i:nth-child(2) { width: 44vmax; height: 44vmax; right: -12vmax; top: 10vmax; background: var(--aqua); opacity: .32; animation: drift2 26s ease-in-out infinite alternate; }
+  .aurora i:nth-child(3) { width: 34vmax; height: 34vmax; left: 25vmax; bottom: -20vmax; background: var(--lime); opacity: .22; animation: drift1 30s ease-in-out infinite alternate-reverse; }
+  .aurora::after { content: ""; position: absolute; inset: 0; background-image: radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px); background-size: 26px 26px; mask-image: radial-gradient(ellipse at 50% 40%, #000 20%, transparent 75%); -webkit-mask-image: radial-gradient(ellipse at 50% 40%, #000 20%, transparent 75%); }
+  @keyframes drift1 { to { transform: translate(9vmax, 7vmax) scale(1.12); } }
+  @keyframes drift2 { to { transform: translate(-8vmax, 9vmax) scale(.9); } }
+
+  .page { position: relative; z-index: 1; width: min(1060px, 100% - 36px); margin: 0 auto; flex: 1; display: flex; flex-direction: column; }
+
+  /* Header */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .mark { width: 54px; height: 54px; border-radius: 17px; background: var(--grad); color: var(--night); display: grid; place-items: center; font: 800 21px var(--head); flex-shrink: 0; box-shadow: 0 12px 30px -6px rgba(25,227,193,.65); position: relative; animation: markFloat 3.6s ease-in-out infinite; }
+  .mark::before { content: ""; position: absolute; inset: -5px; border-radius: 21px; border: 2px solid var(--aqua); opacity: 0; animation: ring 2.8s ease-out infinite; }
+  .mark::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.7) 50%, transparent 70%); background-size: 250% 100%; background-position: 160% 0; animation: shine 4.5s ease-in-out infinite 1.5s; mix-blend-mode: soft-light; }
+  @keyframes shine { 60%, 100% { background-position: -80% 0; } }
+  @keyframes ring { 0% { transform: scale(.9); opacity: .8; } 80%, 100% { transform: scale(1.25); opacity: 0; } }
+  @keyframes markFloat { 50% { transform: translateY(-3px); } }
+  .brand { animation: brandIn .9s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes brandIn { from { opacity: 0; transform: translateX(-26px); } }
+  .brand-text { line-height: 1.1; min-width: 0; }
+  .brand-text b { display: block; font: 800 clamp(19px, 2.4vw, 26px) var(--head); letter-spacing: -.02em; white-space: nowrap; background: linear-gradient(100deg, #fff 0%, #fff 38%, var(--lime) 50%, var(--aqua) 60%, #fff 74%, #fff 100%); background-size: 260% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: nameShine 4.2s linear infinite; }
+  @keyframes nameShine { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+  .brand-text span { display: flex; align-items: center; gap: 7px; font: 600 11.5px var(--head); color: var(--aqua); letter-spacing: .22em; margin-top: 6px; }
+  .brand-text span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 10px var(--lime); animation: blinkDot 1.6s ease-in-out infinite; }
+  @keyframes blinkDot { 50% { opacity: .25; } }
+  .help-btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px; padding: 10px 16px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: background .2s, transform .15s, border-color .2s; flex-shrink: 0; }
+  .help-btn:hover { background: var(--glass-2); border-color: rgba(25,227,193,.5); transform: translateY(-1px); }
+  .help-btn svg { width: 18px; height: 18px; fill: var(--aqua); }
+
+
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  /* Ticker: maneno yanayotembea chini ya jina */
+  .ticker { overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.045); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent); margin-bottom: 8px; }
+  .ticker-track { display: flex; width: max-content; animation: marquee 26s linear infinite; }
+  .ticker:hover .ticker-track { animation-play-state: paused; }
+  .ticker-group { display: flex; align-items: center; flex-shrink: 0; }
+  .ticker-group b { font: 600 13px var(--head); padding: 11px 0; white-space: nowrap; color: var(--text); }
+  .ticker-group b em { font-style: normal; color: var(--lime); }
+  .ticker-group i { width: 7px; height: 7px; border-radius: 50%; margin: 0 22px; background: var(--aqua); box-shadow: 0 0 10px var(--aqua); flex-shrink: 0; }
+  @keyframes marquee { to { transform: translateX(-50%); } }
+
+  /* Hero */
+  .hero { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 56px; align-items: center; padding: 14px 0 34px; }
+  .intro p { color: var(--text); opacity: .88; font-weight: 600; font-size: clamp(17px, 2.1vw, 24px); line-height: 1.45; max-width: 30ch; margin: 0 0 26px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { display: inline-flex; align-items: center; gap: 9px; padding: 11px 16px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line); color: var(--text); font: 600 14px var(--body); cursor: pointer; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: transform .18s, background .2s, border-color .2s; }
+  .chip:hover { transform: translateY(-3px); background: var(--glass-2); border-color: rgba(163,255,122,.5); }
+  .chip em { font-style: normal; font-size: 17px; }
+
+  /* Load-in (mara moja tu) */
+  .intro p, .chips, .card { opacity: 0; transform: translateY(18px); animation: rise .8s cubic-bezier(.2,.8,.2,1) forwards; }
+  .intro p { animation-delay: .38s; } .chips { animation-delay: .5s; } .card { animation-delay: .3s; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  /* Kadi ya fomu na mpaka unaozunguka */
+  .card { position: relative; border-radius: 28px; padding: 26px; background: linear-gradient(160deg, rgba(20,30,60,.88), rgba(9,14,30,.92)); box-shadow: 0 40px 80px -30px rgba(0,0,0,.8); }
+  .card::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.6px; background: conic-gradient(from var(--a), rgba(255,255,255,.08) 0 55%, var(--lime) 75%, var(--aqua) 88%, rgba(255,255,255,.08)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); mask-composite: exclude; animation: spin 6s linear infinite; pointer-events: none; }
+  @keyframes spin { to { --a: 360deg; } }
+  .card h2 { font: 700 18px var(--head); letter-spacing: -.02em; margin: 0 0 4px; }
+  .card .sub { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  label { display: block; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+  .field { display: flex; align-items: center; background: rgba(0,0,0,.35); border: 1.5px solid var(--line); border-radius: 16px; transition: border-color .2s, box-shadow .2s; }
+  .field:focus-within { border-color: var(--aqua); box-shadow: 0 0 0 4px rgba(25,227,193,.16); }
+  .field span { padding-left: 16px; color: var(--aqua); font: 700 18px var(--head); }
+  input[type="tel"] { flex: 1; min-width: 0; padding: 16px 16px 16px 8px; background: transparent; border: 0; outline: 0; color: var(--text); font: 600 18px var(--body); letter-spacing: .03em; }
+  input::placeholder { color: #55618a; font-weight: 500; }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 8px 2px 0; }
+  .actions { display: grid; gap: 10px; margin-top: 18px; }
+  button { font-family: var(--body); }
+  .btn { border: 0; border-radius: 16px; padding: 16px; font-weight: 800; font-size: 15.5px; cursor: pointer; position: relative; overflow: hidden; transition: transform .12s, box-shadow .2s, background .2s; }
+  .btn:active:not(:disabled) { transform: scale(.985); }
+  .btn:disabled { opacity: .6; cursor: not-allowed; }
+  .btn-main { color: var(--night); background: var(--grad); box-shadow: 0 14px 30px -10px rgba(25,227,193,.75); }
+  .btn-main:hover:not(:disabled) { box-shadow: 0 18px 36px -8px rgba(163,255,122,.8); transform: translateY(-2px); }
+  .btn-main::after { content: ""; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 35%, rgba(255,255,255,.55) 50%, transparent 65%); transform: translateX(-120%); }
+  .btn-main:hover:not(:disabled)::after { transform: translateX(120%); transition: transform .8s ease; }
+  .btn-alt { color: var(--text); background: transparent; border: 1.5px solid var(--line); }
+  .btn-alt:hover:not(:disabled) { background: var(--glass); border-color: rgba(25,227,193,.5); }
+  .alt-note { font-size: 12.5px; color: var(--muted); text-align: center; margin: 0; }
+
+  .error-box { display: none; margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: rgba(255,122,138,.1); border: 1px solid rgba(255,122,138,.35); color: #ffb3bd; font-size: 13.5px; }
+
+  .result { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px dashed var(--line); text-align: center; }
+  .result .cap { font-size: 13px; color: var(--muted); }
+  .code { font: 800 clamp(26px, 7.5vw, 34px) var(--head); letter-spacing: .1em; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; background-color: rgba(0,0,0,.3); border: 1.5px dashed rgba(25,227,193,.55); border-radius: 18px; padding: 18px 10px 18px 18px; margin: 10px 0 6px; cursor: copy; user-select: all; }
+  .copy-hint { font-size: 12px; color: var(--muted); min-height: 18px; }
+  .qr-frame { display: inline-block; background: #fff; padding: 12px; border-radius: 20px; margin: 12px 0 4px; box-shadow: 0 0 0 4px rgba(25,227,193,.2), 0 20px 40px -12px rgba(0,0,0,.7); }
+  .qr-frame img { display: block; width: 224px; height: 224px; max-width: 100%; }
+  .status { margin-top: 14px; font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; gap: 9px; }
+  .status::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; }
+  .status.pairing { color: var(--amber); } .status.pairing::before { animation: ping 1.6s ease-out infinite; }
+  .status.connected { color: var(--lime); }
+  .status.error { color: var(--danger); }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(255,207,90,.7); } 100% { box-shadow: 0 0 0 10px rgba(255,207,90,0); } }
+  .link-btn { display: block; margin: 14px auto 0; background: none; border: 0; color: var(--aqua); font-weight: 700; font-size: 13.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+  .dash-box { margin-top: 16px; padding: 14px; border-radius: 16px; background: rgba(163,255,122,.08); border: 1px solid rgba(163,255,122,.3); }
+  .dash-box small { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dash-box a { color: var(--lime); font-weight: 800; word-break: break-all; }
+
+  .resend { text-align: center; margin-top: 16px; }
+  .resend a { color: var(--muted); font-size: 13px; text-underline-offset: 3px; }
+  .resend a:hover { color: var(--text); }
+  #resendBox { display: none; margin-top: 14px; }
+  #resendBox .btn { width: 100%; margin-top: 12px; padding: 14px; }
+  #resendMsg { display: none; margin-top: 10px; font-size: 13px; text-align: center; }
+
+  /* Footer */
+  footer { position: relative; z-index: 1; padding: 18px 0 26px; text-align: center; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--text); font-weight: 700; text-decoration: none; border-bottom: 1px solid rgba(25,227,193,.5); }
+
+  /* Dirisha la maelekezo (dialog) */
+  dialog { border: 0; padding: 0; background: transparent; color: var(--text); width: min(560px, calc(100% - 28px)); max-height: min(82vh, 720px); margin: auto; overflow: visible; }
+  dialog::backdrop { background: rgba(3,6,16,.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); animation: fade .25s ease; }
+  dialog[open] .sheet { animation: pop .35s cubic-bezier(.2,.9,.25,1.05); }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes pop { from { opacity: 0; transform: translateY(24px) scale(.96); } }
+  .sheet { display: flex; flex-direction: column; max-height: min(82vh, 720px); border-radius: 26px; background: linear-gradient(170deg, #121b38, #0a1022); border: 1px solid var(--line); box-shadow: 0 40px 90px -20px rgba(0,0,0,.9); overflow: hidden; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+  .sheet-head h3 { margin: 0; font: 700 17px var(--head); letter-spacing: -.02em; }
+  .x { width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--line); background: var(--glass); color: var(--text); font-size: 16px; cursor: pointer; flex-shrink: 0; }
+  .x:hover { background: var(--glass-2); }
+  .sheet-body { padding: 18px 20px 6px; overflow-y: auto; font-size: 14.5px; color: #c9d3ee; }
+  .sheet-body h4 { margin: 4px 0 8px; font: 700 14px var(--head); color: var(--lime); }
+  .sheet-body ol { margin: 0 0 18px; padding: 0; list-style: none; counter-reset: n; }
+  .sheet-body ol li { counter-increment: n; position: relative; padding: 0 0 10px 38px; }
+  .sheet-body ol li::before { content: counter(n); position: absolute; left: 0; top: -1px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font: 700 12px var(--head); background: var(--grad); color: var(--night); }
+  .sheet-body b { color: var(--text); }
+  .feat-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 10px; }
+  .feat-list li { display: flex; gap: 12px; padding: 12px 14px; border-radius: 16px; background: var(--glass); border: 1px solid var(--line); }
+  .feat-list em { font-style: normal; font-size: 22px; line-height: 1.2; }
+  .feat-list strong { display: block; color: var(--text); margin-bottom: 1px; }
+  details { border-bottom: 1px solid var(--line); }
+  summary { cursor: pointer; list-style: none; padding: 14px 0; font-weight: 700; color: var(--text); display: flex; justify-content: space-between; gap: 14px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--aqua); font-size: 22px; line-height: 1; transition: transform .2s; }
+  details[open] summary::after { transform: rotate(45deg); }
+  details p { margin: 0 0 14px; }
+  .sheet-foot { padding: 14px 20px 18px; }
+  .sheet-foot .help-btn { width: 100%; justify-content: center; background: var(--grad); color: var(--night); border: 0; }
+  .sheet-foot .help-btn svg { fill: var(--night); }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; gap: 30px; padding-top: 6px; }
+    .intro p { max-width: none; font-size: 16px; font-weight: 500; opacity: .8; margin-bottom: 20px; }
   }
-  h1 {
-    font-size: 22px;
-    margin: 0 0 6px;
-    text-align: center;
+  @media (max-width: 560px) {
+    .page { width: calc(100% - 28px); }
+    .brand { gap: 11px; }
+    .brand-text b { font-size: 19px; } .brand-text span { font-size: 10px; letter-spacing: .18em; }
+    .mark { width: 50px; height: 50px; font-size: 19px; border-radius: 16px; }
+    .ticker-group b { font-size: 12px; padding: 10px 0; } .ticker-group i { margin: 0 16px; }
+    .help-btn { padding: 11px 13px; font-size: 13px; }
+    .help-btn .lbl { display: none; }
+    .card { padding: 22px 18px; border-radius: 24px; }
+    .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .chip { flex-direction: column; gap: 5px; justify-content: center; text-align: center; padding: 12px 6px; font-size: 12.5px; line-height: 1.25; }
+    dialog { width: 100%; max-width: none; margin: auto 0 0; }
+    .sheet { border-radius: 26px 26px 0 0; max-height: 86vh; }
+    dialog[open] .sheet { animation: slideup .35s cubic-bezier(.2,.9,.25,1); }
+    @keyframes slideup { from { transform: translateY(100%); } }
   }
-  p.sub {
-    color: var(--muted);
-    text-align: center;
-    margin: 0 0 26px;
-    font-size: 14px;
-  }
-  label {
-    display: block;
-    font-size: 13px;
-    margin-bottom: 6px;
-    color: var(--muted);
-  }
-  input[type="tel"] {
-    width: 100%;
-    padding: 14px;
-    border-radius: 10px;
-    border: 1px solid #2a2e38;
-    background: #10131a;
-    color: var(--text);
-    font-size: 16px;
-    outline: none;
-  }
-  input[type="tel"]:focus {
-    border-color: var(--purple);
-  }
-  button {
-    width: 100%;
-    margin-top: 18px;
-    padding: 14px;
-    border-radius: 10px;
-    border: none;
-    background: var(--purple);
-    color: white;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-  .hint {
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 8px;
-  }
-  .result {
-    margin-top: 24px;
-    text-align: center;
-    display: none;
-  }
-  .code {
-    font-size: 32px;
-    font-weight: 700;
-    letter-spacing: 4px;
-    color: var(--purple);
-    background: #10131a;
-    border: 1px dashed var(--purple);
-    border-radius: 10px;
-    padding: 16px;
-    margin: 12px 0;
-  }
-  .steps {
-    text-align: left;
-    font-size: 13px;
-    color: var(--muted);
-    line-height: 1.7;
-    margin-top: 14px;
-  }
-  .status {
-    margin-top: 16px;
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .status.connected { color: #4caf50; }
-  .status.pairing { color: #f0ad4e; }
-  .status.error { color: #e05555; }
-  .error-box {
-    display: none;
-    margin-top: 16px;
-    padding: 12px;
-    border-radius: 8px;
-    background: rgba(224,85,85,0.12);
-    color: #e05555;
-    font-size: 13px;
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition-duration: .001s !important; }
+    .intro p, .chips, .card { opacity: 1; transform: none; }
+    .ticker-track { animation: none; }
   }
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Unganisha Bot Yako</h1>
-    <p class="sub">Weka namba yako ya WhatsApp upate pairing code — bila session ID.</p>
+  <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
 
-    <label for="phone">Namba ya simu (na country code)</label>
-    <input type="tel" id="phone" placeholder="255712345678" inputmode="numeric" />
-    <div class="hint">Mfano: Tanzania 2557XXXXXXXX (bila + wala 0 mwanzoni)</div>
-
-    <button id="pairBtn">Pata Pairing Code</button>
-    <button id="qrBtn" style="background:#2a2e38; margin-top:10px;">Au unganisha kwa QR Code</button>
-    <div class="hint" style="text-align:center;">Pairing code ikigoma ("couldn't link device"), tumia QR.</div>
-
-    <div class="error-box" id="errorBox"></div>
-
-    <div class="result" id="result">
-      <div id="codeBlock">
-        <div>Pairing Code yako:</div>
-        <div class="code" id="codeDisplay">------</div>
-        <div class="steps">
-          1. Fungua WhatsApp kwenye simu yako<br/>
-          2. Nenda <b>Settings → Linked Devices</b><br/>
-          3. Chagua <b>Link a Device → Link with phone number instead</b><br/>
-          4. Andika code hii uliyopewa hapo juu
-        </div>
+  <div class="page">
+    <header class="top">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">IT</div>
+        <div class="brand-text"><b>Mr. IT MEDIATOR</b><span>WHATSAPP BOT</span></div>
       </div>
-      <div id="qrBlock" style="display:none; text-align:center;">
-        <div>Scan QR hii:</div>
-        <div style="background:#fff; display:inline-block; padding:10px; border-radius:12px; margin:12px 0;">
-          <img id="qrImg" alt="QR Code" style="width:240px; height:240px; display:block;" />
-        </div>
-        <div class="steps" style="text-align:left;">
-          1. Fungua WhatsApp kwenye simu yenye namba uliyoweka<br/>
-          2. Nenda <b>Settings → Linked Devices</b><br/>
-          3. Chagua <b>Link a Device</b> kisha <b>scan</b> QR hii<br/>
-          <span style="color:#9a9fae;">QR inabadilika yenyewe kila sekunde chache — scan ile inayoonekana sasa.</span>
-        </div>
-      </div>
-      <div class="status pairing" id="statusText">⏳ Inasubiri uunganishe...</div>
-    </div>
-
-    <div style="text-align:center; margin-top:18px;">
-      <a href="#" id="resendToggle" style="color:#9a9fae; font-size:13px; text-decoration:underline;">
-        Umesahau dashboard link yako?
+      <a class="help-btn" id="helpTop" href="#" target="_blank" rel="noopener" aria-label="Wasiliana nasi WhatsApp kwa msaada">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm0 18.15h-.01a8.2 8.2 0 0 1-4.18-1.15l-.3-.18-3.12.82.83-3.04-.2-.31a8.2 8.2 0 0 1-1.26-4.38c0-4.54 3.7-8.24 8.25-8.24 2.2 0 4.27.86 5.82 2.42a8.18 8.18 0 0 1 2.41 5.83c0 4.54-3.7 8.23-8.24 8.23Zm4.52-6.16c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.12-.17.25-.64.81-.78.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.15.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.42-.56-.42h-.48c-.17 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28Z"/></svg>
+        <span class="lbl">Msaada</span>
       </a>
-    </div>
+    </header>
 
-    <div id="resendBox" style="display:none; margin-top:14px;">
-      <label for="resendPhone">Namba uliyotumia kuunganisha</label>
-      <input type="tel" id="resendPhone" placeholder="255712345678" inputmode="numeric" />
-      <button id="resendBtn" style="background:#2a2e38;">Tutumie Link Tena WhatsApp</button>
-      <div class="msg-inline" id="resendMsg" style="display:none; margin-top:10px; font-size:13px;"></div>
-    </div>
+    <div class="ticker" aria-hidden="true"><div class="ticker-track"><div class="ticker-group"><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i></div><div class="ticker-group"><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i><b>Unganisha <em>WhatsApp</em> yako na bot kwa dakika moja</b><i></i></div></div></div>
+
+    <main class="hero">
+      <div class="intro">
+        <h1 class="sr-only">Unganisha WhatsApp yako na bot kwa dakika moja.</h1>
+        <p>Weka namba yako, pata pairing code au QR, kisha dhibiti bot kutoka dashboard yako binafsi.</p>
+        <div class="chips">
+          <button type="button" class="chip" data-sheet="how"><em>📘</em>Jinsi ya kuunganisha</button>
+          <button type="button" class="chip" data-sheet="feat"><em>✨</em>Huduma za bot</button>
+          <button type="button" class="chip" data-sheet="faq"><em>❓</em>Maswali</button>
+        </div>
+      </div>
+
+      <div class="card" id="pair">
+        <h2>Anza hapa</h2>
+        <p class="sub">Namba ya WhatsApp unayotaka kuunganisha.</p>
+
+        <label for="phone">Namba ya simu</label>
+        <div class="field">
+          <span aria-hidden="true">+</span>
+          <input type="tel" id="phone" placeholder="255712345678" inputmode="numeric" autocomplete="tel" />
+        </div>
+        <div class="hint">Anza na country code, bila + wala 0. Mfano: 2557XXXXXXXX</div>
+
+        <div class="actions">
+          <button class="btn btn-main" id="pairBtn">Pata Pairing Code</button>
+          <button class="btn btn-alt" id="qrBtn">Tumia QR Code badala yake</button>
+          <p class="alt-note">Pairing code ikigoma, tumia QR.</p>
+        </div>
+
+        <div class="error-box" id="errorBox" role="alert"></div>
+
+        <div class="result" id="result" aria-live="polite">
+          <div id="codeBlock">
+            <div class="cap">Pairing code yako</div>
+            <div class="code" id="codeDisplay" title="Bonyeza kunakili">------</div>
+            <div class="copy-hint" id="copyHint">Bonyeza code kuinakili</div>
+          </div>
+          <div id="qrBlock" style="display:none;">
+            <div class="cap">Scan QR hii kutoka Linked Devices</div>
+            <div class="qr-frame"><img id="qrImg" alt="QR Code ya kuunganisha WhatsApp" /></div>
+          </div>
+          <div class="status pairing" id="statusText">Inasubiri uunganishe...</div>
+          <button type="button" class="link-btn" data-sheet="how">Nahitaji maelekezo</button>
+        </div>
+
+        <div class="resend"><a href="#" id="resendToggle">Umesahau dashboard link yako?</a></div>
+        <div id="resendBox">
+          <label for="resendPhone">Namba uliyotumia kuunganisha</label>
+          <div class="field">
+            <span aria-hidden="true">+</span>
+            <input type="tel" id="resendPhone" placeholder="255712345678" inputmode="numeric" />
+          </div>
+          <button class="btn btn-alt" id="resendBtn">Tumia link tena WhatsApp</button>
+          <div id="resendMsg"></div>
+        </div>
+      </div>
+    </main>
   </div>
 
+  <footer>Mr. IT MEDIATOR WhatsApp Bot &nbsp;•&nbsp; Msaada: <a id="helpFoot" href="#" target="_blank" rel="noopener">0623 647 378</a></footer>
+
+  <!-- Dirisha la maelekezo -->
+  <dialog id="sheet" aria-labelledby="sheetTitle">
+    <div class="sheet">
+      <div class="sheet-head"><h3 id="sheetTitle"></h3><button type="button" class="x" id="sheetClose" aria-label="Funga">✕</button></div>
+      <div class="sheet-body" id="sheetBody"></div>
+      <div class="sheet-foot">
+        <a class="help-btn" id="helpSheet" href="#" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38a9.9 9.9 0 0 0 4.74 1.21h.01c5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2Zm4.52 11.99c-.25-.12-1.47-.72-1.69-.81-.23-.08-.39-.12-.56.12-.17.25-.64.81-.78.97-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.23-1.47-1.38-1.72-.14-.25-.02-.38.11-.5.11-.11.25-.29.37-.43.12-.15.17-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.42-.56-.42h-.48c-.17 0-.43.06-.66.31-.22.25-.86.85-.86 2.07 0 1.22.89 2.4 1.01 2.56.12.17 1.75 2.67 4.23 3.74.59.26 1.05.41 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.47-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.22-.16-.47-.28Z"/></svg>
+          Bado unahitaji msaada? Tuandikie WhatsApp
+        </a>
+      </div>
+    </div>
+  </dialog>
+
+  <template id="tpl-how">
+    <h4>Kwa Pairing Code</h4>
+    <ol>
+      <li>Andika namba yako kwenye fomu kisha bonyeza <b>Pata Pairing Code</b>.</li>
+      <li>Fungua WhatsApp kwenye simu, nenda <b>Settings → Linked Devices</b>.</li>
+      <li>Chagua <b>Link a Device</b> kisha <b>Link with phone number instead</b>.</li>
+      <li>Andika code uliyopewa hapo juu. Ukishaiweka, bot inaunganishwa.</li>
+    </ol>
+    <h4>Kwa QR Code</h4>
+    <ol>
+      <li>Bonyeza <b>Tumia QR Code badala yake</b>.</li>
+      <li>Fungua WhatsApp ya namba uliyoweka, nenda <b>Settings → Linked Devices</b>.</li>
+      <li>Chagua <b>Link a Device</b> kisha scan QR inayoonekana. QR inabadilika yenyewe, scan ile ya sasa.</li>
+    </ol>
+  </template>
+
+  <template id="tpl-feat">
+    <ul class="feat-list">
+      <li><em>📤</em><div><strong>Status na Groups</strong>Tuma status na ujumbe kwenye groups nyingi kwa mara moja.</div></li>
+      <li><em>⬇️</em><div><strong>Downloads</strong>Pakua picha, video na muziki kwa link kutoka dashboard.</div></li>
+      <li><em>🛡️</em><div><strong>Ulinzi</strong>Zuia links zisizotakiwa kwenye groups na uone ujumbe uliofutwa.</div></li>
+      <li><em>⚙️</em><div><strong>Otomatiki</strong>Washa au zima auto view status, auto react na zaidi.</div></li>
+      <li><em>🔗</em><div><strong>Dashboard binafsi</strong>Link ya kipekee ya kudhibiti bot popote ulipo.</div></li>
+    </ul>
+  </template>
+
+  <template id="tpl-faq">
+    <details><summary>Je, nahitaji session ID?</summary><p>Hapana. Unaweka namba tu, kisha unatumia pairing code au QR.</p></details>
+    <details><summary>Pairing code inagoma ("couldn't link device")</summary><p>Bonyeza <b>Tumia QR Code badala yake</b> na uscan QR kutoka Linked Devices. Tumia WhatsApp ya namba ile ile uliyoweka kwenye fomu.</p></details>
+    <details><summary>Nimesahau dashboard link yangu</summary><p>Bonyeza <b>Umesahau dashboard link yako?</b> chini ya fomu, weka namba uliyotumia kuunganisha, nasi tutakutumia link tena kwenye WhatsApp.</p></details>
+    <details><summary>Nawezaje kuondoa bot kwenye simu yangu?</summary><p>Nenda <b>Settings → Linked Devices</b> kwenye WhatsApp na uondoe kifaa. Ukitaka kuunganisha tena, rudia hatua zile zile.</p></details>
+  </template>
+
 <script>
+  // ── Msaada: WhatsApp ya moja kwa moja na ujumbe wa auto ──────────────
+  const SUPPORT_NUMBER = '255623647378'; // 0623 647 378
+  const SUPPORT_TEXT = 'Habari Mr. IT MEDIATOR, nahitaji msaada kuhusu WhatsApp Bot.';
+  const supportUrl = 'https://wa.me/' + SUPPORT_NUMBER + '?text=' + encodeURIComponent(SUPPORT_TEXT);
+  const supportAppUrl = 'whatsapp://send?phone=' + SUPPORT_NUMBER + '&text=' + encodeURIComponent(SUPPORT_TEXT);
+  const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  // Simu: inafungua app ya WhatsApp moja kwa moja (bila kupitia ukurasa wa link).
+  // Ikishindwa (app haipo / kivinjari kimezuia), inarudi kwenye wa.me baada ya muda mfupi.
+  // Kompyuta: link ya kawaida ya wa.me kwenye tab mpya.
+  function openSupport(e) {
+    if (!isMobileDevice) return;
+    e.preventDefault();
+    let left = false;
+    const mark = () => { left = true; };
+    document.addEventListener('visibilitychange', mark, { once: true });
+    window.addEventListener('pagehide', mark, { once: true });
+    window.location.href = supportAppUrl;
+    setTimeout(() => { if (!left && !document.hidden) window.location.href = supportUrl; }, 1400);
+  }
+  ['helpTop', 'helpFoot', 'helpSheet'].forEach((id) => {
+    const a = document.getElementById(id);
+    a.href = supportUrl; // mbadala kwa kompyuta / ikiwa JS haifanyi kazi
+    a.addEventListener('click', openSupport);
+  });
+
+  // ── Dirisha la maelekezo ─────────────────────────────────────────────
+  const sheet = document.getElementById('sheet');
+  const sheetTitle = document.getElementById('sheetTitle');
+  const sheetBody = document.getElementById('sheetBody');
+  const SHEETS = { how: 'Jinsi ya kuunganisha', feat: 'Huduma za bot', faq: 'Maswali ya kawaida' };
+
+  function openSheet(key) {
+    if (!SHEETS[key]) return;
+    sheetTitle.textContent = SHEETS[key];
+    sheetBody.replaceChildren(document.getElementById('tpl-' + key).content.cloneNode(true));
+    sheetBody.scrollTop = 0;
+    if (typeof sheet.showModal === 'function') sheet.showModal(); else sheet.setAttribute('open', '');
+  }
+  document.querySelectorAll('[data-sheet]').forEach((b) => b.addEventListener('click', () => openSheet(b.dataset.sheet)));
+  document.getElementById('sheetClose').addEventListener('click', () => sheet.close());
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); }); // bonyeza nje ya kadi
+
+  // ── Kuunganisha (mantiki ileile) ─────────────────────────────────────
   const phoneInput = document.getElementById('phone');
   const pairBtn = document.getElementById('pairBtn');
   const result = document.getElementById('result');
   const codeDisplay = document.getElementById('codeDisplay');
+  const copyHint = document.getElementById('copyHint');
   const statusText = document.getElementById('statusText');
   const errorBox = document.getElementById('errorBox');
   const qrBtn = document.getElementById('qrBtn');
@@ -195,22 +394,29 @@
 
   let pollTimer = null;
   let currentMode = 'code';
+  let rawCode = '';
 
   function showMode(mode) {
     currentMode = mode;
     codeBlock.style.display = mode === 'code' ? 'block' : 'none';
     qrBlock.style.display = mode === 'qr' ? 'block' : 'none';
   }
+  function showError(msg) { errorBox.textContent = msg; errorBox.style.display = 'block'; }
+  function clearError() { errorBox.style.display = 'none'; errorBox.textContent = ''; }
+  function setStatus(text, cls) { statusText.textContent = text; statusText.className = 'status ' + cls; }
 
-  function showError(msg) {
-    errorBox.textContent = msg;
-    errorBox.style.display = 'block';
+  // Code ya herufi 8 inaonyeshwa kama ABCD-1234; nakala inabaki bila hyphen.
+  function showCode(code) {
+    rawCode = code || '';
+    codeDisplay.textContent = rawCode.length === 8 ? rawCode.slice(0, 4) + '-' + rawCode.slice(4) : (rawCode || '------');
   }
 
-  function clearError() {
-    errorBox.style.display = 'none';
-    errorBox.textContent = '';
-  }
+  codeDisplay.addEventListener('click', async () => {
+    if (!rawCode) return;
+    try { await navigator.clipboard.writeText(rawCode); copyHint.textContent = 'Imenakiliwa'; }
+    catch (e) { copyHint.textContent = 'Shikilia code kuinakili'; }
+    setTimeout(() => { copyHint.textContent = 'Bonyeza code kuinakili'; }, 2000);
+  });
 
   async function pollStatus(phoneNumber) {
     try {
@@ -219,45 +425,37 @@
       if (!data.ok) return;
 
       if (data.status === 'connected') {
-        statusText.textContent = '✅ Umeunganishwa! Bot yako iko tayari.';
-        statusText.className = 'status connected';
+        setStatus('Umeunganishwa! Bot yako iko tayari.', 'connected');
         clearInterval(pollTimer);
         qrBlock.style.display = 'none';
         if (data.dashboardToken) showDashboardLink(data.dashboardToken);
       } else if (data.status === 'error' || data.status === 'disconnected') {
-        // Kwenye QR, onyesha sababu halisi (mfano namba tofauti) badala ya ujumbe wa jumla.
-        statusText.textContent = '❌ ' + (currentMode === 'qr' && data.error ? data.error : 'Muunganisho umeshindwa. Jaribu tena.');
-        statusText.className = 'status error';
+        setStatus(currentMode === 'qr' && data.error ? data.error : 'Muunganisho umeshindwa. Jaribu tena.', 'error');
         clearInterval(pollTimer);
         qrBlock.style.display = 'none';
       } else {
-        if (currentMode === 'qr' && data.qr) qrImg.src = data.qr; // QR mpya inapobadilika
-        statusText.textContent = '⏳ Inasubiri uunganishe...';
-        statusText.className = 'status pairing';
+        if (currentMode === 'qr' && data.qr) qrImg.src = data.qr;
+        setStatus('Inasubiri uunganishe...', 'pairing');
       }
-    } catch (e) {
-      // Silent — will retry on next poll tick.
-    }
+    } catch (e) { /* itajaribu tena kwenye mzunguko ujao */ }
   }
 
-  function showDashboardLink(token) {    const url = window.location.origin + '/dashboard.html?token=' + token;
+  function showDashboardLink(token) {
+    const url = window.location.origin + '/dashboard.html?token=' + token;
     let box = document.getElementById('dashboardBox');
     if (!box) {
       box = document.createElement('div');
       box.id = 'dashboardBox';
-      box.style.marginTop = '18px';
-      box.style.padding = '14px';
-      box.style.borderRadius = '10px';
-      box.style.background = 'rgba(156,39,176,0.12)';
-      box.style.textAlign = 'center';
-      document.getElementById('result').appendChild(box);
+      box.className = 'dash-box';
+      result.appendChild(box);
     }
-    box.innerHTML =
-      '<div style="font-size:13px;color:#9a9fae;margin-bottom:8px;">Link yako binafsi ya kudhibiti bot:</div>' +
-      '<a href="' + url + '" target="_blank" style="color:#c084dc;font-weight:600;word-break:break-all;">' + url + '</a>';
+    box.innerHTML = '<small>Link yako binafsi ya kudhibiti bot:</small>';
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = url;
+    box.appendChild(a);
   }
 
-  // mode: 'code' (pairing code, njia ya kawaida) au 'qr' (njia mbadala ikiwa code inagoma).
+  // mode: 'code' (pairing code) au 'qr' (njia mbadala ikiwa code inagoma).
   async function startPair(mode) {
     clearError();
     const phoneNumber = phoneInput.value.trim();
@@ -267,7 +465,6 @@
     }
 
     const btn = mode === 'qr' ? qrBtn : pairBtn;
-    const idleLabel = mode === 'qr' ? 'Au unganisha kwa QR Code' : 'Pata Pairing Code';
     pairBtn.disabled = true;
     qrBtn.disabled = true;
     btn.textContent = mode === 'qr' ? 'Inatengeneza QR...' : 'Inatengeneza code...';
@@ -280,33 +477,27 @@
       });
       const data = await res.json();
 
-      if (!data.ok) {
-        showError(data.error || 'Hitilafu imetokea. Jaribu tena.');
-        return;
-      }
+      if (!data.ok) { showError(data.error || 'Hitilafu imetokea. Jaribu tena.'); return; }
 
       showMode(mode);
       if (data.status === 'connected') {
         result.style.display = 'block';
         codeBlock.style.display = 'block';
         qrBlock.style.display = 'none';
+        showCode('');
         codeDisplay.textContent = '✅';
-        statusText.textContent = '✅ Namba hii tayari imeunganishwa.';
-        statusText.className = 'status connected';
+        setStatus('Namba hii tayari imeunganishwa.', 'connected');
         if (data.dashboardToken) showDashboardLink(data.dashboardToken);
       } else if (data.status === 'error') {
         showError(data.error || 'Hitilafu imetokea. Jaribu tena.');
       } else {
-        if (mode === 'qr') {
-          if (data.qr) qrImg.src = data.qr;
-        } else {
-          codeDisplay.textContent = data.pairingCode || '------';
-        }
+        if (mode === 'qr') { if (data.qr) qrImg.src = data.qr; }
+        else showCode(data.pairingCode);
         result.style.display = 'block';
-        statusText.textContent = '⏳ Inasubiri uunganishe...';
-        statusText.className = 'status pairing';
+        setStatus('Inasubiri uunganishe...', 'pairing');
         clearInterval(pollTimer);
         pollTimer = setInterval(() => pollStatus(phoneNumber), mode === 'qr' ? 2000 : 3000);
+        result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     } catch (e) {
       showError('Imeshindwa kuwasiliana na server. Jaribu tena.');
@@ -314,14 +505,14 @@
       pairBtn.disabled = false;
       qrBtn.disabled = false;
       pairBtn.textContent = 'Pata Pairing Code';
-      qrBtn.textContent = 'Au unganisha kwa QR Code';
+      qrBtn.textContent = 'Tumia QR Code badala yake';
     }
   }
 
   pairBtn.addEventListener('click', () => startPair('code'));
   qrBtn.addEventListener('click', () => startPair('qr'));
 
-  // "Umesahau dashboard link yako?" — resend it to their WhatsApp inbox.
+  // "Umesahau dashboard link yako?" — itume tena kwenye WhatsApp ya mteja.
   const resendToggle = document.getElementById('resendToggle');
   const resendBox = document.getElementById('resendBox');
   const resendPhone = document.getElementById('resendPhone');
@@ -330,22 +521,19 @@
 
   resendToggle.addEventListener('click', (e) => {
     e.preventDefault();
-    resendBox.style.display = resendBox.style.display === 'none' ? 'block' : 'none';
+    resendBox.style.display = resendBox.style.display === 'block' ? 'none' : 'block';
   });
 
   resendBtn.addEventListener('click', async () => {
     resendMsg.style.display = 'none';
     const phoneNumber = resendPhone.value.trim();
     if (!phoneNumber || phoneNumber.length < 9) {
-      resendMsg.style.display = 'block';
-      resendMsg.style.color = '#e05555';
-      resendMsg.textContent = '❌ Weka namba sahihi.';
+      resendMsg.style.display = 'block'; resendMsg.style.color = '#ff7a8a';
+      resendMsg.textContent = 'Weka namba sahihi.';
       return;
     }
-
     resendBtn.disabled = true;
     resendBtn.textContent = 'Inatuma...';
-
     try {
       const res = await fetch('/api/resend-link', {
         method: 'POST',
@@ -353,22 +541,15 @@
         body: JSON.stringify({ phoneNumber }),
       });
       const data = await res.json();
-
       resendMsg.style.display = 'block';
-      if (data.ok) {
-        resendMsg.style.color = '#4caf50';
-        resendMsg.textContent = '✅ Tumekutumia link kwenye WhatsApp yako.';
-      } else {
-        resendMsg.style.color = '#e05555';
-        resendMsg.textContent = '❌ ' + (data.error || 'Imeshindwa. Jaribu tena.');
-      }
+      if (data.ok) { resendMsg.style.color = '#a3ff7a'; resendMsg.textContent = 'Tumekutumia link kwenye WhatsApp yako.'; }
+      else { resendMsg.style.color = '#ff7a8a'; resendMsg.textContent = data.error || 'Imeshindwa. Jaribu tena.'; }
     } catch (e) {
-      resendMsg.style.display = 'block';
-      resendMsg.style.color = '#e05555';
-      resendMsg.textContent = '❌ Imeshindwa kuwasiliana na server.';
+      resendMsg.style.display = 'block'; resendMsg.style.color = '#ff7a8a';
+      resendMsg.textContent = 'Imeshindwa kuwasiliana na server.';
     } finally {
       resendBtn.disabled = false;
-      resendBtn.textContent = 'Tutumie Link Tena WhatsApp';
+      resendBtn.textContent = 'Tumia link tena WhatsApp';
     }
   });
 </script>
