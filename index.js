@@ -766,7 +766,26 @@ async function _startBot() {
       // WhatsApp inaikataa kwa 401 kila mara, kwa hiyo kujaribu tena mara 4
       // (sekunde 10 kila moja) ni kupoteza muda tu. Ifute mara moja na uombe
       // pairing code MPYA (=> notification mpya kwenye WhatsApp ya simu).
-      if (statusCode === DisconnectReason.loggedOut && !state.creds.registered) {
+      // WhatsApp (au simu) imeondoa kifaa BAADA ya kulinkiwa kweli (device_removed). Hii si
+      // 'code iliyoisha' — creds.registered inabaki false hata session ikiwa hai, kwa hiyo
+      // tunatumia global.__hasOpened. Session imekufa: ifute na usubiri 30s kabla ya code mpya
+      // (kuzuia mzunguko wa haraka wa link/unlink unaoonekana kama shughuli isiyo ya kawaida).
+      let removedDetail = '';
+      try { removedDetail = JSON.stringify(err?.data || {}); } catch {}
+      if (statusCode === DisconnectReason.loggedOut && global.__hasOpened && /device_removed/i.test(removedDetail + errorMessage)) {
+        console.log('🚫 WhatsApp imeondoa kifaa hiki (device_removed) baada ya kulinkiwa — angalia WhatsApp > Linked Devices kwenye simu. Nafuta session na nasubiri 30s kabla ya code mpya...');
+        global.__hasOpened = false;
+        pairingCodeRequested = false;
+        global.__loggedOutCount = 0;
+        global.currentSock = null;
+        global.mainQR = null;
+        deleteSession(sessionId)
+          .catch((e) => console.error('❌ Imeshindwa kufuta session:', e.message))
+          .finally(() => setTimeout(() => startBot(), 30000));
+        return;
+      }
+
+      if (statusCode === DisconnectReason.loggedOut && !state.creds.registered && !global.__hasOpened) {
         console.log('🔁 Pairing code ya awali imeisha bila kuingizwa — nafuta session tupu na kuomba code MPYA...');
         pairingCodeRequested = false;
         global.__loggedOutCount = 0;
@@ -802,6 +821,7 @@ async function _startBot() {
     } else if (connection === 'open') {
       console.log('\n✅ Bot connected successfully!');
       global.__loggedOutCount = 0; // imefunguka — weka upya hesabu ya loggedOut
+      global.__hasOpened = true;   // session hii ILIKUWA imelinkiwa kweli (creds.registered haibadiliki kuwa true kwenye flow hii)
       global.currentSock = sock; // ruhusu functions nyingine (mfano auto-backup) kutumia sock hii
       global.mainQR = null; // imelinki — QR ya zamani isionekane tena kwenye dashboard
       console.log(`📱 Bot Number: ${sock.user.id.split(':')[0]}`);
