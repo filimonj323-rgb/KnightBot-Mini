@@ -1505,6 +1505,40 @@
         <label class="bc-sw"><input type="checkbox" ${isPrivate ? 'checked' : ''} onchange="bcSetMode(this)"><span class="bc-slider"></span></label>
       </div>`;
 
+    // Auto-Add (`.gm autoadd`) — switch ipo HAPA TU (admin). Mteja hana kitufe hiki kwenye dashboard yake.
+    const aa = data.autoAdd || { enabled: false, targets: [] };
+    const aaActive = (aa.targets || []).filter(t => t.enabled).length;
+    const aaTotal = (aa.targets || []).reduce((n, t) => n + (t.totalAdded || 0), 0);
+    const aaHint = aa.enabled
+      ? `Mteja anaweza kutumia <b>.gm autoadd</b>. Groups zinazofanya kazi: ${aaActive}/${(aa.targets || []).length} · jumla ameongezwa: ${aaTotal}`
+      : 'Zimezimwa — mteja akitumia <b>.gm autoadd</b> atajibiwa kwamba haijawashwa.';
+    const aaTargetMap = {};
+    (aa.targets || []).forEach(t => { aaTargetMap[t.groupId] = t; });
+    const aaGroups = (data.groups || []);
+    const aaGroupRows = !aa.enabled ? ''
+      : !aaGroups.length ? '<div class="bc-hint" style="padding:6px 0;">Hakuna groups (bot haipo live au haipo kwenye group lolote).</div>'
+      : aaGroups.map(g => {
+          const t = aaTargetMap[g.id];
+          const on = !!(t && t.enabled);
+          const stat = t ? `leo ${t.count}/${t.perDay} · jumla ${t.totalAdded}${t.lastResult ? ' · ' + escapeHtml(t.lastResult) : ''}` : `washiriki ${g.participants}`;
+          return `
+      <div class="bc-row" style="padding-left:14px;">
+        <div>
+          <div class="bc-name">${escapeHtml(g.subject || g.id)}</div>
+          <div class="bc-hint">${stat}</div>
+        </div>
+        <label class="bc-sw"><input type="checkbox" ${on ? 'checked' : ''} onchange="bcSetAutoAddGroup('${escapeAttr(g.id)}', this)"><span class="bc-slider"></span></label>
+      </div>`;
+        }).join('');
+    const autoAddRow = `
+      <div class="bc-row">
+        <div>
+          <div class="bc-name">👥 Auto-Add (.gm autoadd)</div>
+          <div class="bc-hint">${aaHint}</div>
+        </div>
+        <label class="bc-sw"><input type="checkbox" ${aa.enabled ? 'checked' : ''} onchange="bcSetAutoAdd(this)"><span class="bc-slider"></span></label>
+      </div>` + (aa.enabled ? '<div class="bc-hint" style="margin:4px 0 2px;">Chagua group la kuongezea watu (bot iwe admin AU group liruhusu members wa-add):</div>' : '') + aaGroupRows;
+
     const autoRows = BC_AUTOMATION.map(([key, label, hint]) => `
       <div class="bc-row">
         <div>
@@ -1531,7 +1565,8 @@
 
     box.innerHTML = strip + modeRow +
       '<div class="section-label" style="margin-top:12px;">Otomatiki</div>' + autoRows +
-      '<div class="section-label" style="margin-top:12px;">Ulinzi wa Groups (groups zote)</div>' + protRows;
+      '<div class="section-label" style="margin-top:12px;">Ulinzi wa Groups (groups zote)</div>' + protRows +
+      '<div class="section-label" style="margin-top:12px;">Huduma za Ziada</div>' + autoAddRow;
   }
 
   // Tuma badiliko la toggle moja; render upya kutoka jibu la server, na
@@ -1566,6 +1601,16 @@
 
   function bcSetAuto(key, cb) {
     bcPost('automation', { [key]: cb.checked }, cb, `${key} ${cb.checked ? 'imewashwa' : 'imezimwa'}.`);
+  }
+
+  function bcSetAutoAddGroup(groupId, cb) {
+    bcPost('autoadd-group', { groupId, enabled: cb.checked }, cb,
+      cb.checked ? 'Group limechaguliwa kwa auto-add.' : 'Group limeondolewa kwenye auto-add.');
+  }
+
+  function bcSetAutoAdd(cb) {
+    bcPost('autoadd', { enabled: cb.checked }, cb,
+      cb.checked ? 'Auto-Add imewashwa kwa mteja huyu.' : 'Auto-Add imezimwa kwa mteja huyu.');
   }
 
   function bcSetProtection(feature, cb) {
