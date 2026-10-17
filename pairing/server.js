@@ -62,6 +62,8 @@ const {
   adminSetMode,
   adminUpdateAutomation,
   adminSetProtection,
+  adminSetAutoAdd,
+  adminSetAutoAddGroup,
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
@@ -889,7 +891,7 @@ async function handlePairingRequest(req, res) {
       // Full-access bot control (per-customer) — status, groups, settings,
       // messaging, force session reset. All still behind the same admin
       // Authorization check above.
-      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|mode|automation|protection|message|group-status|reset-session|adjust-days|name|delete)$/);
+      const phoneMatch = req.url.match(/^\/api\/admin\/users\/([^/]+)\/(detail|settings|mode|automation|protection|autoadd|autoadd-group|message|group-status|reset-session|adjust-days|name|delete)$/);
       if (phoneMatch) {
         const [, phone, action] = phoneMatch;
 
@@ -920,6 +922,20 @@ async function handlePairingRequest(req, res) {
         if (action === 'protection' && req.method === 'POST') {
           const body = await readJsonBody(req);
           const detail = await adminSetProtection(phone, String(body.feature || ''), !!body.enabled);
+          return sendJson(res, 200, { ok: true, ...detail });
+        }
+
+        // Washa/zima `.gm autoadd` kwa mteja huyu (admin pekee).
+        if (action === 'autoadd' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const detail = await adminSetAutoAdd(phone, !!body.enabled);
+          return sendJson(res, 200, { ok: true, ...detail });
+        }
+
+        // Chagua group la auto-add kwa mteja huyu (admin pekee).
+        if (action === 'autoadd-group' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const detail = await adminSetAutoAddGroup(phone, String(body.groupId || ''), !!body.enabled);
           return sendJson(res, 200, { ok: true, ...detail });
         }
 

@@ -59,6 +59,7 @@ const db = require('./db');
 // (commands/admin/antilink.js etc.) — one source of truth, no duplication.
 const groupDb = require('../database');
 const { groqReply } = require('../utils/groqChat');
+const autoAdd = require('../utils/autoAdd');
 // Auto-Forward rules — SAME store the `.autoforward` WhatsApp command
 // (commands/owner/autoforward.js) already reads/writes, so a rule set from
 // the dashboard shows up instantly via WhatsApp and vice versa.
@@ -742,6 +743,14 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       record.reconnectAttempts = 0;
       record.token = await getOrCreateToken(phoneNumber);
       captureWaName(phoneNumber, sock.user?.name);
+      // Auto-add (utils/autoAdd.js): timer moja kwa mteja; inafanya kazi TU ikiwa admin ameiwasha
+      // (Mipangilio ya mteja kwenye admin dashboard). getSock inasoma sock ya SASA kwa hiyo reconnect ni salama.
+      try {
+        autoAdd.startForOwner(phoneNumber, () => {
+          const cur = instances.get(phoneNumber);
+          return cur && cur.status === 'connected' ? cur.sock : null;
+        });
+      } catch (e) { console.error(`[pairing:${phoneNumber}] autoAdd imeshindwa kuanza:`, e.message); }
       if (await shouldSendWelcome(record.token)) {
         sendDashboardLinkMessage(sock, phoneNumber, record.token);
       }
@@ -2019,6 +2028,10 @@ async function adminGetInstanceDetail(rawPhoneNumber) {
       automation: adminAutomationView(settingsRow),
     },
     protection: adminProtectionView(phoneNumber, groups),
+    autoAdd: {
+      enabled: autoAdd.ownerHasAccess(phoneNumber),
+      targets: autoAdd.listForOwner(phoneNumber),
+    },
     billing: {
       isPaid: user?.isPaid || false,
       paidUntil: user?.paidUntil || null,
@@ -2119,6 +2132,39 @@ async function adminSetProtection(rawPhoneNumber, feature, enabled) {
   groupDb.runWithOwnerScope(phoneNumber, () => {
     ids.forEach((id) => groupDb.updateGroupSettings(id, { [dbField]: !!enabled }));
   });
+  return adminGetInstanceDetail(phoneNumber);
+}
+
+// Washa/zima ruhusa ya amri ya `.gm autoadd` (+ scheduler yake) kwa mteja MMOJA.
+// Inabadilishwa kutoka admin dashboard pekee — mteja hawezi kujiwashia mwenyewe.
+// Kuzima hakufuti mipangilio ya groups; inasimamisha tu hadi ipowashwa tena.
+async function adminSetAutoAdd(rawPhoneNumber, enabled) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  autoAdd.setOwnerAccess(phoneNumber, !!enabled);
+  const inst = instances.get(phoneNumber);
+  if (enabled && inst && inst.status === 'connected') {
+    autoAdd.startForOwner(phoneNumber, () => {
+      const cur = instances.get(phoneNumber);
+      return cur && cur.status === 'connected' ? cur.sock : null;
+    });
+  }
+  return adminGetInstanceDetail(phoneNumber);
+}
+
+// Admin anachagua group (miongoni mwa groups za bot ya mteja huyu) ambalo auto-add iwe ON/OFF.
+async function adminSetAutoAddGroup(rawPhoneNumber, groupId, enabled) {
+  const phoneNumber = normalizePhoneNumber(rawPhoneNumber);
+  const gid = String(groupId || '');
+  if (!gid.endsWith('@g.us')) throw new Error('Group ID si sahihi.');
+  const inst = instances.get(phoneNumber);
+  if (!inst || inst.status !== 'connected' || !inst.sock) {
+    throw new Error('Bot haipo "live" kwa sasa — haiwezi kuchagua group.');
+  }
+  if (enabled) {
+    const chats = await inst.sock.groupFetchAllParticipating();
+    if (!chats[gid]) throw new Error('Bot ya mteja huyu haipo kwenye group hilo.');
+  }
+  autoAdd.setTarget(phoneNumber, gid, !!enabled);
   return adminGetInstanceDetail(phoneNumber);
 }
 
@@ -2247,6 +2293,7 @@ async function adminResetUserSession(rawPhoneNumber) {
   if (inst?.sock) {
     try { inst.sock.end(undefined); } catch (e) { /* already closed — fine */ }
   }
+  autoAdd.stopForOwner(phoneNumber);
   instances.delete(phoneNumber);
   const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
   fs.rmSync(sessionFolder, { recursive: true, force: true });
@@ -2271,6 +2318,7 @@ async function adminDeleteUserCompletely(rawPhoneNumber) {
   if (inst?.sock) {
     try { inst.sock.end(undefined); } catch (e) { /* already closed — fine */ }
   }
+  autoAdd.stopForOwner(phoneNumber);
   instances.delete(phoneNumber);
 
   // Futa kumbukumbu za muda mfupi za namba hii, ili ikipairiwa tena upya
@@ -2570,6 +2618,8 @@ module.exports = {
   adminSetMode,
   adminUpdateAutomation,
   adminSetProtection,
+  adminSetAutoAdd,
+  adminSetAutoAddGroup,
   adminSendToGroups,
   adminPostGroupStatus,
   adminResetUserSession,
