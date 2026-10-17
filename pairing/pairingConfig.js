@@ -24,8 +24,8 @@ const num = (name, def) => () => {
 const cfg = {
   // ── Pricing packages (TZS) — { days, price }, mpangilio = mpangilio wa kuonyeshwa ──
   PLANS: [
-    { days: 1, price: 300 },
-    { days: 3, price: 500 },
+    { days: 2, price: 500 },
+    { days: 3, price: 600 },
     { days: 5, price: 800 },
     { days: 7, price: 1000 },
     { days: 10, price: 1500 },
