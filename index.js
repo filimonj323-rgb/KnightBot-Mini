@@ -423,6 +423,35 @@ async function getWaVersion() {
 let pairingCodeRequested = false;
 
 // Main connection function
+// ── Cache ya RAM ya ujumbe kwa ajili ya retry (getMessage) ──────────────
+// Haiandiki Turso kabisa. Hakuna kikomo cha idadi: ujumbe wa zamani zaidi ya
+// RETRY_CACHE_TTL_HOURS (default 6) unafutwa kiotomatiki kila dakika 10.
+// Inapotea bot ikiwashwa upya (retry ya ujumbe wa zamani sana haitafanya kazi).
+const RETRY_CACHE_TTL_MS = Number(process.env.RETRY_CACHE_TTL_HOURS || 6) * 60 * 60 * 1000;
+const retryCache = new Map(); // "jid|id" -> { m: message, t: timestamp }
+const retryKey = (k) => `${k.remoteJid}|${k.id}`;
+function cacheForRetry(key, message) {
+  const k = retryKey(key);
+  retryCache.delete(k); // weka mwisho ili mpangilio ubaki wa zamani -> mpya
+  retryCache.set(k, { m: message, t: Date.now() });
+}
+function getCachedForRetry(key) {
+  if (!key?.id || !key?.remoteJid) return undefined;
+  const k = retryKey(key);
+  const e = retryCache.get(k);
+  if (!e) return undefined;
+  if (Date.now() - e.t > RETRY_CACHE_TTL_MS) { retryCache.delete(k); return undefined; }
+  return e.m;
+}
+// Futa ujumbe uliozeeka (Map inahifadhi mpangilio wa kuingizwa, kwa hiyo tunasimama kwenye wa kwanza ambao bado mpya)
+setInterval(() => {
+  const cutoff = Date.now() - RETRY_CACHE_TTL_MS;
+  for (const [k, e] of retryCache) {
+    if (e.t >= cutoff) break;
+    retryCache.delete(k);
+  }
+}, 10 * 60 * 1000).unref();
+
 let starting = false;
 async function startBot() {
   // Kinga: usiunde socket mbili kwa wakati mmoja (creds zilezile = conflict)
@@ -535,7 +564,8 @@ async function _startBot() {
     // upande wake, inaomba tuma tena). Kabla haikuwa hivi (ilirudisha
     // undefined kila mara), Baileys haikuwa na cha kutuma tena, na
     // mpokeaji alibaki na "Waiting for this message" milele.
-    getMessage: async (key) => (await getStoredMessage(sessionId, key)) || undefined
+    // RAM kwanza (bila gharama); Turso ni akiba tu kwa ujumbe wa zamani uliohifadhiwa kabla.
+    getMessage: async (key) => getCachedForRetry(key) || (await getStoredMessage(sessionId, key)) || undefined
   });
   mainSock = sock; // rejea ya kimataifa kwa ajili ya SIGTERM/SIGINT shutdown
 
@@ -625,7 +655,7 @@ async function _startBot() {
       // Okoa Turso "rows written": usihifadhi ujumbe wa watu wengine kwenye groups.
       // Retry/poll zinahitaji ujumbe wa bot yenyewe (fromMe) na DM tu.
       if (msg.key.remoteJid.endsWith('@g.us') && !msg.key.fromMe) continue;
-      saveMessageForRetry(sessionId, msg.key, msg.message).catch(() => {});
+      cacheForRetry(msg.key, msg.message); // RAM tu — hakuna Turso write
     }
   });
 
@@ -1241,6 +1271,13 @@ backupServer.listen(HTTP_PORT, () => {
   console.log(`[AutoBackup] Tayari kupokea backup kwenye port ${HTTP_PORT}${BACKUP_RECEIVE_PATH}`);
 });
 // ===== MWISHO WA AUTO-BACKUP =====
+
+// Fuatilia memory kila dakika 5 (inasaidia kujua kama kuna ukuaji au OOM)
+setInterval(() => {
+  const mb = (n) => Math.round(n / 1048576);
+  const m = process.memoryUsage();
+  console.log(`[MEM] rss=${mb(m.rss)}MB heap=${mb(m.heapUsed)}MB retryCache=${retryCache.size}`);
+}, 5 * 60 * 1000).unref();
 
 // Handle process termination
 process.on('uncaughtException', (err) => {
