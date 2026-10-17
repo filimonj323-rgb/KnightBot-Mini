@@ -386,8 +386,14 @@ module.exports = {
         // Bot ya mteja (pairing/instanceManager) ina sock.pairingOwnerId; bot kuu haina.
         // (Usilinganishe `sock !== global.currentSock` — amri hupokea Proxy ya sock wakati
         // mipangilio ya kufuta amri imewashwa, kwa hiyo rejea hazifanani hata kwa bot kuu.)
-        if (sock.pairingOwnerId) return extra.reply('❌ Feature hii inapatikana kwa bot kuu tu.');
-        if (!global.currentSock) return extra.reply('❌ Bot kuu haijaunganishwa bado — jaribu tena baada ya sekunde chache.');
+        // Bot ya mteja inaweza kutumia feature hii TU ikiwa admin ameiwasha kwenye admin dashboard
+        // (Mipangilio ya mteja huyo). Mipangilio yake imehifadhiwa kwa key ya "<namba>::<groupId>".
+        const owner = sock.pairingOwnerId || null;
+        if (owner) {
+          if (!autoAdd.ownerHasAccess(owner)) return extra.reply('🔒 Feature ya *auto-add* haijawashwa kwa akaunti yako. Wasiliana na admin aiwashe.');
+        } else if (!global.currentSock) {
+          return extra.reply('❌ Bot kuu haijaunganishwa bado — jaribu tena baada ya sekunde chache.');
+        }
 
         const first = args[1]?.toLowerCase();
         if (!first || first === 'help') {
@@ -400,7 +406,7 @@ module.exports = {
             '• .gm autoadd <group> now — jaribu kuongeza mmoja sasa hivi\n' +
             '• .gm autoadd status — hali ya groups zote\n\n' +
             '🕛 Default: *saa 6 usiku (00:00) hadi 05:00* EAT, mmoja kila dakika 15–35.\n' +
-            'ℹ️ Bot lazima iwe admin kwenye group lengwa. Walioondoka wenyewe hawaongezwi tena.'
+            'ℹ️ Bot iwe admin, AU group liruhusu members wa-add watu. Walioondoka wenyewe hawaongezwi tena.'
           );
         }
         if (first === 'status') return extra.reply(await autoAdd.statusText(sock));
@@ -408,11 +414,13 @@ module.exports = {
         let groupId;
         try { groupId = await resolveGroupId(sock, args[1]); } catch (e) { return extra.reply(`❌ ${e.message}`); }
         const action = args[2]?.toLowerCase();
+        const storeKey = autoAdd.keyFor(owner, groupId);
         const all = database.getAutoAddAll();
-        const cfg = all[groupId] || { ...autoAdd.DEFAULTS };
+        const cfg = all[storeKey] || { ...autoAdd.DEFAULTS };
         const meta = await sock.groupMetadata(groupId);
         const hh = (h) => String(h).padStart(2, '0') + ':00';
-        const save = () => { all[groupId] = cfg; database.saveAutoAddAll(all); };
+        // Soma store upya wakati wa kuhifadhi ili tusifute mabadiliko ya bots/wateja wengine.
+        const save = () => { const fresh = database.getAutoAddAll(); fresh[storeKey] = cfg; database.saveAutoAddAll(fresh); };
         const clampPerDay = (v) => Math.max(1, Math.min(autoAdd.MAX_PER_DAY_CAP, Math.floor(Number(v))));
 
         if (action === 'on') {
@@ -427,7 +435,7 @@ module.exports = {
             `✅ Auto-add *IMEWASHWA* kwa *${meta.subject}*\n\n` +
             `👥 Watu ${cfg.perDay} kwa siku, kutoka groups mbalimbali (random)\n` +
             `🕛 ${hh(cfg.startHour)}–${hh(cfg.endHour)} EAT\n\n` +
-            `⚠️ Bot lazima iwe admin kwenye group hili. Jaribu: *.gm autoadd ${args[1]} now*`
+            `⚠️ Bot iwe admin au group liruhusu members wa-add. Jaribu: *.gm autoadd ${args[1]} now*`
           );
         }
         if (action === 'off') {
