@@ -1210,6 +1210,46 @@ async function sendToSelfChat(phoneNumber, text) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Dashboard: hali ya muunganisho + QR ya namba ya mteja (kwa token yake).
+// • Bot ikiwa imeunganishwa → hali + namba tu.
+// • Bot haijalinkiwa → QR ya kulinki (scan kutoka Linked Devices). QR inalindwa na
+//   ukaguzi uleule wa "namba iliyoscan lazima iwe hii" (awaitingFirstLink).
+// ─────────────────────────────────────────────────────────────────────────
+async function getConnectionForToken(token) {
+  const phoneNumber = await getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+  const inst = instances.get(phoneNumber);
+  const status = inst ? inst.status : 'disconnected'; // 'pairing' | 'connecting' | 'connected' | 'disconnected' | 'error'
+  const out = {
+    phoneNumber,
+    status,
+    mode: inst ? (inst.mode || 'code') : null,
+    qr: null,
+    waName: null,
+    error: inst ? (inst.error || null) : null,
+  };
+  if (status === 'connected') {
+    out.waName = (inst.sock && inst.sock.user && inst.sock.user.name) || null;
+  } else if (status === 'pairing' && inst.mode === 'qr') {
+    out.qr = inst.qr || null; // inabadilika kila sekunde chache
+  }
+  return out;
+}
+
+async function startQrForToken(token) {
+  const phoneNumber = await getPhoneNumberByToken(token);
+  if (!phoneNumber) throw new Error('Dashboard link si sahihi.');
+  const r = await createOrPairInstance(phoneNumber, { mode: 'qr' });
+  return {
+    phoneNumber,
+    status: r.status,
+    mode: r.mode,
+    qr: r.qr || null,
+    error: r.error || null,
+  };
+}
+
 async function getInstanceByToken(token) {
   const phoneNumber = await getPhoneNumberByToken(token);
   if (!phoneNumber) return null;
@@ -2497,6 +2537,8 @@ module.exports = {
   assertActiveForToken,
   sendToSelfChat,
   getInstanceByToken,
+  getConnectionForToken,
+  startQrForToken,
   listGroups,
   postGroupStatusForToken,
   sendMessageToGroups,

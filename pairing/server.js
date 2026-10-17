@@ -33,6 +33,8 @@ const {
   previewMediaForToken,
   resolveMediaDownloadForToken,
   getSettingsForToken,
+  getConnectionForToken,
+  startQrForToken,
   updateSettingsForToken,
   updateAutomationForToken,
   updateModeForToken,
@@ -544,6 +546,20 @@ async function handlePairingRequest(req, res) {
       const resolved = await resolveMediaDownloadForToken(token, youtubeUrl, type);
       res.writeHead(302, { Location: resolved.download });
       return res.end();
+    }
+
+    // Dashboard: hali ya muunganisho + QR (mteja mwenyewe, kwa token).
+    if (req.method === 'GET' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/connection')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/connection', ''));
+      const conn = await getConnectionForToken(token);
+      return sendJson(res, 200, { ok: true, ...conn });
+    }
+
+    // Dashboard: anzisha QR ya kulinki namba ya mteja (bot haijaunganishwa).
+    if (req.method === 'POST' && req.url.startsWith('/api/dashboard/') && req.url.endsWith('/connection/qr')) {
+      const token = decodeURIComponent(req.url.split('/api/dashboard/')[1].replace('/connection/qr', ''));
+      const r = await startQrForToken(token);
+      return sendJson(res, 200, { ok: true, ...r });
     }
 
     // Settings: read a customer's current (optional) prefix/bot name.
