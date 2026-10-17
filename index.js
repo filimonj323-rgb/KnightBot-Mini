@@ -216,6 +216,7 @@ let handler; // populated by loadBaileysBridge()
 // container ya zamani inashikilia connection mpaka OS iikate kwa nguvu,
 // ikisababisha "mgongano wa connection statusCode 440" na container mpya).
 let mainSock = null;
+let mainDispose = null; // flush ya creds+keys Turso — inaitwa wakati wa shutdown
 const { groqReply } = require('./utils/groqChat');
 const fs = require('fs');
 const path = require('path');
@@ -540,7 +541,7 @@ async function _startBot() {
   // init/uhamisho/seeding), hivyo hii kimsingi hairuhusu ucheleweshaji wa
   // ziada kabisa.
 
-  const [{ state, saveCreds }, version] = await Promise.all([
+  const [{ state, saveCreds, dispose }, version] = await Promise.all([
     useTursoAuthState(sessionId),
     waVersionPromise,
   ]);
@@ -568,6 +569,7 @@ async function _startBot() {
     getMessage: async (key) => getCachedForRetry(key) || (await getStoredMessage(sessionId, key)) || undefined
   });
   mainSock = sock; // rejea ya kimataifa kwa ajili ya SIGTERM/SIGINT shutdown
+  mainDispose = dispose;
 
   // Bind store to socket
   store.bind(sock.ev);
@@ -606,7 +608,11 @@ async function _startBot() {
   // "chakavu" (imepitwa na hali mpya ya connection) kufikia mtumiaji
   // anapoiandika kwenye simu, na kusababisha "couldn't link a device".
   const pairNumber = String(process.env.PAIR_NUMBER || config.pairNumber || '').replace(/[^0-9]/g, '');
-  if (pairNumber && !state.creds.registered && !pairingCodeRequested) {
+  // `!state.creds.me`: creds zenye `me` lakini registered=false ni masalio ya pairing
+  // iliyoisha — socket hii inajaribu LOGIN (si usajili), WhatsApp itaikataa kwa 401 na
+  // handler ya 'close' itafuta session na kuanza upya. Kuomba code HAPA ni kutoa code
+  // feki (haitoi notification). Code halisi inaombwa baada ya session kufutwa (creds mpya).
+  if (pairNumber && !state.creds.registered && !state.creds.me && !pairingCodeRequested) {
     // Herufi 8 hasa (A-Z, 0-9) ndizo tu WhatsApp inazokubali kama custom
     // code — sawa na uthibitisho unaotumika kwenye pairing/instanceManager.js.
     // Isipokidhi hilo, tunarudi kwenye random code ya WhatsApp badala ya
@@ -619,8 +625,9 @@ async function _startBot() {
 
     console.log(`📲 Naomba pairing code kwa namba ${pairNumber.slice(0, 5)}****${pairNumber.slice(-2)} (${process.env.PAIR_NUMBER ? 'Railway PAIR_NUMBER' : 'config.pairNumber'}) — notification ya WhatsApp inaenda kwenye namba hii.`);
     pairingCodeRequested = true; // zuia jaribio lolote lijalo la startBot() (reconnect) lisiombe code nyingine
-    setTimeout(() => {
+    const requestCodeOnce = (attempt = 1) => {
       if (state.creds.registered) return; // ime-link tayari kabla hatujafika hapa — usiombe code bure
+      if (sock !== mainSock) return;      // socket chakavu — usiombe code juu yake
       sock.requestPairingCode(pairNumber, customCode || undefined)
         .then((rawCode) => {
           const code = rawCode.match(/.{1,4}/g).join('-');
@@ -629,16 +636,25 @@ async function _startBot() {
           console.log('ℹ️  Ikiwa namba haikubali code hii ("couldn\'t link a device"), tumia QR CODE inayoonekana hapa chini (au juu, ikitokea kabla ya hii) badala yake — zote mbili zinaelekea session moja.\n\n');
         })
         .catch((e) => {
+          // Websocket bado haijafunguka (haijafika kwa WhatsApp) — jaribu tena bila hatari ya abuse
+          if (/connection closed|not open|connecting/i.test(e.message || '') && attempt < 5) {
+            console.log(`⏳ Socket bado haijawa tayari (${e.message}) — najaribu tena kuomba code (${attempt}/4)...`);
+            return setTimeout(() => requestCodeOnce(attempt + 1), 3000);
+          }
           console.error('❌ Imeshindwa kupata pairing code:', e.message);
           console.log('ℹ️  Tumia QR CODE kwenye logs badala yake kuunganisha (WhatsApp > Linked Devices > Link a device).');
           pairingCodeRequested = false; // hitilafu ya kweli (si kufungwa na WhatsApp) — ruhusu jaribio jingine
         });
-    }, 3000);
+    };
+    setTimeout(() => requestCodeOnce(), 3000);
   }
 
   // Watchdog for inactive socket (Baileys bug fix)
   let lastActivity = Date.now();
-  const INACTIVITY_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+  // Imezimwa kwa default: Baileys yenyewe ina keep-alive (inafunga socket iliyokufa kwa 408).
+  // Kulazimisha reconnect kila baada ya dakika 30 bila ujumbe = login mpya bila sababu
+  // (WhatsApp huona kama shughuli isiyo ya kawaida). Washa kwa INACTIVITY_TIMEOUT_MIN=<dakika>.
+  const INACTIVITY_TIMEOUT = Number(process.env.INACTIVITY_TIMEOUT_MIN || 0) * 60 * 1000;
 
   // Update on every message
   sock.ev.on('messages.upsert', () => {
@@ -661,7 +677,7 @@ async function _startBot() {
 
   // Check every 5 min
   const watchdogInterval = setInterval(async () => {
-    if (Date.now() - lastActivity > INACTIVITY_TIMEOUT && sock.ws.readyState === 1) { // WebSocket open but inactive
+    if (INACTIVITY_TIMEOUT > 0 && Date.now() - lastActivity > INACTIVITY_TIMEOUT && sock.ws.readyState === 1) { // WebSocket open but inactive
       console.log('⚠️ No activity detected. Forcing reconnect...');
       await sock.end(undefined, undefined, { reason: 'inactive' });
       clearInterval(watchdogInterval);
@@ -730,6 +746,15 @@ async function _startBot() {
 
       // Process inazima (deploy mpya) — usianzishe socket mpya wala usifute session
       if (shuttingDown) return;
+
+      // 440 = connectionReplaced: container/process nyingine imechukua creds hizi (mf. deploy
+      // mpya Railway ikiwa bado inaingiliana na ya zamani). Kuunganisha tena papo hapo
+      // kunaleta mgongano usio na mwisho (ping-pong) — subiri kidogo.
+      if (statusCode === 440) {
+        console.log('⚠️ connectionReplaced (440) — instance nyingine inatumia session hii. Nasubiri 30s kabla ya kujaribu tena...');
+        setTimeout(() => startBot(), 30000);
+        return;
+      }
 
       if (statusCode !== DisconnectReason.loggedOut) {
         setTimeout(() => startBot(), 3000);
@@ -1326,6 +1351,16 @@ const gracefulShutdown = async (signal) => {
     mainSock?.end?.(new Error('shutdown'));
   } catch (e) {
     // Silent
+  }
+  // Hifadhi creds+keys Turso KABLA ya process.exit — vinginevyo exit(0) inakata flush
+  // ya session-db inayoendelea (kuna throttle ya sekunde 5) na restart inapata session chakavu.
+  try {
+    await Promise.race([
+      Promise.resolve(mainDispose && mainDispose()),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+  } catch (e) {
+    console.error('[shutdown] imeshindwa kuhifadhi session:', e.message);
   }
   try {
     if (pocketBridgeProcess) {
