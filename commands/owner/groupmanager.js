@@ -8,6 +8,7 @@ const { downloadContentFromMessage } = global.__baileys;
 const { sendButtons } = require('gifted-btns');
 const pendingGroupStatus = require('../../utils/pendingGroupStatus');
 const { sendGroupStatus } = require('../../utils/groupStatusVideo');
+const { addMembers, parseNumbers, formatResult } = require('../../utils/addMembers');
 
 const PURPLE_COLOR = '#9C27B0';
 // Kikomo cha rows kwenye orodha ya button - epuka ujumbe mkubwa mno
@@ -119,6 +120,7 @@ module.exports = {
           `• .gm antispam <groupId> on/off\n` +
           `• .gm mute <groupId> on/off\n\n` +
           `*Members*\n` +
+          `• .gm add <groupId> <namba> [namba2 ...] — Ongeza members\n` +
           `• .gm kick <groupId> <namba>\n` +
           `• .gm promote <groupId> <namba>\n` +
           `• .gm demote <groupId> <namba>\n\n` +
@@ -372,6 +374,25 @@ module.exports = {
           `🔇 *${meta.subject}*\n\n` +
           `Mute: *${val === 'on' ? 'ON ✅ (Admins tu waweza kutuma)' : 'OFF ❌ (Wote waweza kutuma)'}*`
         );
+      }
+
+      // ══════════════════════════════════════
+      // KICK - Toa member
+      // ══════════════════════════════════════
+      if (opt === 'add') {
+        let groupId = args[1];
+        const { valid, invalid } = parseNumbers(args.slice(2));
+        if (!groupId || valid.length === 0) {
+          return extra.reply(
+            '❌ Tumia: .gm add <namba ya group|groupId> <namba> [namba2 ...]\n\n' +
+            'Mfano: .gm add 3 255712345678 0655123456'
+          );
+        }
+        try { groupId = await resolveGroupId(sock, groupId); } catch (e) { return extra.reply(`❌ ${e.message}`); }
+
+        if (valid.length > 1) await extra.reply(`⏳ Inaongeza ${valid.length} members... Subiri.`);
+        const res = await addMembers(sock, groupId, valid);
+        return extra.reply(formatResult(res, invalid));
       }
 
       // ══════════════════════════════════════
