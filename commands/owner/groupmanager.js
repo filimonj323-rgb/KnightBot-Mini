@@ -383,7 +383,11 @@ module.exports = {
       if (opt === 'autoadd') {
         const database = require('../../database');
         const autoAdd = require('../../utils/autoAdd');
-        if (sock !== global.currentSock) return extra.reply('❌ Feature hii inapatikana kwa bot kuu tu.');
+        // Bot ya mteja (pairing/instanceManager) ina sock.pairingOwnerId; bot kuu haina.
+        // (Usilinganishe `sock !== global.currentSock` — amri hupokea Proxy ya sock wakati
+        // mipangilio ya kufuta amri imewashwa, kwa hiyo rejea hazifanani hata kwa bot kuu.)
+        if (sock.pairingOwnerId) return extra.reply('❌ Feature hii inapatikana kwa bot kuu tu.');
+        if (!global.currentSock) return extra.reply('❌ Bot kuu haijaunganishwa bado — jaribu tena baada ya sekunde chache.');
 
         const first = args[1]?.toLowerCase();
         if (!first || first === 'help') {
