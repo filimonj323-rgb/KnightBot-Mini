@@ -66,13 +66,20 @@ async function doSplit(buffer, maxSeconds) {
     }
 
     const pattern = path.join(tmpDir, 'part_%03d.mp4');
-    const args = [
+    // Hakuna maandishi ya stderr kwenye kosa la awali => ffmpeg iliuawa (SIGKILL/OOM),
+    // kwa kawaida kwa sababu ilitumia threads nyingi (default = cores zote za host ya
+    // Railway) na kuzidi kikomo cha memory ya container. Hapa tunazuia threads/lookahead,
+    // na tukishindwa tunajaribu mara ya pili kwa mipangilio myepesi zaidi.
+    const makeArgs = (o) => [
       '-hide_banner', '-loglevel', 'error', '-y',
+      '-threads', String(o.threads),
       '-i', inPath,
       '-map', '0:v:0', '-map', '0:a:0?',
-      // Punguza ukubwa: upande mrefu zaidi usizidi 1280px
-      '-vf', "scale='if(gt(iw,ih),min(1280,iw),-2)':'if(gt(iw,ih),-2,min(1280,ih))'",
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '27', '-pix_fmt', 'yuv420p',
+      // Punguza ukubwa: upande mrefu zaidi usizidi o.maxSide px
+      '-vf', `scale='if(gt(iw,ih),min(${o.maxSide},iw),-2)':'if(gt(iw,ih),-2,min(${o.maxSide},ih))'`,
+      '-threads', String(o.threads),
+      '-c:v', 'libx264', '-preset', o.preset, '-crf', String(o.crf), '-pix_fmt', 'yuv420p',
+      '-x264-params', `threads=${o.threads}:lookahead-threads=1:rc-lookahead=${o.lookahead}`,
       '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
       // Keyframe kila mwanzo wa kipande ili kukata kuwe sahihi
       '-force_key_frames', `expr:gte(t,n_forced*${maxSeconds})`,
@@ -83,12 +90,35 @@ async function doSplit(buffer, maxSeconds) {
       pattern,
     ];
 
-    await new Promise((resolve, reject) => {
+    const runFfmpeg = (args) => new Promise((resolve, reject) => {
       execFile(ffmpegBin, args, { timeout: 15 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, _o, stderr) => {
-        if (err) return reject(new Error('ffmpeg imeshindwa kukata video: ' + (String(stderr).trim().slice(-300) || err.message)));
-        resolve();
+        if (!err) return resolve();
+        const detail = String(stderr || '').trim().slice(-300);
+        const sig = err.signal ? ` [signal: ${err.signal}${err.signal === 'SIGKILL' ? ' — inaonekana memory ya server haitoshi' : ''}]` : '';
+        reject(new Error('ffmpeg imeshindwa kukata video: ' + (detail || String(err.message).split('\n')[0].slice(0, 120)) + sig));
       });
     });
+
+    const attempts = [
+      { threads: 2, preset: 'veryfast',  crf: 27, maxSide: 1280, lookahead: 10 },
+      { threads: 1, preset: 'ultrafast', crf: 30, maxSide: 720,  lookahead: 0  },
+    ];
+    let lastErr = null;
+    for (const o of attempts) {
+      // Futa vipande vya jaribio lililopita
+      for (const f of fs.readdirSync(tmpDir)) {
+        if (/^part_/.test(f)) fs.rmSync(path.join(tmpDir, f), { force: true });
+      }
+      try {
+        await runFfmpeg(makeArgs(o));
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        console.error('[groupStatusVideo]', e.message, '| mipangilio:', JSON.stringify(o));
+      }
+    }
+    if (lastErr) throw lastErr;
 
     const files = fs.readdirSync(tmpDir).filter((f) => /^part_\d+\.mp4$/.test(f)).sort();
     const parts = files.map((f) => fs.readFileSync(path.join(tmpDir, f))).filter((b) => b.length > 0);
