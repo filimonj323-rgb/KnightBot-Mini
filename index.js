@@ -839,6 +839,9 @@ async function _startBot() {
       // Initialize anti-call feature
       handler.initializeAntiCall(sock);
 
+      // Auto-add: scheduler ya kuongeza watu kwenye group lengwa usiku (timer moja tu, salama kuitwa tena)
+      try { require('./utils/autoAdd').start(() => global.currentSock); } catch (e) { console.error('[autoAdd] imeshindwa kuanza:', e.message); }
+
       // Cleanup old chats (keep only active ones, e.g., last touched <1 day)
       const now = Date.now();
       for (const [jid, chatMsgs] of store.messages.entries()) {

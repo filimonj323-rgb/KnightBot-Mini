@@ -35,6 +35,7 @@ const WARNINGS_DB = path.join(DB_PATH, 'warnings.json');
 const MODS_DB = path.join(DB_PATH, 'mods.json');
 const BOTSETTINGS_DB = path.join(DB_PATH, 'botsettings.json');
 const LEFT_DB = path.join(DB_PATH, 'leftmembers.json');
+const AUTOADD_DB = path.join(DB_PATH, 'autoadd.json');
 
 // Ramani kutoka path la faili la ndani → "store_key" kwenye Turso.
 const STORE_KEYS = {
@@ -44,6 +45,7 @@ const STORE_KEYS = {
   [MODS_DB]: 'mods',
   [BOTSETTINGS_DB]: 'botsettings',
   [LEFT_DB]: 'leftmembers',
+  [AUTOADD_DB]: 'autoadd',
 };
 
 // Initialize database directory
@@ -64,6 +66,7 @@ initDB(WARNINGS_DB, {});
 initDB(MODS_DB, { moderators: [] });
 initDB(BOTSETTINGS_DB, { __main__: { chatbotInbox: false, chatbotGroup: false } });
 initDB(LEFT_DB, {});
+initDB(AUTOADD_DB, {});
 
 // ── TURSO BACKING STORE ─────────────────────────────────────────────────
 let tursoSchemaReady = false;
@@ -362,6 +365,10 @@ const removeLeftMember = (groupId, userId) => {
   return false;
 };
 
+// Auto-add (utils/autoAdd.js): { "<targetGroupId>": { enabled, perDay, startHour, endHour, count, ... } }
+const getAutoAddAll = () => readDB(AUTOADD_DB);
+const saveAutoAddAll = (all) => writeDB(AUTOADD_DB, all);
+
 // Bot-wide settings (chatbot on/off, n.k.) — Turso-backed kama groups/warnings
 // ili zisirudi OFF kimya kimya kila container inaporestart. Ime-scope kwa
 // owner (sawa na getGroupSettings/updateGroupSettings) ili mteja mmoja wa
@@ -414,5 +421,7 @@ module.exports = {
   updateBotSettings,
   addLeftMember,
   getLeftMembers,
-  removeLeftMember
+  removeLeftMember,
+  getAutoAddAll,
+  saveAutoAddAll
 };
