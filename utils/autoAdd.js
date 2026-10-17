@@ -22,6 +22,38 @@ const MAX_TRIES_PER_RUN = 3;
 
 const DEFAULTS = { enabled: false, perDay: 10, startHour: 0, endHour: 5 };
 
+// ── Owner scoping (bots za wateja wa pairing/instanceManager.js) ──
+// Bot kuu: key ya store = groupId (kama zamani, haibadiliki).
+// Bot ya mteja: key = "<namba ya mteja>::<groupId>" (muundo ule ule wa database.js scopedGroupKey),
+// kwa hiyo mteja mmoja hagusi mipangilio ya mwingine wala ya bot kuu.
+const SCOPE_SEP = '::';
+const keyFor = (owner, groupId) => (owner ? `${owner}${SCOPE_SEP}${groupId}` : groupId);
+const ownerOfKey = (k) => (String(k).includes(SCOPE_SEP) ? String(k).split(SCOPE_SEP)[0] : null);
+const groupOfKey = (k) => (String(k).includes(SCOPE_SEP) ? String(k).slice(String(k).indexOf(SCOPE_SEP) + SCOPE_SEP.length) : String(k));
+
+// Ruhusa ya feature kwa mteja — inawashwa/kuzimwa na admin PEKEE (admin dashboard > Mipangilio).
+// Inahifadhiwa kwenye botsettings (Turso-backed, owner-scoped), default = OFF.
+function ownerHasAccess(owner) {
+  if (!owner) return true; // bot kuu haina gate
+  try { return database.runWithOwnerScope(owner, () => database.getBotSettings().autoAddAccess === true); }
+  catch { return false; }
+}
+function setOwnerAccess(owner, enabled) {
+  return database.runWithOwnerScope(owner, () => database.updateBotSettings({ autoAddAccess: !!enabled }));
+}
+
+// Hifadhi entry MOJA tu kwa kusoma store upya (tick inachukua dakika kadhaa — haitakiwi kuandika juu
+// ya mabadiliko ya wengine). Sehemu za runtime tu ndizo zinaandikwa; enabled/perDay/dirisha vya
+// sasa vinabaki kama mtumiaji alivyovibadilisha wakati run inaendelea.
+const RUNTIME_FIELDS = ['count', 'tried', 'totalAdded', 'lastRun', 'lastResult', 'nextAt', 'windowKey'];
+function saveEntry(storeKey, cfg) {
+  const fresh = database.getAutoAddAll();
+  const cur = fresh[storeKey] || cfg;
+  for (const f of RUNTIME_FIELDS) if (cfg[f] !== undefined) cur[f] = cfg[f];
+  fresh[storeKey] = cur;
+  database.saveAutoAddAll(fresh);
+}
+
 const rand = (a, b) => a + Math.random() * (b - a);
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const shuffle = (arr) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -98,13 +130,18 @@ async function runOnce(sock, target, cfg, opts = {}) {
   let meta;
   try { meta = await sock.groupMetadata(target); }
   catch (e) { return { ok: false, msg: `Imeshindwa kusoma group lengwa: ${e.message}` }; }
-  if (!isBotAdminIn(meta, sock)) return { ok: false, msg: `Bot si admin kwenye *${meta.subject}*` };
+  // Bot haihitaji kuwa admin: inatosha group liruhusu "members wanaweza kuongeza watu" (memberAddMode),
+  // au bot iwe admin. Kama hakuna kati ya hivyo (au field haipatikani kwenye toleo la Baileys) tunajaribu
+  // MARA MOJA tu kwa kila run na hatumchomi mtu aliyejaribiwa kwa jibu la 403 (linaweza kuwa ni ukosefu wa ruhusa).
+  const isAdmin = isBotAdminIn(meta, sock);
+  const mayLackPermission = !isAdmin && meta.memberAddMode !== true;
+  const maxTries = mayLackPermission ? 1 : MAX_TRIES_PER_RUN;
 
   cfg.tried = cfg.tried || {};
   for (const [k, v] of Object.entries(cfg.tried)) if (Date.now() - v.t > TRIED_TTL_MS) delete cfg.tried[k]; // safisha
 
   let lastReason = '';
-  for (let i = 0; i < MAX_TRIES_PER_RUN; i++) {
+  for (let i = 0; i < maxTries; i++) {
     const cand = await pickCandidate(sock, target, cfg, meta);
     if (!cand) return { ok: false, msg: lastReason || 'Hakuna mtu mpya wa kuongeza (wote wameshajaribiwa au wapo tayari)' };
 
@@ -118,26 +155,33 @@ async function runOnce(sock, target, cfg, opts = {}) {
       cfg.totalAdded = (cfg.totalAdded || 0) + 1;
       return { ok: true, msg: `Ameongezwa ${cand.phone} (kutoka ${cand.fromGroup}) → ${meta.subject}`, phone: cand.phone };
     }
+    if (mayLackPermission && res.privacy.length && !res.added.length) {
+      return { ok: false, msg: `Imekataliwa kwenye *${meta.subject}* — bot si admin na group halionekani kuruhusu members kuongeza watu (au mtu ana privacy). Weka bot kuwa admin au ruhusu members wa-add.` };
+    }
     const why = res.privacy.length ? 'privacy' : res.recentlyLeft.length ? 'ameondoka karibuni' : res.notOnWA.length ? 'hayupo WhatsApp' : res.already.length ? 'tayari yupo' : 'imeshindwa';
     cfg.tried[cand.phone] = { t: Date.now(), s: why };
     lastReason = `${cand.phone}: ${why}`;
-    if (i < MAX_TRIES_PER_RUN - 1) await sleep(rand(15000, 45000));
+    if (i < maxTries - 1) await sleep(rand(15000, 45000));
   }
-  return { ok: false, msg: `Majaribio ${MAX_TRIES_PER_RUN} hayakufanikiwa (mwisho: ${lastReason})` };
+  return { ok: false, msg: `Majaribio ${maxTries} hayakufanikiwa (mwisho: ${lastReason})` };
 }
 
 // ── Scheduler ──
 let timer = null;
-let running = false;
+const running = new Set(); // "__main__" au namba ya mteja — kila mmoja ana lock yake
 
-async function tick(getSock, opts = {}) {
-  if (running) return;
-  running = true;
+async function tick(getSock, opts = {}, owner = null) {
+  const lock = owner || '__main__';
+  if (running.has(lock)) return;
+  running.add(lock);
   try {
     const sock = getSock();
     if (!sock) return;
+    if (owner && !ownerHasAccess(owner)) return; // admin amezima feature kwa mteja huyu
     const all = database.getAutoAddAll();
-    for (const [target, cfg] of Object.entries(all)) {
+    for (const [storeKey, cfg] of Object.entries(all)) {
+      if (ownerOfKey(storeKey) !== owner) continue; // bot kuu inagusa za bot kuu tu; mteja zake tu
+      const target = groupOfKey(storeKey);
       if (!cfg.enabled) continue;
       const now = eatNow(opts.now);
       if (!inWindow(cfg, now.hour)) continue;
@@ -147,23 +191,26 @@ async function tick(getSock, opts = {}) {
         cfg.windowKey = key;
         cfg.count = 0;
         cfg.nextAt = Date.now() + rand(0, 15) * 60000;
-        database.saveAutoAddAll(all);
+        saveEntry(storeKey, cfg);
       }
       if ((cfg.count || 0) >= Math.min(cfg.perDay, MAX_PER_DAY_CAP)) continue;
       if (Date.now() < (cfg.nextAt || 0)) continue;
 
-      const r = await runOnce(sock, target, cfg, opts);
+      const r = owner
+        ? await database.runWithOwnerScope(owner, () => runOnce(sock, target, cfg, opts))
+        : await runOnce(sock, target, cfg, opts);
       cfg.lastRun = Date.now();
       cfg.lastResult = r.msg;
       cfg.nextAt = Date.now() + (r.ok ? rand(MIN_GAP_MIN, MAX_GAP_MIN) : 10) * 60000;
-      if (r.ok) console.log(`[autoAdd] ✅ ${r.msg} (${cfg.count}/${cfg.perDay})`);
-      else console.log(`[autoAdd] ⚠️ ${r.msg}`);
-      database.saveAutoAddAll(all);
+      const tag = owner ? `[autoAdd:${owner}]` : '[autoAdd]';
+      if (r.ok) console.log(`${tag} ✅ ${r.msg} (${cfg.count}/${cfg.perDay})`);
+      else console.log(`${tag} ⚠️ ${r.msg}`);
+      saveEntry(storeKey, cfg);
     }
   } catch (e) {
     console.error('[autoAdd] tick error:', e.message);
   } finally {
-    running = false;
+    running.delete(lock);
   }
 }
 
@@ -175,9 +222,47 @@ function start(getSock) {
   console.log('[autoAdd] scheduler imeanza (angalia kila dakika 3, dirisha la usiku EAT).');
 }
 
-async function statusText(sock) {
+// Bot ya mteja (pairing): timer moja kwa kila mteja. getSock inarudisha sock ya SASA ya mteja
+// (au null ikiwa haijaunganishwa) kwa hiyo reconnect haihitaji kuanzisha upya. Salama kuitwa mara nyingi.
+const ownerTimers = new Map();
+function startForOwner(owner, getSock) {
+  if (!owner || ownerTimers.has(owner)) return;
+  const t = setInterval(() => tick(getSock, {}, owner), TICK_MS);
+  if (t.unref) t.unref();
+  ownerTimers.set(owner, t);
+}
+function stopForOwner(owner) {
+  const t = ownerTimers.get(owner);
+  if (t) { clearInterval(t); ownerTimers.delete(owner); }
+}
+
+// Admin dashboard: chagua/ondoa group lengwa la mteja. Inaunda entry yenye DEFAULTS ikiwa haipo;
+// kuzima kunaacha mipangilio na historia (tried/totalAdded) kama ilivyo.
+function setTarget(owner, groupId, enabled) {
+  const k = keyFor(owner, groupId);
   const all = database.getAutoAddAll();
-  const targets = Object.entries(all);
+  const cfg = all[k] || { ...DEFAULTS };
+  cfg.enabled = !!enabled;
+  if (enabled) cfg.windowKey = null; // quota ianze upya
+  all[k] = cfg;
+  database.saveAutoAddAll(all);
+  return cfg;
+}
+
+// Muhtasari wa mipangilio ya mteja mmoja (kwa admin dashboard)
+function listForOwner(owner) {
+  const out = [];
+  for (const [k, c] of Object.entries(database.getAutoAddAll())) {
+    if (ownerOfKey(k) !== owner) continue;
+    out.push({ groupId: groupOfKey(k), enabled: !!c.enabled, perDay: c.perDay, count: c.count || 0, totalAdded: c.totalAdded || 0, lastResult: c.lastResult || null });
+  }
+  return out;
+}
+
+async function statusText(sock) {
+  const owner = sock?.pairingOwnerId || null;
+  const all = database.getAutoAddAll();
+  const targets = Object.entries(all).filter(([k]) => ownerOfKey(k) === owner).map(([k, c]) => [groupOfKey(k), c]);
   if (!targets.length) return 'ℹ️ Hakuna group lililowekwa auto-add bado.\nTumia: *.gm autoadd <namba|groupId> on*';
   let names = {};
   try { for (const g of Object.values(await sock.groupFetchAllParticipating())) names[g.id] = g.subject; } catch {}
@@ -194,4 +279,7 @@ async function statusText(sock) {
   return out.join('\n').trim();
 }
 
-module.exports = { start, tick, runOnce, statusText, DEFAULTS, MAX_PER_DAY_CAP, eatNow, inWindow, windowKey };
+module.exports = {
+  start, tick, runOnce, statusText, DEFAULTS, MAX_PER_DAY_CAP, eatNow, inWindow, windowKey,
+  keyFor, setTarget, ownerHasAccess, setOwnerAccess, startForOwner, stopForOwner, listForOwner,
+};
