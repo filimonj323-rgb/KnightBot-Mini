@@ -1475,6 +1475,21 @@ const handleGroupUpdate = async (sock, update) => {
       return;
     }
     
+    // Rekodi walioondoka/kutolewa kwa ajili ya `.gm restore` — INAFANYA KAZI hata
+    // goodbye ikiwa imezimwa (kabla ya early-return hapa chini).
+    // Rekodi TU kwenye groups ambazo bot ni admin (vinginevyo restore haiwezi kuongeza watu).
+    if (action === 'remove' && await isBotAdmin(sock, id)) {
+      for (const participant of participants || []) {
+        try {
+          let jid = typeof participant === 'string' ? participant : (participant?.id || participant?.jid || participant?.participant);
+          // Pendelea namba halisi (s.whatsapp.net) — 'add' inahitaji hiyo, si LID
+          const phone = typeof participant === 'object' ? participant?.phoneNumber : null;
+          if (phone && phone.endsWith('@s.whatsapp.net')) jid = phone;
+          if (jid && jid !== sock.user?.id?.split(':')[0] + '@s.whatsapp.net') database.addLeftMember(id, jid);
+        } catch (e) { /* usivunje handler kwa sababu ya rekodi */ }
+      }
+    }
+
     const groupSettings = database.getGroupSettings(id);
     
     if (!groupSettings.welcome && !groupSettings.goodbye) return;

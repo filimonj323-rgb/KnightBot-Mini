@@ -34,6 +34,7 @@ const USERS_DB = path.join(DB_PATH, 'users.json');
 const WARNINGS_DB = path.join(DB_PATH, 'warnings.json');
 const MODS_DB = path.join(DB_PATH, 'mods.json');
 const BOTSETTINGS_DB = path.join(DB_PATH, 'botsettings.json');
+const LEFT_DB = path.join(DB_PATH, 'leftmembers.json');
 
 // Ramani kutoka path la faili la ndani → "store_key" kwenye Turso.
 const STORE_KEYS = {
@@ -42,6 +43,7 @@ const STORE_KEYS = {
   [WARNINGS_DB]: 'warnings',
   [MODS_DB]: 'mods',
   [BOTSETTINGS_DB]: 'botsettings',
+  [LEFT_DB]: 'leftmembers',
 };
 
 // Initialize database directory
@@ -61,6 +63,7 @@ initDB(USERS_DB, {});
 initDB(WARNINGS_DB, {});
 initDB(MODS_DB, { moderators: [] });
 initDB(BOTSETTINGS_DB, { __main__: { chatbotInbox: false, chatbotGroup: false } });
+initDB(LEFT_DB, {});
 
 // ── TURSO BACKING STORE ─────────────────────────────────────────────────
 let tursoSchemaReady = false;
@@ -317,6 +320,48 @@ const isModerator = (userId) => {
   return mods.includes(userId);
 };
 
+// Left members — watu walioondoka/kutolewa kwenye group (kwa `.gm restore`).
+// Muundo: { "<groupKey>": { "<userJid>": <timestamp ya kuondoka> } }.
+// groupKey ime-scope kwa owner (sawa na getGroupSettings). Rekodi zaidi ya
+// siku 30 zinafutwa kiotomatiki.
+const LEFT_MEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+const addLeftMember = (groupId, userId) => {
+  if (!groupId || !userId) return false;
+  const key = scopedGroupKey(groupId);
+  const all = readDB(LEFT_DB);
+  if (!all[key]) all[key] = {};
+  all[key][userId] = Date.now();
+  return writeDB(LEFT_DB, all);
+};
+
+const getLeftMembers = (groupId) => {
+  const key = scopedGroupKey(groupId);
+  const all = readDB(LEFT_DB);
+  const group = all[key] || {};
+  const cutoff = Date.now() - LEFT_MEMBER_TTL_MS;
+  const fresh = {};
+  let pruned = false;
+  for (const [userId, ts] of Object.entries(group)) {
+    if (ts >= cutoff) fresh[userId] = ts; else pruned = true;
+  }
+  if (pruned) {
+    all[key] = fresh;
+    writeDB(LEFT_DB, all);
+  }
+  return fresh;
+};
+
+const removeLeftMember = (groupId, userId) => {
+  const key = scopedGroupKey(groupId);
+  const all = readDB(LEFT_DB);
+  if (all[key] && userId in all[key]) {
+    delete all[key][userId];
+    return writeDB(LEFT_DB, all);
+  }
+  return false;
+};
+
 // Bot-wide settings (chatbot on/off, n.k.) — Turso-backed kama groups/warnings
 // ili zisirudi OFF kimya kimya kila container inaporestart. Ime-scope kwa
 // owner (sawa na getGroupSettings/updateGroupSettings) ili mteja mmoja wa
@@ -366,5 +411,8 @@ module.exports = {
   removeModerator,
   isModerator,
   getBotSettings,
-  updateBotSettings
+  updateBotSettings,
+  addLeftMember,
+  getLeftMembers,
+  removeLeftMember
 };
