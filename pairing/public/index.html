@@ -136,17 +136,33 @@
     <div class="hint">Mfano: Tanzania 2557XXXXXXXX (bila + wala 0 mwanzoni)</div>
 
     <button id="pairBtn">Pata Pairing Code</button>
+    <button id="qrBtn" style="background:#2a2e38; margin-top:10px;">Au unganisha kwa QR Code</button>
+    <div class="hint" style="text-align:center;">Pairing code ikigoma ("couldn't link device"), tumia QR.</div>
 
     <div class="error-box" id="errorBox"></div>
 
     <div class="result" id="result">
-      <div>Pairing Code yako:</div>
-      <div class="code" id="codeDisplay">------</div>
-      <div class="steps">
-        1. Fungua WhatsApp kwenye simu yako<br/>
-        2. Nenda <b>Settings → Linked Devices</b><br/>
-        3. Chagua <b>Link a Device → Link with phone number instead</b><br/>
-        4. Andika code hii uliyopewa hapo juu
+      <div id="codeBlock">
+        <div>Pairing Code yako:</div>
+        <div class="code" id="codeDisplay">------</div>
+        <div class="steps">
+          1. Fungua WhatsApp kwenye simu yako<br/>
+          2. Nenda <b>Settings → Linked Devices</b><br/>
+          3. Chagua <b>Link a Device → Link with phone number instead</b><br/>
+          4. Andika code hii uliyopewa hapo juu
+        </div>
+      </div>
+      <div id="qrBlock" style="display:none; text-align:center;">
+        <div>Scan QR hii:</div>
+        <div style="background:#fff; display:inline-block; padding:10px; border-radius:12px; margin:12px 0;">
+          <img id="qrImg" alt="QR Code" style="width:240px; height:240px; display:block;" />
+        </div>
+        <div class="steps" style="text-align:left;">
+          1. Fungua WhatsApp kwenye simu yenye namba uliyoweka<br/>
+          2. Nenda <b>Settings → Linked Devices</b><br/>
+          3. Chagua <b>Link a Device</b> kisha <b>scan</b> QR hii<br/>
+          <span style="color:#9a9fae;">QR inabadilika yenyewe kila sekunde chache — scan ile inayoonekana sasa.</span>
+        </div>
       </div>
       <div class="status pairing" id="statusText">⏳ Inasubiri uunganishe...</div>
     </div>
@@ -172,8 +188,19 @@
   const codeDisplay = document.getElementById('codeDisplay');
   const statusText = document.getElementById('statusText');
   const errorBox = document.getElementById('errorBox');
+  const qrBtn = document.getElementById('qrBtn');
+  const codeBlock = document.getElementById('codeBlock');
+  const qrBlock = document.getElementById('qrBlock');
+  const qrImg = document.getElementById('qrImg');
 
   let pollTimer = null;
+  let currentMode = 'code';
+
+  function showMode(mode) {
+    currentMode = mode;
+    codeBlock.style.display = mode === 'code' ? 'block' : 'none';
+    qrBlock.style.display = mode === 'qr' ? 'block' : 'none';
+  }
 
   function showError(msg) {
     errorBox.textContent = msg;
@@ -195,12 +222,16 @@
         statusText.textContent = '✅ Umeunganishwa! Bot yako iko tayari.';
         statusText.className = 'status connected';
         clearInterval(pollTimer);
+        qrBlock.style.display = 'none';
         if (data.dashboardToken) showDashboardLink(data.dashboardToken);
       } else if (data.status === 'error' || data.status === 'disconnected') {
-        statusText.textContent = '❌ Muunganisho umeshindwa. Jaribu tena.';
+        // Kwenye QR, onyesha sababu halisi (mfano namba tofauti) badala ya ujumbe wa jumla.
+        statusText.textContent = '❌ ' + (currentMode === 'qr' && data.error ? data.error : 'Muunganisho umeshindwa. Jaribu tena.');
         statusText.className = 'status error';
         clearInterval(pollTimer);
+        qrBlock.style.display = 'none';
       } else {
+        if (currentMode === 'qr' && data.qr) qrImg.src = data.qr; // QR mpya inapobadilika
         statusText.textContent = '⏳ Inasubiri uunganishe...';
         statusText.className = 'status pairing';
       }
@@ -226,7 +257,8 @@
       '<a href="' + url + '" target="_blank" style="color:#c084dc;font-weight:600;word-break:break-all;">' + url + '</a>';
   }
 
-  pairBtn.addEventListener('click', async () => {
+  // mode: 'code' (pairing code, njia ya kawaida) au 'qr' (njia mbadala ikiwa code inagoma).
+  async function startPair(mode) {
     clearError();
     const phoneNumber = phoneInput.value.trim();
     if (!phoneNumber || phoneNumber.length < 9) {
@@ -234,45 +266,60 @@
       return;
     }
 
+    const btn = mode === 'qr' ? qrBtn : pairBtn;
+    const idleLabel = mode === 'qr' ? 'Au unganisha kwa QR Code' : 'Pata Pairing Code';
     pairBtn.disabled = true;
-    pairBtn.textContent = 'Inatengeneza code...';
+    qrBtn.disabled = true;
+    btn.textContent = mode === 'qr' ? 'Inatengeneza QR...' : 'Inatengeneza code...';
 
     try {
       const res = await fetch('/api/pair', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber }),
+        body: JSON.stringify({ phoneNumber, mode }),
       });
       const data = await res.json();
 
       if (!data.ok) {
         showError(data.error || 'Hitilafu imetokea. Jaribu tena.');
-        pairBtn.disabled = false;
-        pairBtn.textContent = 'Pata Pairing Code';
         return;
       }
 
+      showMode(mode);
       if (data.status === 'connected') {
         result.style.display = 'block';
+        codeBlock.style.display = 'block';
+        qrBlock.style.display = 'none';
         codeDisplay.textContent = '✅';
         statusText.textContent = '✅ Namba hii tayari imeunganishwa.';
         statusText.className = 'status connected';
         if (data.dashboardToken) showDashboardLink(data.dashboardToken);
+      } else if (data.status === 'error') {
+        showError(data.error || 'Hitilafu imetokea. Jaribu tena.');
       } else {
-        codeDisplay.textContent = data.pairingCode || '------';
+        if (mode === 'qr') {
+          if (data.qr) qrImg.src = data.qr;
+        } else {
+          codeDisplay.textContent = data.pairingCode || '------';
+        }
         result.style.display = 'block';
         statusText.textContent = '⏳ Inasubiri uunganishe...';
         statusText.className = 'status pairing';
         clearInterval(pollTimer);
-        pollTimer = setInterval(() => pollStatus(phoneNumber), 3000);
+        pollTimer = setInterval(() => pollStatus(phoneNumber), mode === 'qr' ? 2000 : 3000);
       }
     } catch (e) {
       showError('Imeshindwa kuwasiliana na server. Jaribu tena.');
     } finally {
       pairBtn.disabled = false;
+      qrBtn.disabled = false;
       pairBtn.textContent = 'Pata Pairing Code';
+      qrBtn.textContent = 'Au unganisha kwa QR Code';
     }
-  });
+  }
+
+  pairBtn.addEventListener('click', () => startPair('code'));
+  qrBtn.addEventListener('click', () => startPair('qr'));
 
   // "Umesahau dashboard link yako?" — resend it to their WhatsApp inbox.
   const resendToggle = document.getElementById('resendToggle');
