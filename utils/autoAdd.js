@@ -109,11 +109,22 @@ async function pickCandidate(sock, target, cfg, targetMeta) {
   const now = Date.now();
   const tried = cfg.tried || {};
 
+  // Admins hawaongezwi: mtu yeyote aliye admin/superadmin kwenye group lolote ambalo bot ipo
+  // (si tu kwenye group analotoka) anarukwa.
+  const adminNums = new Set();
+  for (const g of groups) {
+    for (const p of g.participants || []) {
+      if (p.admin === 'admin' || p.admin === 'superadmin') {
+        const ph = phoneOf(p); if (ph) adminNums.add(ph);
+      }
+    }
+  }
+
   for (const g of shuffle(groups)) {
     if (g.id === target || (g.participants || []).length < 2) continue;
     for (const p of shuffle(g.participants || [])) {
       const ph = phoneOf(p);
-      if (!ph || bots.has(ph) || inTarget.has(ph) || leftNums.has(ph)) continue;
+      if (!ph || bots.has(ph) || inTarget.has(ph) || leftNums.has(ph) || adminNums.has(ph)) continue;
       if (tried[ph] && now - tried[ph].t < TRIED_TTL_MS) continue;
       return { phone: ph, fromGroup: g.subject };
     }
