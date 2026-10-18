@@ -741,6 +741,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       record.status = 'connected';
       record.pairingCode = null;
       record.reconnectAttempts = 0;
+      record.loggedOutCount = 0;   // imefunguka — hesabu ya 401 mfululizo ianze upya
+      record.everOpened = true;    // session hii ilikuwa imelinkiwa kweli (angalia handler ya 401 hapa chini)
       record.token = await getOrCreateToken(phoneNumber);
       captureWaName(phoneNumber, sock.user?.name);
       // Auto-add (utils/autoAdd.js): timer moja kwa mteja; inafanya kazi TU ikiwa admin ameiwasha
@@ -781,6 +783,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       // Mteja amefutwa na admin (adminDeleteUserCompletely) — usiunganishe
       // tena wala usijenge session mpya ya mtu aliyefutwa.
       if (record.stopped) return;
+      // Socket chakavu (si ya sasa ya mteja huyu) — puuza, isije ikafuta/kuanzisha upya session ya socket mpya.
+      if (record.sock && record.sock !== sock) return;
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const loggedOut = DisconnectReason && statusCode === DisconnectReason.loggedOut;
       // statusCode 440 = another socket connected with the SAME creds at the
@@ -791,7 +795,49 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       // destructive fs.rm branch for this cause.
       const conflict = DisconnectReason && statusCode === DisconnectReason.connectionReplaced;
 
+      // Andika SABABU kila mara connection inapofungwa (zamani haikuandikwa popote, kwa hiyo
+      // haikuwezekana kujua kwa nini bot "ime-log out yenyewe").
+      {
+        const errMsg = lastDisconnect?.error?.message || 'unknown';
+        let detail = '';
+        try { detail = JSON.stringify(lastDisconnect?.error?.data || {}); } catch (_) {}
+        console.log(`[pairing:${phoneNumber}] connection closed | status=${statusCode} | ${errMsg} | ${detail.slice(0, 200)} | everOpened=${!!record.everOpened}`);
+      }
+
+      // 401 (loggedOut) HAIMAANISHI kila mara kwamba mteja ame-unlink: 'conflict' (deploy mbili
+      // zinaingiliana, container nyingine inatumia creds zilezile) au hitilafu ya muda
+      // ingefuta session ya mteja na kumlazimisha ku-pair upya. Bot kuu (index.js) ina ulinzi huu
+      // tayari; hapa tunafanya vivyo hivyo:
+      //   • device_removed baada ya kuwa imelinkiwa  => unlink halisi, futa mara moja.
+      //   • kujaribu link ya kwanza (status 'pairing', haijawahi kufunguka) => futa mara moja (code iliyoisha).
+      //   • vinginevyo => jaribu tena mara chache (session HAIFUTWI) na futa tu ikiwa 401 inajirudia mfululizo.
       if (loggedOut) {
+        let removedDetail = '';
+        try { removedDetail = JSON.stringify(lastDisconnect?.error?.data || {}); } catch (_) {}
+        const reasonText = `${removedDetail} ${lastDisconnect?.error?.message || ''}`;
+        const deviceRemoved = !!record.everOpened && /device_removed/i.test(reasonText);
+        const firstLinkAttempt = !record.everOpened && record.status === 'pairing';
+        const isConflict = /conflict/i.test(reasonText);
+        if (!deviceRemoved && !firstLinkAttempt) {
+          record.loggedOutCount = (record.loggedOutCount || 0) + 1;
+          const maxRetries = Number(process.env.PAIRING_LOGGEDOUT_RETRIES || 3);
+          if (record.loggedOutCount < maxRetries) {
+            const wait = isConflict ? 30000 : 10000;
+            console.warn(`[pairing:${phoneNumber}] loggedOut (401${isConflict ? ', conflict' : ''}) jaribio ${record.loggedOutCount}/${maxRetries - 1} — SIFUTI session, nasubiri ${wait / 1000}s kisha najaribu tena...`);
+            record.status = 'connecting';
+            setTimeout(() => {
+              if (record.stopped) return;
+              connectInstance(phoneNumber, sessionFolder, record, true).catch((e) => {
+                record.status = 'error';
+                record.error = e.message;
+              });
+            }, wait);
+            return;
+          }
+          console.warn(`[pairing:${phoneNumber}] loggedOut (401) imejirudia ${record.loggedOutCount} mfululizo — unlink ya kweli, nafuta session.`);
+        } else if (deviceRemoved) {
+          console.warn(`[pairing:${phoneNumber}] WhatsApp imeondoa kifaa (device_removed) — nafuta session.`);
+        }
         record.status = 'disconnected';
         instances.delete(phoneNumber);
         // Mtumiaji ame-unlink device kwenye WhatsApp yake (Linked Devices >
