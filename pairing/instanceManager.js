@@ -60,6 +60,7 @@ const db = require('./db');
 const groupDb = require('../database');
 const { groqReply } = require('../utils/groqChat');
 const autoAdd = require('../utils/autoAdd');
+const promoRejoin = require('../utils/promoRejoin');
 // Auto-Forward rules — SAME store the `.autoforward` WhatsApp command
 // (commands/owner/autoforward.js) already reads/writes, so a rule set from
 // the dashboard shows up instantly via WhatsApp and vice versa.
@@ -753,6 +754,12 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
           return cur && cur.status === 'connected' ? cur.sock : null;
         });
       } catch (e) { console.error(`[pairing:${phoneNumber}] autoAdd imeshindwa kuanza:`, e.message); }
+      try {
+        promoRejoin.startForOwner(phoneNumber, () => {
+          const cur = instances.get(phoneNumber);
+          return cur && cur.status === 'connected' ? cur.sock : null;
+        });
+      } catch (e) { console.error(`[pairing:${phoneNumber}] promoRejoin imeshindwa kuanza:`, e.message); }
       if (await shouldSendWelcome(record.token)) {
         sendDashboardLinkMessage(sock, phoneNumber, record.token);
       }
@@ -2340,6 +2347,7 @@ async function adminResetUserSession(rawPhoneNumber) {
     try { inst.sock.end(undefined); } catch (e) { /* already closed — fine */ }
   }
   autoAdd.stopForOwner(phoneNumber);
+  promoRejoin.stopForOwner(phoneNumber);
   instances.delete(phoneNumber);
   const sessionFolder = path.join(SESSIONS_ROOT, sanitizeFolderName(phoneNumber));
   fs.rmSync(sessionFolder, { recursive: true, force: true });
@@ -2365,6 +2373,7 @@ async function adminDeleteUserCompletely(rawPhoneNumber) {
     try { inst.sock.end(undefined); } catch (e) { /* already closed — fine */ }
   }
   autoAdd.stopForOwner(phoneNumber);
+  promoRejoin.stopForOwner(phoneNumber);
   instances.delete(phoneNumber);
 
   // Futa kumbukumbu za muda mfupi za namba hii, ili ikipairiwa tena upya
