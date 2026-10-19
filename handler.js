@@ -2094,19 +2094,24 @@ const handleAntipromoImpl = async (sock, msg, groupMetadata) => {
 
     if (count >= maxWarnings) {
       try {
-        await sock.groupParticipantsUpdate(from, [sender], 'remove');
-        database.clearWarnings(from, sender);
+        // Tumia namba halisi (si LID) ili bot iweze kumrudisha baadaye.
+        const part = (groupMetadata?.participants || []).find((p) => p.id === sender || p.phoneNumber === sender);
+        const rejoinJid = (part && part.phoneNumber) || sender;
+        // Ujumbe KWANZA (kabla ya kumtoa), ukimwambia atarudishwa baada ya saa 24.
         await sock.sendMessage(from, {
-          text: `🚫 *Antipromo*\n\n@${sender.split('@')[0]} ametolewa kwenye group kwa kutuma matangazo (${reason}) mara ${maxWarnings}.`,
+          text: require('./utils/promoStyle').kickMessage(`@${sender.split('@')[0]}`, reason, maxWarnings),
           mentions: [sender]
         });
+        await sock.groupParticipantsUpdate(from, [sender], 'remove');
+        database.clearWarnings(from, sender);
+        database.addPromoBan(from, rejoinJid, Date.now() + 24 * 60 * 60 * 1000);
       } catch (e) {
         console.error('Failed to kick for antipromo:', e);
       }
     } else {
       try {
         await sock.sendMessage(from, {
-          text: `⚠️ *Antipromo Detected!* (${reason})\n\n@${sender.split('@')[0]}, ujumbe umefutwa.\nOnyo: *${count}/${maxWarnings}*\n\nUkivuka kiwango, utatolewa kwenye group.`,
+          text: require('./utils/promoStyle').warnMessage(`@${sender.split('@')[0]}`, reason, count, maxWarnings),
           mentions: [sender]
         });
       } catch (e) {

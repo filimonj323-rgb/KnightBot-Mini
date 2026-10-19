@@ -36,6 +36,7 @@ const MODS_DB = path.join(DB_PATH, 'mods.json');
 const BOTSETTINGS_DB = path.join(DB_PATH, 'botsettings.json');
 const LEFT_DB = path.join(DB_PATH, 'leftmembers.json');
 const AUTOADD_DB = path.join(DB_PATH, 'autoadd.json');
+const PROMOBAN_DB = path.join(DB_PATH, 'promoban.json');
 
 // Ramani kutoka path la faili la ndani → "store_key" kwenye Turso.
 const STORE_KEYS = {
@@ -46,6 +47,7 @@ const STORE_KEYS = {
   [BOTSETTINGS_DB]: 'botsettings',
   [LEFT_DB]: 'leftmembers',
   [AUTOADD_DB]: 'autoadd',
+  [PROMOBAN_DB]: 'promoban',
 };
 
 // Initialize database directory
@@ -67,6 +69,7 @@ initDB(MODS_DB, { moderators: [] });
 initDB(BOTSETTINGS_DB, { __main__: { chatbotInbox: false, chatbotGroup: false } });
 initDB(LEFT_DB, {});
 initDB(AUTOADD_DB, {});
+initDB(PROMOBAN_DB, {});
 
 // ── TURSO BACKING STORE ─────────────────────────────────────────────────
 let tursoSchemaReady = false;
@@ -369,6 +372,32 @@ const removeLeftMember = (groupId, userId) => {
 const getAutoAddAll = () => readDB(AUTOADD_DB);
 const saveAutoAddAll = (all) => writeDB(AUTOADD_DB, all);
 
+// Promo-ban (utils/promoRejoin.js): watu waliotolewa na Antipromo, wanarudishwa baada ya `until`.
+// Muundo: { "<owner>|<groupId>|<userJid>": { owner, groupId, jid, until, tries } }
+const addPromoBan = (groupId, jid, until) => {
+  const owner = ownerScopeStorage.getStore() || null;
+  const key = `${owner || '__main__'}|${groupId}|${jid}`;
+  const all = readDB(PROMOBAN_DB);
+  all[key] = { owner, groupId, jid, until, tries: 0 };
+  return writeDB(PROMOBAN_DB, all);
+};
+const savePromoBan = (key, entry) => {
+  const all = readDB(PROMOBAN_DB);
+  all[key] = entry;
+  return writeDB(PROMOBAN_DB, all);
+};
+const removePromoBan = (key) => {
+  const all = readDB(PROMOBAN_DB);
+  if (!(key in all)) return false;
+  delete all[key];
+  return writeDB(PROMOBAN_DB, all);
+};
+const getPromoBansDue = (owner) => {
+  const all = readDB(PROMOBAN_DB);
+  const now = Date.now();
+  return Object.entries(all).filter(([, e]) => (e.owner || null) === (owner || null) && e.until <= now);
+};
+
 // Bot-wide settings (chatbot on/off, n.k.) — Turso-backed kama groups/warnings
 // ili zisirudi OFF kimya kimya kila container inaporestart. Ime-scope kwa
 // owner (sawa na getGroupSettings/updateGroupSettings) ili mteja mmoja wa
@@ -423,5 +452,9 @@ module.exports = {
   getLeftMembers,
   removeLeftMember,
   getAutoAddAll,
-  saveAutoAddAll
+  saveAutoAddAll,
+  addPromoBan,
+  savePromoBan,
+  removePromoBan,
+  getPromoBansDue
 };
