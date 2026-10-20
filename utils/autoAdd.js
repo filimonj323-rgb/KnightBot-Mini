@@ -6,16 +6,16 @@
  * - Saa ni Africa/Dar_es_Salaam. NB: "saa 6 usiku" ya Kiswahili = 00:00 (usiku wa manane).
  * - Hairudii: mtu aliyejaribiwa (ameongezwa, privacy, n.k.) hajaribiwi tena kwa siku 45;
  *   walioondoka wenyewe kwenye target (.gm left) hawaongezwi tena.
- * - Inaongeza MMOJA kwa wakati, kwa mapumziko ya random ya dakika 15–35.
+ * - Inaongeza MMOJA kwa wakati, kwa mapumziko ya random ya dakika 5–12.
  */
 
 const database = require('../database');
 const { addMembers } = require('./addMembers');
 
 const TZ = 'Africa/Dar_es_Salaam';
-const TICK_MS = 3 * 60 * 1000;
-const MIN_GAP_MIN = 15;
-const MAX_GAP_MIN = 35;
+const TICK_MS = 60 * 1000;
+const MIN_GAP_MIN = 5;
+const MAX_GAP_MIN = 12;
 const MAX_PER_DAY_CAP = 30;            // kikomo cha usalama
 const TRIED_TTL_MS = 45 * 24 * 60 * 60 * 1000;
 const MAX_TRIES_PER_RUN = 3;
@@ -172,7 +172,7 @@ async function runOnce(sock, target, cfg, opts = {}) {
     const why = res.privacy.length ? 'privacy' : res.recentlyLeft.length ? 'ameondoka karibuni' : res.notOnWA.length ? 'hayupo WhatsApp' : res.already.length ? 'tayari yupo' : 'imeshindwa';
     cfg.tried[cand.phone] = { t: Date.now(), s: why };
     lastReason = `${cand.phone}: ${why}`;
-    if (i < maxTries - 1) await sleep(rand(15000, 45000));
+    if (i < maxTries - 1) await sleep(rand(8000, 20000));
   }
   return { ok: false, msg: `Majaribio ${maxTries} hayakufanikiwa (mwisho: ${lastReason})` };
 }
@@ -201,7 +201,7 @@ async function tick(getSock, opts = {}, owner = null) {
       if (cfg.windowKey !== key) {            // dirisha jipya => quota upya
         cfg.windowKey = key;
         cfg.count = 0;
-        cfg.nextAt = Date.now() + rand(0, 15) * 60000;
+        cfg.nextAt = Date.now() + rand(0, 3) * 60000;
         saveEntry(storeKey, cfg);
       }
       if ((cfg.count || 0) >= Math.min(cfg.perDay, MAX_PER_DAY_CAP)) continue;
@@ -212,7 +212,7 @@ async function tick(getSock, opts = {}, owner = null) {
         : await runOnce(sock, target, cfg, opts);
       cfg.lastRun = Date.now();
       cfg.lastResult = r.msg;
-      cfg.nextAt = Date.now() + (r.ok ? rand(MIN_GAP_MIN, MAX_GAP_MIN) : 10) * 60000;
+      cfg.nextAt = Date.now() + (r.ok ? rand(MIN_GAP_MIN, MAX_GAP_MIN) : 3) * 60000;
       const tag = owner ? `[autoAdd:${owner}]` : '[autoAdd]';
       if (r.ok) console.log(`${tag} ✅ ${r.msg} (${cfg.count}/${cfg.perDay})`);
       else console.log(`${tag} ⚠️ ${r.msg}`);
@@ -230,7 +230,7 @@ function start(getSock) {
   if (timer) return;
   timer = setInterval(() => tick(getSock), TICK_MS);
   if (timer.unref) timer.unref();
-  console.log('[autoAdd] scheduler imeanza (angalia kila dakika 3, dirisha la usiku EAT).');
+  console.log('[autoAdd] scheduler imeanza (angalia kila dakika 1, dirisha la usiku EAT).');
 }
 
 // Bot ya mteja (pairing): timer moja kwa kila mteja. getSock inarudisha sock ya SASA ya mteja
