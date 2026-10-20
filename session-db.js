@@ -21,7 +21,7 @@
 // seedCredsFromLegacyImport, migrateDiskSessionIfPresent) ndiyo kiungo
 // pekee ambacho index.js kinahitaji.
 
-const { getClient, runBatch } = require('./lib/db');
+const { getSessionClient, getAllSessionClients, getClient: getMainClient, sessionDbIsSeparate, sessionShardCount } = require('./lib/db');
 const pino = require('pino');
 const { createLogger } = require('./lib/logger');
 const fs = require('fs');
@@ -190,11 +190,49 @@ async function retryOperation(operation, operationName = 'DB Operation') {
   throw lastError;
 }
 
+// Uhamisho (copy, si move): sessions zilizo kwenye database kuu na bado hazipo kwenye shard yake
+// zinanakiliwa (keys kwanza, row ya wa_sessions MWISHO = alama ya kukamilika, kwa hiyo ni salama
+// kuanza upya ikikatika). Bila hii kila bot ingehitaji pairing upya. wa_messages hazihamishwi.
+async function migrateSessionsToSeparateDb() {
+  if (!sessionDbIsSeparate()) return;
+  const src = getMainClient();
+  let sess;
+  try {
+    sess = await src.execute('SELECT session_id, state, updated_at FROM wa_sessions');
+  } catch (_) { return; } // database kuu haina jedwali — hakuna cha kuhamisha
+  let moved = 0, totalKeys = 0;
+  for (const r of sess.rows) {
+    const dst = getSessionClient(r.session_id);
+    const ex = await dst.execute({ sql: 'SELECT 1 FROM wa_sessions WHERE session_id = ?', args: [r.session_id] });
+    if (ex.rows.length) continue; // tayari ipo kwenye shard yake
+    let last = '';
+    const PAGE = 300;
+    for (;;) {
+      const page = await src.execute({
+        sql: 'SELECT key_id, value, updated_at FROM wa_session_keys WHERE session_id = ? AND key_id > ? ORDER BY key_id LIMIT ?',
+        args: [r.session_id, last, PAGE],
+      });
+      if (!page.rows.length) break;
+      await dst.batch(page.rows.map((k) => ({
+        sql: 'INSERT OR REPLACE INTO wa_session_keys (session_id, key_id, value, updated_at) VALUES (?, ?, ?, ?)',
+        args: [r.session_id, k.key_id, k.value, k.updated_at],
+      })), 'write');
+      totalKeys += page.rows.length;
+      last = page.rows[page.rows.length - 1].key_id;
+    }
+    await dst.execute({
+      sql: 'INSERT OR REPLACE INTO wa_sessions (session_id, state, updated_at) VALUES (?, ?, ?)',
+      args: [r.session_id, r.state, r.updated_at],
+    });
+    moved++;
+  }
+  if (moved) log.info(`[session-db] Uhamisho kwenda shards ${sessionShardCount()}: session ${moved} + keys ${totalKeys} zimenakiliwa.`);
+}
+
 async function initializeDatabase() {
   if (schemaReady) return true;
   try {
-    const client = getClient();
-    await client.batch(
+    for (const client of getAllSessionClients()) await client.batch(
       [
         `CREATE TABLE IF NOT EXISTS wa_sessions (
                 session_id TEXT PRIMARY KEY,
@@ -208,7 +246,8 @@ async function initializeDatabase() {
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY (session_id, key_id)
             )`,
-        `CREATE INDEX IF NOT EXISTS idx_wa_session_keys_updated ON wa_session_keys (session_id, updated_at)`,
+        // Index ya updated_at imeondolewa: kila key write ilihesabiwa mara 2 (jedwali + index). Prune inatumia PK tu.
+        `DROP INDEX IF EXISTS idx_wa_session_keys_updated`,
         `CREATE TABLE IF NOT EXISTS wa_messages (
                 session_id TEXT NOT NULL,
                 msg_id TEXT NOT NULL,
@@ -223,6 +262,7 @@ async function initializeDatabase() {
     );
     schemaReady = true;
     log.info('[session-db] Majedwali "wa_sessions" + "wa_session_keys" + "wa_messages" tayari (Turso).');
+    await migrateSessionsToSeparateDb().catch((e) => log.error('[session-db] Uhamisho kwenda database ya pili umeshindwa: %s', e.message));
     return true;
   } catch (err) {
     log.error('[session-db] Table error: %s', err.message);
@@ -232,7 +272,7 @@ async function initializeDatabase() {
 
 async function loadCreds(sessionId) {
   return retryOperation(async () => {
-    const client = getClient();
+    const client = getSessionClient(sessionId);
     const res = await client.execute({ sql: `SELECT state FROM wa_sessions WHERE session_id = ?`, args: [sessionId] });
     if (res.rows.length === 0) return null;
     return JSON.parse(res.rows[0].state);
@@ -248,18 +288,21 @@ async function loadCreds(sessionId) {
  */
 async function listSessionIds(prefix) {
   return retryOperation(async () => {
-    const client = getClient();
-    const res = await client.execute({
-      sql: `SELECT session_id FROM wa_sessions WHERE session_id LIKE ?`,
-      args: [`${prefix}%`],
-    });
-    return res.rows.map((r) => r.session_id);
+    const ids = new Set();
+    for (const client of getAllSessionClients()) {
+      const res = await client.execute({
+        sql: `SELECT session_id FROM wa_sessions WHERE session_id LIKE ?`,
+        args: [`${prefix}%`],
+      });
+      for (const r of res.rows) ids.add(r.session_id);
+    }
+    return [...ids];
   }, `listSessionIds(${prefix})`);
 }
 
 async function saveCredsRow(sessionId, credsData) {
   return retryOperation(async () => {
-    const client = getClient();
+    const client = getSessionClient(sessionId);
     const serialized = JSON.stringify({ creds: credsData }, replacer);
     await client.execute({
       sql: `INSERT INTO wa_sessions (session_id, state, updated_at)
@@ -273,7 +316,7 @@ async function saveCredsRow(sessionId, credsData) {
 
 async function countKeys(sessionId) {
   return retryOperation(async () => {
-    const client = getClient();
+    const client = getSessionClient(sessionId);
     const res = await client.execute({
       sql: `SELECT COUNT(*) AS n FROM wa_session_keys WHERE session_id = ?`,
       args: [sessionId],
@@ -285,7 +328,7 @@ async function countKeys(sessionId) {
 async function getKeysByIds(sessionId, keyIds) {
   if (keyIds.length === 0) return {};
   return retryOperation(async () => {
-    const client = getClient();
+    const client = getSessionClient(sessionId);
     const placeholders = keyIds.map(() => '?').join(', ');
     const res = await client.execute({
       sql: `SELECT key_id, value FROM wa_session_keys WHERE session_id = ? AND key_id IN (${placeholders})`,
@@ -321,7 +364,7 @@ async function upsertKeys(sessionId, keyMap) {
       args.push(sessionId, keyId, JSON.stringify(value, replacer), now);
     }
     await retryOperation(async () => {
-      const client = getClient();
+      const client = getSessionClient(sessionId);
       await client.execute({
         sql: `INSERT INTO wa_session_keys (session_id, key_id, value, updated_at)
                  VALUES ${rowsSql.join(', ')}
@@ -338,7 +381,7 @@ async function deleteKeys(sessionId, keyIds) {
   for (let i = 0; i < keyIds.length; i += MAX_KEYS_PER_BATCH) {
     const chunk = keyIds.slice(i, i + MAX_KEYS_PER_BATCH);
     await retryOperation(async () => {
-      const client = getClient();
+      const client = getSessionClient(sessionId);
       const placeholders = chunk.map(() => '?').join(', ');
       await client.execute({
         sql: `DELETE FROM wa_session_keys WHERE session_id = ? AND key_id IN (${placeholders})`,
@@ -474,11 +517,16 @@ async function migrateDiskSessionIfPresent(sessionId, diskFolder) {
 
 async function deleteSession(sessionId) {
   return retryOperation(async () => {
-    await runBatch([
+    const stmts = [
       { sql: `DELETE FROM wa_sessions WHERE session_id = ?`, args: [sessionId] },
       { sql: `DELETE FROM wa_session_keys WHERE session_id = ?`, args: [sessionId] },
       { sql: `DELETE FROM wa_messages WHERE session_id = ?`, args: [sessionId] },
-    ]);
+    ];
+    await getSessionClient(sessionId).batch(stmts, 'write');
+    // Nakala ya zamani kwenye database kuu (kabla ya shards) — ifute pia ili isifufuke kwenye uhamisho ujao.
+    if (sessionDbIsSeparate()) {
+      try { await getMainClient().batch(stmts, 'write'); } catch (_) { /* jedwali halipo kuu — sawa */ }
+    }
     clearSessionRuntimeState(sessionId);
     log.info(`[session-db] Session ${sessionId} deleted (creds + keys + messages)`);
   }, `deleteSession(${sessionId})`);
@@ -486,7 +534,11 @@ async function deleteSession(sessionId) {
 
 async function deleteAllSessions() {
   return retryOperation(async () => {
-    await runBatch([`DELETE FROM wa_sessions`, `DELETE FROM wa_session_keys`, `DELETE FROM wa_messages`]);
+    const all = ['DELETE FROM wa_sessions', 'DELETE FROM wa_session_keys', 'DELETE FROM wa_messages'];
+    for (const client of getAllSessionClients()) await client.batch(all, 'write');
+    if (sessionDbIsSeparate()) {
+      try { await getMainClient().batch(all, 'write'); } catch (_) {}
+    }
     for (const sessionId of [...sessionRuntimeCache.keys()]) clearSessionRuntimeState(sessionId);
     exitHandlers.clear();
     log.info(`[session-db] Sessions zote zimefutwa (creds + keys + messages).`);
@@ -496,7 +548,7 @@ async function deleteAllSessions() {
 async function saveMessageForRetry(sessionId, key, message) {
   if (!key?.id || !key?.remoteJid || !message) return;
   return retryOperation(async () => {
-    const client = getClient();
+    const client = getSessionClient(sessionId);
     const serialized = JSON.stringify(message, replacer);
     await client.execute({
       sql: `INSERT INTO wa_messages (session_id, msg_id, remote_jid, message, updated_at)
@@ -511,7 +563,7 @@ async function saveMessageForRetry(sessionId, key, message) {
 async function getStoredMessage(sessionId, key) {
   if (!key?.id || !key?.remoteJid) return undefined;
   return retryOperation(async () => {
-    const client = getClient();
+    const client = getSessionClient(sessionId);
     const res = await client.execute({
       sql: `SELECT message FROM wa_messages WHERE session_id = ? AND remote_jid = ? AND msg_id = ?`,
       args: [sessionId, key.remoteJid, key.id],
@@ -528,7 +580,7 @@ function startMessagePruner(sessionId) {
 
   const timer = setInterval(async () => {
     try {
-      const client = getClient();
+      const client = getSessionClient(sessionId);
       const cutoff = Date.now() - MESSAGE_STORE_MAX_AGE_MS;
       const res = await client.execute({
         sql: `DELETE FROM wa_messages WHERE session_id = ? AND updated_at < ?`,
@@ -733,7 +785,7 @@ function startPrekeyPruner(sessionId, keysCache) {
 
   const timer = setInterval(async () => {
     try {
-      const client = getClient();
+      const client = getSessionClient(sessionId);
       const cutoff = Date.now() - PRUNE_PREKEY_MAX_AGE_MS;
       // Turso/libSQL RETURNING inaweza kutokuwepo kwa toleo fulani, hivyo
       // hatutegemei kupata key_id zilizofutwa hapa — RAM cache ya funguo
