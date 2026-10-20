@@ -386,7 +386,7 @@ async function loadBaileysBridge() {
 // cached for an hour so we don't hit that endpoint on every reconnect.
 let cachedWaVersion = null;
 let cachedWaVersionAt = 0;
-const WA_VERSION_TTL_MS = 60 * 60 * 1000; // 1 hour
+const WA_VERSION_TTL_MS = 30 * 60 * 1000; // 30 min
 
 async function getWaVersion() {
   const now = Date.now();
@@ -736,6 +736,7 @@ async function _startBot() {
       const errorMessage = err?.message || 'Unknown error';
       const isConflict = /conflict/i.test(errorMessage);
 
+      if (statusCode === 405) { cachedWaVersion = null; cachedWaVersionAt = 0; } // version imekataliwa — chukua mpya
       if (statusCode === 515 || statusCode === 503 || statusCode === 408) {
         console.log(`⚠️ Connection closed (${statusCode}). Reconnecting...`);
       } else {
