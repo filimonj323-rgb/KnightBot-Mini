@@ -3,6 +3,7 @@
  */
 process.env.PUPPETEER_SKIP_DOWNLOAD = 'true';
 process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'true';
+require('./session-check'); // ukaguzi wa sessions (soma tu) — zima kwa CHECK_ENABLED=false kwenye session-check.js
 process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || '/tmp/puppeteer_cache_disabled';
 
 const { initializeTempSystem } = require('./utils/tempManager');

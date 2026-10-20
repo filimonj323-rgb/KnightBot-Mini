@@ -229,8 +229,17 @@ async function migrateSessionsToSeparateDb() {
   if (moved) log.info(`[session-db] Uhamisho kwenda shards ${sessionShardCount()}: session ${moved} + keys ${totalKeys} zimenakiliwa.`);
 }
 
+let initPromise = null;
 async function initializeDatabase() {
   if (schemaReady) return true;
+  // Wito zote zinasubiri init MOJA (pamoja na uhamisho wa shards) — zamani
+  // wito wa pili ulirudi true mara moja wakati uhamisho bado unaendelea,
+  // na auto-reconnect ilikuta sessions chache kuliko zilizopo.
+  if (!initPromise) initPromise = _initializeDatabase().finally(() => { if (!schemaReady) initPromise = null; });
+  return initPromise;
+}
+
+async function _initializeDatabase() {
   try {
     for (const client of getAllSessionClients()) await client.batch(
       [
@@ -260,9 +269,9 @@ async function initializeDatabase() {
       ],
       'write'
     );
-    schemaReady = true;
-    log.info('[session-db] Majedwali "wa_sessions" + "wa_session_keys" + "wa_messages" tayari (Turso).');
+    log.info('[session-db] Majedwali "wa_sessions" + "wa_session_keys" + "wa_messages" tayari (Turso). Shards zilizosomwa: ' + sessionShardCount());
     await migrateSessionsToSeparateDb().catch((e) => log.error('[session-db] Uhamisho kwenda database ya pili umeshindwa: %s', e.message));
+    schemaReady = true;
     return true;
   } catch (err) {
     log.error('[session-db] Table error: %s', err.message);
@@ -287,6 +296,7 @@ async function loadCreds(sessionId) {
  * jina awali, au Railway volume mpya haina chochote).
  */
 async function listSessionIds(prefix) {
+  await initializeDatabase(); // hakikisha uhamisho wa shards umekamilika kabla ya kuorodhesha
   return retryOperation(async () => {
     const ids = new Set();
     for (const client of getAllSessionClients()) {
