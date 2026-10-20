@@ -669,7 +669,7 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   captureWaName(phoneNumber, state.creds?.me?.name); // jina la WhatsApp (kama tayari lipo kwenye session)
   // Session iliyokwisha kulinkiwa (mteja wa zamani) haihitaji ukaguzi wa "namba ya QR" — usiiguse.
   if (state.creds.registered) record.awaitingFirstLink = false;
-  const { version } = await fetchLatestBaileysVersion();
+  const version = await require('../lib/waVersion').getWaVersion();
 
   const sock = makeWASocket({
     version,
@@ -872,6 +872,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         return;
       }
 
+      // 405 = WhatsApp imekataa version ya WA Web inayotumika — futa cache ili jaribio lijalo lichukue ya live.
+      if (statusCode === 405) require('../lib/waVersion').invalidateWaVersion();
       record.reconnectAttempts = (record.reconnectAttempts || 0) + 1;
 
       // Cap retries so a persistently failing link doesn't hammer WhatsApp
@@ -886,13 +888,19 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         // kuendelea kupata "connection closed" hata baada ya kubadilisha
         // CUSTOM_PAIRING_CODE au kusubiri. Jaribio jipya lazima lianze na
         // session tupu.
+        // USALAMA: 405 (version imekataliwa) au session iliyokwisha kulinkiwa HAIFUTWI — ni tatizo la muda,
+        // si creds mbovu. Kufuta kungeua bots za wateja wote kwa kosa la version.
+        if (statusCode === 405 || record.everOpened || state.creds.registered) {
+          console.warn(`[pairing:${phoneNumber}] reconnect imeshindwa (status=${statusCode}) — session imehifadhiwa, haikufutwa.`);
+          return;
+        }
         fs.rm(sessionFolder, { recursive: true, force: true }, () => {});
         deleteDbSession(sessionId).catch((e) => console.error(`[pairing:${phoneNumber}] imeshindwa kufuta Turso session chakavu:`, e.message));
         return;
       }
 
       record.status = 'connecting';
-      const backoffMs = Math.min(2000 * record.reconnectAttempts, 10000);
+      const backoffMs = statusCode === 405 ? 20000 : Math.min(2000 * record.reconnectAttempts, 10000);
       setTimeout(() => {
         connectInstance(phoneNumber, sessionFolder, record, true).catch((e) => {
           record.status = 'error';
