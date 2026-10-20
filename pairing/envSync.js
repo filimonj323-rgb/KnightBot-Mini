@@ -45,7 +45,7 @@ const NEVER_EXACT = new Set([
 ]);
 const NEVER_PREFIXES = [
   'RAILWAY_', 'RAILPACK_', 'NIXPACKS_', 'NIX_', 'NODE_', 'NPM_', 'YARN_', 'PNPM_', 'BUN_', 'MISE_',
-  'PUPPETEER_', 'PLAYWRIGHT_', 'LC_', 'XDG_', 'KUBERNETES_', 'TURSO_',
+  'PUPPETEER_', 'PLAYWRIGHT_', 'LC_', 'XDG_', 'KUBERNETES_', 'TURSO_', 'SESSION_TURSO_',
 ];
 const NEVER_SUFFIXES = ['_PATH', '_DIR', '_HOME', '_ROOT'];
 const MAX_VALUE_LEN = 20000;
@@ -174,7 +174,9 @@ async function syncEnv(opts = {}) {
 // makusudi (TOKENVAULT_KEY, ADMIN_SESSION_SECRET, TURSO_*), ili uweze kuzibandika kwenye Railway
 // (Variables → Raw Editor) ya account mpya. Faili hili lina SIRI — usiliweke
 // GitHub (hata private) wala usilishiriki.
-const EXPORT_EXTRA = ['TOKENVAULT_KEY', 'ADMIN_SESSION_SECRET', 'TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'];
+const EXPORT_EXTRA = ['TOKENVAULT_KEY', 'ADMIN_SESSION_SECRET', 'TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN',
+  'SESSION_TURSO_DATABASE_URL', 'SESSION_TURSO_AUTH_TOKEN',
+  ...Array.from({ length: 8 }, (_, i) => [`SESSION_TURSO_DATABASE_URL_${i + 1}`, `SESSION_TURSO_AUTH_TOKEN_${i + 1}`]).flat()];
 
 function quoteEnvValue(v) {
   const s = String(v);

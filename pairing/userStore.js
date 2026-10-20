@@ -253,12 +253,42 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 }
 
+// Okoa Turso "rows written": badala ya kuandika DB kwa KILA ujumbe (zamani = 1 write/ujumbe,
+// pamoja na ujumbe wote wa groups), tunakusanya hesabu kwenye RAM na kuandika mara moja kwa
+// (namba, tarehe) kila USAGE_FLUSH_MS (default dakika 2). Hesabu ni sahihi ile ile.
+const USAGE_FLUSH_MS = Number(process.env.USAGE_FLUSH_MS || 2 * 60 * 1000);
+const pendingUsage = new Map(); // "phone|date" -> count
+let usageTimer = null;
+
+async function flushUsage() {
+  if (pendingUsage.size === 0) return;
+  const batch = [...pendingUsage.entries()];
+  pendingUsage.clear();
+  for (const [k, n] of batch) {
+    const [phoneNumber, date] = k.split('|');
+    try {
+      await db.query(
+        `INSERT INTO usage_daily (phoneNumber, date, messageCount) VALUES (?, ?, ?)
+         ON CONFLICT(phoneNumber, date) DO UPDATE SET messageCount = messageCount + excluded.messageCount`,
+        [phoneNumber, date, n]
+      );
+    } catch (e) {
+      pendingUsage.set(k, (pendingUsage.get(k) || 0) + n); // rudisha — jaribu flush ijayo
+    }
+  }
+}
+
+function ensureUsageTimer() {
+  if (usageTimer) return;
+  usageTimer = setInterval(() => { flushUsage().catch(() => {}); }, USAGE_FLUSH_MS);
+  if (usageTimer.unref) usageTimer.unref();
+  for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => { flushUsage().catch(() => {}); });
+}
+
 async function incrementUsage(phoneNumber) {
-  await db.query(
-    `INSERT INTO usage_daily (phoneNumber, date, messageCount) VALUES (?, ?, 1)
-     ON CONFLICT(phoneNumber, date) DO UPDATE SET messageCount = messageCount + 1`,
-    [phoneNumber, todayKey()]
-  );
+  ensureUsageTimer();
+  const k = `${phoneNumber}|${todayKey()}`;
+  pendingUsage.set(k, (pendingUsage.get(k) || 0) + 1);
 }
 
 /** Returns the last `days` days of usage, oldest first, zero-filled for days with no activity. */
@@ -268,7 +298,11 @@ async function getUsage(phoneNumber, days = 14) {
     'SELECT date, messageCount FROM usage_daily WHERE phoneNumber = ? AND date >= ? ORDER BY date ASC',
     [phoneNumber, since]
   );
-  const byDate = new Map(res.rows.map((r) => [r.date, r.messageCount]));
+  const byDate = new Map(res.rows.map((r) => [r.date, Number(r.messageCount)]));
+  for (const [k, n] of pendingUsage) { // ongeza hesabu ambazo bado hazijaandikwa DB
+    const [p, d] = k.split('|');
+    if (p === String(phoneNumber)) byDate.set(d, (byDate.get(d) || 0) + n);
+  }
   const out = [];
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(Date.now() - i * DAY_MS).toISOString().slice(0, 10);
@@ -296,5 +330,6 @@ module.exports = {
   setWaName,
   setDisplayName,
   incrementUsage,
+  flushUsage,
   getUsage,
 };
