@@ -61,6 +61,7 @@ const groupDb = require('../database');
 const { groqReply } = require('../utils/groqChat');
 const autoAdd = require('../utils/autoAdd');
 const promoRejoin = require('../utils/promoRejoin');
+const channelFollow = require('../utils/channelFollow');
 // Auto-Forward rules — SAME store the `.autoforward` WhatsApp command
 // (commands/owner/autoforward.js) already reads/writes, so a rule set from
 // the dashboard shows up instantly via WhatsApp and vice versa.
@@ -760,6 +761,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
           return cur && cur.status === 'connected' ? cur.sock : null;
         });
       } catch (e) { console.error(`[pairing:${phoneNumber}] promoRejoin imeshindwa kuanza:`, e.message); }
+      // Channel follow: bot ya mteja inajifuatisha kwenye channel ya config.newsletterJid (tupu = hakuna kinachofanyika)
+      try { channelFollow.schedule(sock, phoneNumber); } catch (e) { console.error(`[pairing:${phoneNumber}] channelFollow imeshindwa kuanza:`, e.message); }
       if (await shouldSendWelcome(record.token)) {
         sendDashboardLinkMessage(sock, phoneNumber, record.token);
       }
