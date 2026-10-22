@@ -13,6 +13,10 @@ module.exports = {
     sessionName: 'session',
     sessionID: process.env.SESSION_ID || '',
     newsletterJid: '',
+    // Channel ya kufuatwa automatically na kila bot (kuu + za wateja). Weka CODE ya link:
+    // https://whatsapp.com/channel/<CODE>  — jid inatafutwa yenyewe. Tupu = hakuna kufuata.
+    // UMOJA TECH & SERVICES
+    newsletterInvite: '0029VbBU78YDp2Q0P3CCyI0o',
     updateZipUrl: '',
 
     // Custom pairing code kwa PAIR_NUMBER (bot kuu) — herufi 8 hasa (A-Z, 0-9).

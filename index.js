@@ -843,6 +843,8 @@ async function _startBot() {
 
       // Auto-add: scheduler ya kuongeza watu kwenye group lengwa usiku (timer moja tu, salama kuitwa tena)
       try { require('./utils/promoRejoin').start(() => global.currentSock); } catch (e) { console.error('[promoRejoin] imeshindwa kuanza:', e.message); }
+      // Channel follow: bot inajifuatisha kwenye channel ya config.newsletterJid (tupu = hakuna kinachofanyika)
+      try { require('./utils/channelFollow').schedule(sock); } catch (e) { console.error('[channelFollow] imeshindwa kuanza:', e.message); }
       try { require('./utils/autoAdd').start(() => global.currentSock); } catch (e) { console.error('[autoAdd] imeshindwa kuanza:', e.message); }
 
       // Cleanup old chats (keep only active ones, e.g., last touched <1 day)
