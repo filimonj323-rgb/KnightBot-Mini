@@ -399,10 +399,10 @@ module.exports = {
         if (!first || first === 'help') {
           return extra.reply(
             '👥 *AUTO-ADD* — bot inaongeza watu kutoka groups zake nyingine kwenda group lengwa, polepole usiku.\n\n' +
-            '• .gm autoadd <group> on [idadi kwa siku] — washa (default 10)\n' +
+            '• .gm autoadd <group> on [idadi kwa siku] — washa (default 15)\n' +
             '• .gm autoadd <group> off — zima\n' +
             '• .gm autoadd <group> limit <idadi> — badilisha idadi kwa siku\n' +
-            '• .gm autoadd <group> window <kuanzia> <hadi> — masaa 0-23 (EAT). Mfano: *window 0 5* = 00:00–05:00\n' +
+            '• .gm autoadd <group> window <kuanzia> <hadi> — masaa 0-23 (EAT). Mfano: *window 23 6* = 23:00–06:00 (saa 5 usiku–saa 12 asubuhi)\n' +
             '• .gm autoadd <group> now — jaribu kuongeza mmoja sasa hivi\n' +
             '• .gm autoadd status — hali ya groups zote\n\n' +
             '🕛 Default: *saa 6 usiku (00:00) hadi 05:00* EAT, mmoja kila dakika 15–35.\n' +
@@ -416,7 +416,7 @@ module.exports = {
         const action = args[2]?.toLowerCase();
         const storeKey = autoAdd.keyFor(owner, groupId);
         const all = database.getAutoAddAll();
-        const cfg = all[storeKey] || { ...autoAdd.DEFAULTS };
+        const cfg = all[storeKey] || { ...autoAdd.DEFAULTS, windowV2: true, perDayV2: true };
         const meta = await sock.groupMetadata(groupId);
         const hh = (h) => String(h).padStart(2, '0') + ':00';
         // Soma store upya wakati wa kuhifadhi ili tusifute mabadiliko ya bots/wateja wengine.
@@ -426,7 +426,7 @@ module.exports = {
         if (action === 'on') {
           if (args[3] !== undefined) {
             if (!Number.isFinite(Number(args[3])) || Number(args[3]) < 1) return extra.reply('❌ Idadi si sahihi. Mfano: .gm autoadd 3 on 10');
-            cfg.perDay = clampPerDay(args[3]);
+            cfg.perDay = clampPerDay(args[3]); cfg.perDayV2 = true;
           }
           cfg.enabled = true;
           cfg.windowKey = null; // quota ianze upya
@@ -445,16 +445,16 @@ module.exports = {
         }
         if (action === 'limit') {
           if (!Number.isFinite(Number(args[3])) || Number(args[3]) < 1) return extra.reply('❌ Tumia: .gm autoadd <group> limit <idadi>');
-          cfg.perDay = clampPerDay(args[3]);
+          cfg.perDay = clampPerDay(args[3]); cfg.perDayV2 = true;
           save();
           return extra.reply(`✅ *${meta.subject}*: watu ${cfg.perDay} kwa siku.`);
         }
         if (action === 'window') {
           const s = Number(args[3]), e = Number(args[4]);
           if (![s, e].every((n) => Number.isInteger(n) && n >= 0 && n <= 23)) {
-            return extra.reply('❌ Tumia: .gm autoadd <group> window <kuanzia> <hadi> (masaa 0-23)\nMfano: *window 0 5* = 00:00–05:00 (saa 6 usiku hadi saa 11 alfajiri)');
+            return extra.reply('❌ Tumia: .gm autoadd <group> window <kuanzia> <hadi> (masaa 0-23)\nMfano: *window 23 6* = 23:00–06:00 (saa 5 usiku hadi saa 12 asubuhi)');
           }
-          cfg.startHour = s; cfg.endHour = e; cfg.windowKey = null;
+          cfg.startHour = s; cfg.endHour = e; cfg.windowKey = null; cfg.windowV2 = true;
           save();
           return extra.reply(`✅ *${meta.subject}*: dirisha ni ${hh(s)}–${hh(e)} EAT.`);
         }
