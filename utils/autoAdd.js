@@ -2,11 +2,12 @@
  * Auto-Add: bot inaongeza watu 'randomly' kutoka groups mbalimbali ambazo bot ipo,
  * kwenda kwenye group lengwa (target) lililochaguliwa — polepole, usiku tu.
  *
- * - Kila target ina mipangilio yake: perDay (default 10), dirisha la muda (default 00:00–05:00 EAT).
- * - Saa ni Africa/Dar_es_Salaam. NB: "saa 6 usiku" ya Kiswahili = 00:00 (usiku wa manane).
+ * - Kila target ina mipangilio yake: perDay (default 15), dirisha la muda (default 23:00–06:00 EAT = saa 5 usiku hadi saa 12 asubuhi).
+ * - Saa ni Africa/Dar_es_Salaam. NB: saa za Kiswahili — "saa 5 usiku" = 23:00, "saa 6 usiku" = 00:00, "saa 12 asubuhi" = 06:00.
  * - Hairudii: mtu aliyejaribiwa (ameongezwa, privacy, n.k.) hajaribiwi tena kwa siku 45;
  *   walioondoka wenyewe kwenye target (.gm left) hawaongezwi tena.
- * - Inaongeza MMOJA kwa wakati, kwa mapumziko ya random ya dakika 5–12.
+ * - Inaongeza MMOJA kwa wakati. Mapumziko yanahesabiwa kulingana na muda uliobaki wa dirisha na watu waliobaki
+ *   (random ndani ya ~55–95% ya wastani) ili quota ya siku ikamilike kabla dirisha halijaisha (mfano 15 ndani ya 23:00–06:00).
  */
 
 const database = require('../database');
@@ -15,12 +16,31 @@ const { addMembers } = require('./addMembers');
 const TZ = 'Africa/Dar_es_Salaam';
 const TICK_MS = 60 * 1000;
 const MIN_GAP_MIN = 5;
-const MAX_GAP_MIN = 12;
+const END_MARGIN_MIN = 10;             // acha akiba ya dakika kabla dirisha halijaisha
 const MAX_PER_DAY_CAP = 30;            // kikomo cha usalama
 const TRIED_TTL_MS = 45 * 24 * 60 * 60 * 1000;
 const MAX_TRIES_PER_RUN = 3;
 
-const DEFAULTS = { enabled: false, perDay: 10, startHour: 0, endHour: 5 };
+const DEFAULTS = { enabled: false, perDay: 15, startHour: 23, endHour: 6 }; // 23:00–06:00 EAT (inavuka usiku wa manane)
+
+// Entries za zamani zilihifadhi dirisha la zamani (0–5). Zibadilishe MARA MOJA kwenda 23–6;
+// `windowV2` inazuia kubatilisha dirisha ambalo mtumiaji alilichagua mwenyewe baadaye (.gm autoadd ... window).
+function migrateWindows(all) {
+  let changed = false;
+  for (const cfg of Object.values(all)) {
+    if (!cfg) continue;
+    if (!cfg.windowV2) {
+      if (cfg.startHour === 0 && cfg.endHour === 5) { cfg.startHour = DEFAULTS.startHour; cfg.endHour = DEFAULTS.endHour; cfg.windowKey = null; }
+      cfg.windowV2 = true; changed = true;
+    }
+    // idadi ya zamani (default 10) -> 15, mara moja; `perDayV2` inalinda idadi aliyochagua mtumiaji mwenyewe
+    if (!cfg.perDayV2) {
+      if (cfg.perDay === 10 || cfg.perDay === undefined) cfg.perDay = DEFAULTS.perDay;
+      cfg.perDayV2 = true; changed = true;
+    }
+  }
+  return changed;
+}
 
 // ── Owner scoping (bots za wateja wa pairing/instanceManager.js) ──
 // Bot kuu: key ya store = groupId (kama zamani, haibadiliki).
@@ -70,6 +90,21 @@ function inWindow(cfg, hour) {
   const s = cfg.startHour, e = cfg.endHour;
   if (s === e) return true;
   return s < e ? (hour >= s && hour < e) : (hour >= s || hour < e);
+}
+// Dakika zilizobaki hadi dirisha liishe (EAT = UTC+3, hakuna DST). Dirisha la masaa 24 (s===e) linaisha usiku wa manane.
+function minutesLeftInWindow(cfg, date = new Date()) {
+  const e = new Date(date.getTime() + 3 * 3600000);
+  const nowMin = e.getUTCHours() * 60 + e.getUTCMinutes() + e.getUTCSeconds() / 60;
+  if (cfg.startHour === cfg.endHour) return 1440 - nowMin;
+  return (cfg.endHour * 60 - nowMin + 1440) % 1440;
+}
+// Mapumziko ya dakika hadi mtu anayefuata: wastani = (muda uliobaki) / (watu waliobaki), kisha random 55–95% yake.
+function nextGapMin(cfg, date = new Date()) {
+  const quota = Math.min(cfg.perDay, MAX_PER_DAY_CAP);
+  const remaining = quota - (cfg.count || 0);
+  if (remaining <= 0) return MIN_GAP_MIN;
+  const avg = Math.max(0, minutesLeftInWindow(cfg, date) - END_MARGIN_MIN) / remaining;
+  return Math.max(MIN_GAP_MIN, avg * rand(0.55, 0.95));
 }
 // Kitambulisho cha "dirisha la leo" — quota inaanza upya kila dirisha jipya
 function windowKey(cfg, now) {
@@ -190,6 +225,7 @@ async function tick(getSock, opts = {}, owner = null) {
     if (!sock) return;
     if (owner && !ownerHasAccess(owner)) return; // admin amezima feature kwa mteja huyu
     const all = database.getAutoAddAll();
+    if (migrateWindows(all)) database.saveAutoAddAll(all);
     for (const [storeKey, cfg] of Object.entries(all)) {
       if (ownerOfKey(storeKey) !== owner) continue; // bot kuu inagusa za bot kuu tu; mteja zake tu
       const target = groupOfKey(storeKey);
@@ -212,7 +248,7 @@ async function tick(getSock, opts = {}, owner = null) {
         : await runOnce(sock, target, cfg, opts);
       cfg.lastRun = Date.now();
       cfg.lastResult = r.msg;
-      cfg.nextAt = Date.now() + (r.ok ? rand(MIN_GAP_MIN, MAX_GAP_MIN) : 3) * 60000;
+      cfg.nextAt = Date.now() + (r.ok ? nextGapMin(cfg, opts.now || new Date()) : 3) * 60000;
       const tag = owner ? `[autoAdd:${owner}]` : '[autoAdd]';
       if (r.ok) console.log(`${tag} ✅ ${r.msg} (${cfg.count}/${cfg.perDay})`);
       else console.log(`${tag} ⚠️ ${r.msg}`);
@@ -252,7 +288,7 @@ function stopForOwner(owner) {
 function setTarget(owner, groupId, enabled) {
   const k = keyFor(owner, groupId);
   const all = database.getAutoAddAll();
-  const cfg = all[k] || { ...DEFAULTS };
+  const cfg = all[k] || { ...DEFAULTS, windowV2: true, perDayV2: true };
   cfg.enabled = !!enabled;
   if (enabled) cfg.windowKey = null; // quota ianze upya
   all[k] = cfg;
@@ -273,6 +309,7 @@ function listForOwner(owner) {
 async function statusText(sock) {
   const owner = sock?.pairingOwnerId || null;
   const all = database.getAutoAddAll();
+  if (migrateWindows(all)) database.saveAutoAddAll(all);
   const targets = Object.entries(all).filter(([k]) => ownerOfKey(k) === owner).map(([k, c]) => [groupOfKey(k), c]);
   if (!targets.length) return 'ℹ️ Hakuna group lililowekwa auto-add bado.\nTumia: *.gm autoadd <namba|groupId> on*';
   let names = {};
@@ -291,6 +328,6 @@ async function statusText(sock) {
 }
 
 module.exports = {
-  start, tick, runOnce, statusText, DEFAULTS, MAX_PER_DAY_CAP, eatNow, inWindow, windowKey,
+  start, tick, runOnce, nextGapMin, minutesLeftInWindow, statusText, DEFAULTS, MAX_PER_DAY_CAP, eatNow, inWindow, windowKey,
   keyFor, setTarget, ownerHasAccess, setOwnerAccess, startForOwner, stopForOwner, listForOwner,
 };
