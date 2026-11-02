@@ -1155,7 +1155,9 @@ const http = require('http');
 const BACKUP_SECRET = process.env.BACKUP_SECRET || 'badilisha_hii_iwe_secret_ndefu_na_ngumu_kubashiri';
 const BACKUP_RECIPIENT = process.env.BACKUP_RECIPIENT || (config.ownerNumber && config.ownerNumber[0]) || null;
 const BACKUP_RECEIVE_PATH = '/receive-backup';
-const HTTP_PORT = process.env.PORT || 3000;
+// PORT (Railway) INASHINDA daima. SERVER_PORT ni fallback ya Bot-Hosting/Pterodactyl
+// (inaweka port ya server yenyewe, mf. 26114). Zote zikikosekana -> 3000.
+const HTTP_PORT = process.env.PORT || process.env.SERVER_PORT || 3000;
 const MAX_BACKUP_SIZE = 50 * 1024 * 1024; // 50MB - kikomo cha usalama
 
 // ===== REMINDER RELAY: pairing/server.js (mfumo wa wateja, Railway service
