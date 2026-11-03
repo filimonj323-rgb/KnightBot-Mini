@@ -457,7 +457,7 @@
 <script>
   // EDIT hii iwe URL kamili ya Railway service yako (ile ile inayotumika
   // kwenye admin.html — API_BASE).
-  const API_BASE = 'https://botkuusite.up.railway.app';
+  const API_BASE = (location.hostname.endsWith('bot-hosting.cloud') || location.port === '26114') ? '' : 'https://botkuusite.up.railway.app';
 
   let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
   let pollTimer = null;
