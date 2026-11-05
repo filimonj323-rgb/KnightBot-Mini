@@ -1231,7 +1231,7 @@
   // requests reach Railway instead of 404-ing against GitHub Pages itself.
   // EDIT this to your Railway service's URL (same value as
   // pairing/pairingConfig.js's PAIRING_BASE_URL / MAIN_BOT_API_URL).
-  const API_BASE = (location.hostname.endsWith('bot-hosting.cloud') || location.port === '26114') ? '' : 'https://botkuusite.up.railway.app';
+  const API_BASE = 'https://botkuusite.up.railway.app';
 
   const params = new URLSearchParams(window.location.search);
   const token = params.get('token');

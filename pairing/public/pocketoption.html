@@ -359,7 +359,7 @@
 <script src="trade-export.js"></script>
 <script>
   // Lazima ilingane na API_BASE ya admin.html / fxtrading.html
-  const API_BASE = (location.hostname.endsWith('bot-hosting.cloud') || location.port === '26114') ? '' : 'https://botkuusite.up.railway.app';
+  const API_BASE = 'https://botkuusite.up.railway.app';
   let TOKEN = sessionStorage.getItem('adminToken') || '';
   let state = { bridge: null, balance: null, trades: [], auto: [], pairs: [], modes: [], at: null, atStats: null };
   let atDirty = false;

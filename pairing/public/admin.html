@@ -738,7 +738,7 @@
   // prefixed with API_BASE so it always reaches the right place. EDIT this
   // to your Railway service's URL (same value as pairing/pairingConfig.js's
   // PAIRING_BASE_URL / MAIN_BOT_API_URL).
-  const API_BASE = (location.hostname.endsWith('bot-hosting.cloud') || location.port === '26114') ? '' : 'https://botkuusite.up.railway.app';
+  const API_BASE = 'https://botkuusite.up.railway.app';
 
   let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
   let ALL_USERS = [];
