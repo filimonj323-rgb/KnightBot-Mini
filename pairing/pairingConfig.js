@@ -54,8 +54,8 @@ const getters = {
   ABLINER_BASE_URL: str('ABLINER_BASE_URL', 'https://abliner.net/api/v1'),
 
   // URLs za huduma
-  PAIRING_BASE_URL: str('PAIRING_BASE_URL', 'https://botkuusite.up.railway.app'),
-  MAIN_BOT_API_URL: str('MAIN_BOT_API_URL', 'https://botkuusite.up.railway.app'),
+  PAIRING_BASE_URL: str('PAIRING_BASE_URL', 'https://botkuuusite.up.railway.app'),
+  MAIN_BOT_API_URL: str('MAIN_BOT_API_URL', 'https://botkuuusite.up.railway.app'),
   // LAZIMA ilingane HASA na REMINDER_SECRET kwenye service ya index.js (la sivyo 403)
   MAIN_BOT_API_SECRET: str('MAIN_BOT_API_SECRET'),
 
