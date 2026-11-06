@@ -196,14 +196,23 @@ module.exports = {
       let audioBuffer = null;
       const errors = [];
 
-      try { videoBuffer = await downloadDirectYtdl(videoUrl); }
-      catch (e) { errors.push('ytdl: ' + (e?.message || e)); console.error('[VIDEO] ytdl failed:', e?.message || e); }
+      // Njia mpya (kutoka Knightbot-MD): Knight → Prince → Hector. Zinarudisha link,
+      // Baileys inaisoma moja kwa moja (hakuna RAM kubwa). Zikishindwa, tunaendelea na za zamani.
+      try {
+        videoData = await require('../../utils/mediaApis').resolveYouTubeVideo(videoUrl);
+        console.log('[VIDEO] ✅ imefanikiwa kwa API mpya:', videoData.source);
+      } catch (e) { errors.push('apis-mpya: ' + (e?.message || e)); }
+
+      if (!videoData) {
+        try { videoBuffer = await downloadDirectYtdl(videoUrl); }
+        catch (e) { errors.push('ytdl: ' + (e?.message || e)); console.error('[VIDEO] ytdl failed:', e?.message || e); }
+      }
 
       // Hatua 2: youtubei.js — jaribu wateja kadhaa wa YouTube kwa mpangilio.
       // "Video is unplayable" kutoka mteja mmoja haimaanishi wengine watashindwa.
       // (API za zamani EliteProTech/Yupra/Okatsu ZIMEONDOLEWA: 404, domain
       // haipo tena (ENOTFOUND), na 402 — zilikuwa zinachelewesha tu.)
-      if (!videoBuffer) {
+      if (!videoBuffer && !videoData) {
         console.error('[VIDEO] url inayojaribiwa:', videoUrl);
         for (const client of ['TV', 'TV_EMBEDDED', 'IOS', 'ANDROID']) {
           try {

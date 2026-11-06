@@ -100,6 +100,42 @@ module.exports = {
       let success = false;
 
       // ══════════════════════════════════════
+      // API 0 (mpya, kutoka Knightbot-MD): Knight API, kisha ruhend ttdl
+      // ══════════════════════════════════════
+      if (!success) {
+        const candidates = [];
+        try { candidates.push(['Knight', () => require('../../utils/mediaApis').knightTikTokDownload(url)]); } catch (e) {}
+        candidates.push(['ttdl', async () => {
+          const { ttdl } = require('ruhend-scraper');
+          const d = await ttdl(url);
+          const direct = d?.video_hd || d?.video || d?.video_wm || d?.hdplay || d?.play || d?.data?.find?.((m) => m?.url)?.url || null;
+          if (!direct) throw new Error('No video URL found');
+          return { title: d.title || '', download: direct };
+        }]);
+        for (const [name, run] of candidates) {
+          if (success) break;
+          try {
+            console.log(`TikTok API 0: ${name}...`);
+            const r = await run();
+            if (r?.download && /^https?:\/\//i.test(r.download)) {
+              const buf = await fetchBuffer(r.download);
+              if (buf && buf.length > 1000) {
+                await sock.sendMessage(chatId, {
+                  video: buf,
+                  mimetype: 'video/mp4',
+                  caption: `*DOWNLOADED BY ${botName}*${r.title ? `\n\n📝 ${r.title}` : ''}`
+                }, { quoted: msg });
+                success = true;
+                console.log(`✅ API 0 (${name}) success!`);
+              }
+            }
+          } catch (e) {
+            console.log(`❌ API 0 (${name}) failed:`, e.message);
+          }
+        }
+      }
+
+      // ══════════════════════════════════════
       // API 1: tikwm.com (Reliable sana - no watermark)
       // ══════════════════════════════════════
       if (!success) {

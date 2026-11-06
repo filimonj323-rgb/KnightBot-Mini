@@ -65,6 +65,20 @@ module.exports = {
         react: { text: '🔄', key: msg.key }
       });
       
+      // Njia mpya (kutoka Knightbot-MD): Knight API → Hanggts. Zikishindwa, scraper ya zamani inafuata.
+      try {
+        const dl = await require('../../utils/mediaApis').resolveFacebook(url);
+        const botNameNew = config.botName.toUpperCase();
+        await sock.sendMessage(extra.from, {
+          video: { url: dl.download },
+          mimetype: 'video/mp4',
+          caption: `*DOWNLOADED BY ${botNameNew}*${dl.title ? `\n\n📝 ${dl.title}` : ''}`
+        }, { quoted: msg });
+        return;
+      } catch (newErr) {
+        console.log('[facebook] njia mpya zimeshindwa, naendelea na scraper:', newErr?.message || newErr);
+      }
+
       try {
         // Use @bochilteam/scraper-facebook
         const data = await facebookdl(url);
