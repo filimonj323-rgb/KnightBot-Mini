@@ -1032,6 +1032,25 @@
         </div>
       </div>
 
+      <div class="protect-block" data-feature="antiBot">
+        <div class="toggle-row">
+          <span class="tg-ico">🤖</span>
+          <span class="toggle-label">Anti Bot (inafuta commands za bots nyingine, onyo 3 = kuondolewa)</span>
+          <label class="switch"><input type="checkbox" class="protectToggle"><span class="slider"></span></label>
+        </div>
+        <div class="protect-groups" style="display:none;">
+          <div class="protect-hint">Chagua groups zitakazowasha ulinzi huu</div>
+          <div class="group-list" data-list>
+            <div class="group-row" style="justify-content:center;color:var(--muted);">Inapakia groups...</div>
+          </div>
+          <div class="group-list-actions">
+            <span data-action="all">☑️ Chagua Zote</span>
+            <span data-action="none">⬜ Ondoa Zote</span>
+          </div>
+          <div class="selected-count" data-count>Umechagua groups: 0</div>
+        </div>
+      </div>
+
       <button id="protectSaveBtn">💾 Hifadhi Ulinzi</button>
       <div class="msg" id="protectMsgBox"></div>
     </div>
@@ -2140,9 +2159,9 @@
   });
 
   /* =========================================================
-     SECTION 4c — Group-wise protection (antiGroupMention, antiPromo, antiLink)
+     SECTION 4c — Group-wise protection (antiGroupMention, antiPromo, antiLink, antiBot)
      ========================================================= */
-  const protectFeatures = ['antiGroupMention', 'antiPromo', 'antiLink'];
+  const protectFeatures = ['antiGroupMention', 'antiPromo', 'antiLink', 'antiBot'];
   const protectState = {};
   protectFeatures.forEach(f => { protectState[f] = { enabled: false, groupIds: new Set() }; });
 
