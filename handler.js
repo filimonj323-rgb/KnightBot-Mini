@@ -996,6 +996,15 @@ const handleMessageImpl = async (sock, msg) => {
       }
     }
     
+    // Antibot: gundua bots nyingine kwa message-ID (inafanya kazi tu kama .antibot on)
+    if (isGroup) {
+      try {
+        await withOwnerScope(sock, () => require('./commands/admin/antibot').handleAntibotDetection(sock, msg, groupMetadata));
+      } catch (error) {
+        console.error('Error in antibot handler:', error);
+      }
+    }
+
     // Track group message statistics
     if (isGroup) {
       addMessage(from, sender);
