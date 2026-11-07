@@ -156,18 +156,7 @@ const PROTECTION_FEATURES = {
   antiGroupMention: 'antigroupmention',
   antiPromo: 'antipromo',
   antiLink: 'antilink',
-  antiBot: 'antibotEnabled',
 };
-
-// Features zinazokuwa ON kwa default: field ikiwa haijawahi kuandikwa kwenye
-// database ya group (undefined) tunaihesabu kama IMEWASHWA. Dashboard ikiihifadhi
-// (true/false) thamani hiyo ya wazi ndiyo inayoshinda. Antibot: default ON + onyo (warn).
-const PROTECTION_DEFAULT_ON = { antiBot: true };
-function isProtectionOn(groupSettings, feature) {
-  const v = groupSettings ? groupSettings[PROTECTION_FEATURES[feature]] : undefined;
-  if (v === undefined) return !!PROTECTION_DEFAULT_ON[feature];
-  return !!v;
-}
 
 // Automation keys that ship ON for every customer unless they explicitly
 // switch them off from the dashboard (Settings > Otomatiki) — same
@@ -1696,7 +1685,7 @@ async function getProtectionForToken(token) {
       Object.keys(PROTECTION_FEATURES).forEach((feature) => {
         const dbField = PROTECTION_FEATURES[feature];
         const groupIds = groups
-          .filter((g) => isProtectionOn(groupDb.getGroupSettings(g.id), feature))
+          .filter((g) => !!groupDb.getGroupSettings(g.id)[dbField])
           .map((g) => g.id);
         result[feature] = { enabled: groupIds.length > 0, groupIds };
       });
@@ -2167,7 +2156,7 @@ function adminProtectionView(phoneNumber, groups) {
     groupDb.runWithOwnerScope(phoneNumber, () => {
       Object.keys(PROTECTION_FEATURES).forEach((feature) => {
         const dbField = PROTECTION_FEATURES[feature];
-        out[feature].enabledCount = groups.filter((g) => isProtectionOn(groupDb.getGroupSettings(g.id), feature)).length;
+        out[feature].enabledCount = groups.filter((g) => !!groupDb.getGroupSettings(g.id)[dbField]).length;
       });
     });
   } catch (e) { /* onyesha 0 badala ya kuvunja detail nzima */ }
