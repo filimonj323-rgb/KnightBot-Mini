@@ -1,6 +1,6 @@
 /**
- * Antibot - Inazuia na kufuta COMMANDS za bots nyingine (zinazogunduliwa kwa
- * message-ID ya Baileys). Ujumbe wa kawaida wa bot (si command) haugusiwi.
+ * Antibot - Inazuia na kufuta COMMANDS za bots nyingine na MAJIBU yao ya commands
+ * (bot inagunduliwa kwa message-ID ya Baileys). Maongezi mengine ya bot hayaguswi.
  * Admins, owner na bot yenyewe hawaguswi.
  *
  * Mipangilio huhifadhiwa kwenye group settings (database):
@@ -15,6 +15,12 @@ const config = require('../../config');
 const { findParticipant, buildComparableIds } = require('../../utils/jidHelper');
 
 const recent = new Map(); // msgId -> timestamp (dedupe)
+const lastCommand = new Map(); // chatId -> { ts, sender } — command ya mwisho kwenye group
+const RESPONSE_WINDOW_MS = 15000; // bot ikijibu ndani ya sekunde 15 baada ya command = jibu la command
+
+// Weka ANTIBOT_DEBUG=1 kwenye Railway kuona kwa nini ujumbe unagunduliwa au haugunduliwi
+const debugOn = () => /^(1|true|yes)$/i.test(String(process.env.ANTIBOT_DEBUG || ''));
+const dbg = (...a) => { if (debugOn()) console.log('[antibot]', ...a); };
 
 // Jina la bot (branding) — linatoka config.botName
 const brand = () => String(config.botName || 'Bot').toUpperCase();
@@ -29,23 +35,58 @@ function isBaileysBotId(id) {
     return true;
   }
   if (id.startsWith('B24E') && id.length === 20) return true;
+  // Prefix za ziada za bots zenu (env ANTIBOT_ID_PREFIXES="ABC,XYZ")
+  const extra = String(process.env.ANTIBOT_ID_PREFIXES || '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (extra.some((p) => id.startsWith(p))) return true;
   if (id.startsWith('NJX-')) return true;
   // Forks nyingi: PREFIX-hex yenye dash
   if (/^[A-Z0-9]{2,8}-[A-F0-9]{8,}$/i.test(id)) return true;
   return false;
 }
 
-// Maandishi ya ujumbe (text, caption ya picha/video)
-function getMessageText(msg) {
-  const m = msg?.message || {};
+// Ondoa vifuniko (ephemeral/viewOnce/documentWithCaption) ili kufikia ujumbe halisi
+function unwrapMessage(m) {
+  let cur = m || {};
+  for (let i = 0; i < 4; i++) {
+    const inner =
+      cur.ephemeralMessage?.message ||
+      cur.viewOnceMessage?.message ||
+      cur.viewOnceMessageV2?.message ||
+      cur.documentWithCaptionMessage?.message ||
+      null;
+    if (!inner) break;
+    cur = inner;
+  }
+  return cur;
+}
+
+function textOf(m) {
+  m = unwrapMessage(m);
   return (
     m.conversation ||
     m.extendedTextMessage?.text ||
     m.imageMessage?.caption ||
     m.videoMessage?.caption ||
     m.documentMessage?.caption ||
+    m.buttonsMessage?.contentText ||
+    m.interactiveMessage?.body?.text ||
     ''
   );
+}
+
+// Maandishi ya ujumbe (text, caption ya picha/video)
+function getMessageText(msg) {
+  return textOf(msg?.message);
+}
+
+// Maandishi ya ujumbe uliobandikwa (reply/quote), kama upo
+function getQuotedText(msg) {
+  const m = unwrapMessage(msg?.message);
+  for (const v of Object.values(m)) {
+    const q = v && typeof v === 'object' ? v.contextInfo?.quotedMessage : null;
+    if (q) return textOf(q);
+  }
+  return '';
 }
 
 // Command = ujumbe unaoanza na alama ya prefix (. ! # / $ n.k) ikifuatiwa na herufi,
@@ -53,15 +94,16 @@ function getMessageText(msg) {
 function isCommandText(text) {
   const t = String(text || '').trim();
   if (!t) return false;
-  if (/^[!#$%&*+,.\/:;<=>?^_~|\\-][a-z]/i.test(t)) return true;
+  // (* _ ~ : ; hazimo: ni alama za bold/italic/emoji, zingefanya majibu ya kawaida yaonekane kama commands)
+  if (/^[!#$%&+,.\/<=>?^|\\-][a-z]/i.test(t)) return true;
   const own = Array.isArray(config.prefix) ? config.prefix : [config.prefix];
   return own.filter(Boolean).some((p) => t.startsWith(p) && /[a-z]/i.test(t.charAt(p.length)));
 }
 
 /**
  * Inaitwa kwa kila ujumbe wa group (kutoka handler.js).
- * Inarudisha true kama ujumbe ni command ya bot nyingine (imezuiwa) — handler
- * haitaiendesha. Inarudisha false kwa kila kitu kingine.
+ * Inarudisha true kama ujumbe ni command ya bot nyingine au jibu lake (imezuiwa) —
+ * handler haitaiendesha. Inarudisha false kwa kila kitu kingine.
  */
 async function handleAntibotDetection(sock, msg, groupMetadata) {
   try {
@@ -73,11 +115,32 @@ async function handleAntibotDetection(sock, msg, groupMetadata) {
     if (settings.antibotEnabled === false) return false; // default ni ON
 
     const msgId = msg.key.id;
-    if (!isBaileysBotId(msgId)) return false;
-    if (!isCommandText(getMessageText(msg))) return false; // ujumbe wa kawaida wa bot hauguswi
+    const now = Date.now();
+    const senderRaw = msg.key.participant || msg.participant || chatId;
+    const senderAlt = msg.key.participantAlt;
+    const senderKey = buildComparableIds(senderRaw)[0] || senderRaw;
+
+    const text = getMessageText(msg);
+    const isCmd = isCommandText(text);
+
+    // Rekodi command ya mwisho ya group (kwa kugundua majibu ya bots)
+    if (isCmd) {
+      lastCommand.set(chatId, { ts: now, sender: senderKey });
+      if (lastCommand.size > 200) {
+        for (const [id, v] of lastCommand) if (now - v.ts > 60000) lastCommand.delete(id);
+      }
+    }
+
+    // "Command ya bot" = ujumbe wenye ID ya bot ambao ni command, unaojibu command,
+    // au umekuja ndani ya sekunde chache baada ya command ya mtu mwingine
+    const botId = isBaileysBotId(msgId);
+    const quotesCmd = isCommandText(getQuotedText(msg));
+    const last = lastCommand.get(chatId);
+    const inWindow = !!last && now - last.ts < RESPONSE_WINDOW_MS && last.sender !== senderKey;
+    dbg(`id=${msgId} len=${String(msgId).length} botId=${botId} cmd=${isCmd} quotesCmd=${quotesCmd} inWindow=${inWindow} text=${JSON.stringify(String(text).slice(0, 30))}`);
+    if (!(botId && (isCmd || quotesCmd || inWindow))) return false; // ujumbe mwingine wa bot hauguswi
 
     // Dedupe (notify + append)
-    const now = Date.now();
     if (recent.has(msgId) && now - recent.get(msgId) < 20000) return true;
     recent.set(msgId, now);
     if (recent.size > 300) {
@@ -89,17 +152,14 @@ async function handleAntibotDetection(sock, msg, groupMetadata) {
     // Lazy require ili kuepuka circular dependency na handler.js
     const handler = require('../../handler');
 
-    const senderRaw = msg.key.participant || msg.participant || chatId;
-    const senderAlt = msg.key.participantAlt;
-
-    if (!(await handler.isBotAdmin(sock, chatId, groupMetadata))) return false;
-    if (await handler.isAdmin(sock, senderRaw, chatId, groupMetadata)) return false;
-    if (handler.isOwner(senderRaw, sock)) return false;
+    if (!(await handler.isBotAdmin(sock, chatId, groupMetadata))) { dbg('ruka: bot si admin kwenye group hii'); return false; }
+    if (await handler.isAdmin(sock, senderRaw, chatId, groupMetadata)) { dbg('ruka: mtumaji ni admin'); return false; }
+    if (handler.isOwner(senderRaw, sock)) { dbg('ruka: mtumaji ni owner'); return false; }
 
     // Usimguse bot yenyewe
     const botIds = [sock.user?.id, sock.user?.lid].filter(Boolean);
     const targetIds = new Set([senderRaw, senderAlt].filter(Boolean).flatMap((j) => buildComparableIds(j)));
-    if (botIds.some((b) => buildComparableIds(b).some((id) => targetIds.has(id)))) return false;
+    if (botIds.some((b) => buildComparableIds(b).some((id) => targetIds.has(id)))) { dbg('ruka: ni bot hii yenyewe'); return false; }
 
     // JID itakayotumika kwa kick (ile iliyopo kwenye group metadata)
     let kickJid = senderRaw;
@@ -189,7 +249,7 @@ module.exports = {
           `${header()}\n\n` +
           `Hali: *${isOn ? 'IMEWASHWA' : 'IMEZIMWA'}*\n` +
           `Hatua: *${currentAction}*\n\n` +
-          `Inazuia na kufuta commands zinazotumwa na bots nyingine.\n` +
+          `Inazuia na kufuta commands za bots nyingine na majibu yao.\n` +
           `Admins, owner na bot hii hawaguswi.\n\n` +
           `*Matumizi:*\n` +
           `  .antibot on  — washa\n` +
@@ -237,5 +297,6 @@ module.exports = {
 
   handleAntibotDetection,
   isBaileysBotId,
-  isCommandText
+  isCommandText,
+  getQuotedText
 };
