@@ -996,16 +996,6 @@ const handleMessageImpl = async (sock, msg) => {
       }
     }
     
-    // Antibot: zuia na ufute commands za bots nyingine (inafanya kazi tu kama .antibot on)
-    if (isGroup) {
-      try {
-        const blockedByAntibot = await withOwnerScope(sock, () => require('./commands/admin/antibot').handleAntibotDetection(sock, msg, groupMetadata));
-        if (blockedByAntibot) return; // command ya bot nyingine — usiiendeshe
-      } catch (error) {
-        console.error('Error in antibot handler:', error);
-      }
-    }
-
     // Track group message statistics
     if (isGroup) {
       addMessage(from, sender);
