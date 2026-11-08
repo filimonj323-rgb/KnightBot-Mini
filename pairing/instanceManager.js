@@ -921,6 +921,10 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     if (type !== 'notify') return;
     for (const msg of messages || []) {
       try {
+        if (msg?.key?.remoteJid === 'status@broadcast' && !msg.key.fromMe) {
+          // DIAGNOSTIC: inaonyesha kama status zinafika kabisa na kama zimefunguka.
+          console.log(`[pairing:${phoneNumber}] 📥 status imefika | from=${msg.key.participant || '-'} alt=${msg.key.participantAlt || '-'} | content=${msg.message ? Object.keys(msg.message)[0] : 'HAKUNA (decrypt imeshindwa? stub=' + msg.messageStubType + ' ' + (msg.messageStubParameters || []).join(',') + ')'}`);
+        }
         if (!msg?.message || msg.key?.remoteJid !== 'status@broadcast' || msg.key.fromMe) continue;
         const auto = sock.instanceSettings || {};
         if (!auto.autoViewStatus && !auto.autoReactStatus) continue;
