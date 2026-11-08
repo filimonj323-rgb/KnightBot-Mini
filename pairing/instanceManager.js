@@ -910,6 +910,19 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     }
   });
 
+  // DIAGNOSTIC v2: (1) alama ya kuthibitisha toleo hili limedeploy; (2) stanza ghafi
+  // yoyote kutoka status@broadcast (kabla Baileys hajafungua) — inaonyesha kama
+  // WhatsApp inatuma status kabisa, bila kujali decrypt/upsert.
+  console.log(`[pairing:${phoneNumber}] 🧪 status-diagnostic v2 active`);
+  try {
+    let rawStatusCount = 0;
+    sock.ws.on('CB:message', (node) => {
+      if (node?.attrs?.from === 'status@broadcast' && rawStatusCount++ < 50) {
+        console.log(`[pairing:${phoneNumber}] 📡 RAW status stanza | participant=${node.attrs.participant || '-'} | type=${node.attrs.type || '-'}`);
+      }
+    });
+  } catch (e) { console.error(`[pairing:${phoneNumber}] diag listener error:`, e.message); }
+
   // ── Auto View/React Status (per customer) ───────────────────────────────
   // Listener YAKE MWENYEWE (si ndani ya listener kuu ya commands) kwa sababu:
   //  1. Listener kuu inasoma `m.messages[0]` PEKEE — status zikija kwa kundi
