@@ -910,6 +910,75 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     }
   });
 
+  // ── Auto View/React Status (per customer) ───────────────────────────────
+  // Listener YAKE MWENYEWE (si ndani ya listener kuu ya commands) kwa sababu:
+  //  1. Listener kuu inasoma `m.messages[0]` PEKEE — status zikija kwa kundi
+  //     (batch) zote isipokuwa ya kwanza zilipotea kimya.
+  //  2. Hapa tunapitia ujumbe WOTE kwenye batch, tunachuja type === 'notify'
+  //     (kama handler.js), na KILA hatua ina log — hakuna `catch` ya kimya.
+  // Access gate (trial/malipo/blocked) bado inaangaliwa kabla ya view/react.
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return;
+    for (const msg of messages || []) {
+      try {
+        if (!msg?.message || msg.key?.remoteJid !== 'status@broadcast' || msg.key.fromMe) continue;
+        const auto = sock.instanceSettings || {};
+        if (!auto.autoViewStatus && !auto.autoReactStatus) continue;
+
+        const statusId = msg.key.id;
+        if (!statusId || viewedStatusCache.has(statusId) || statusProcessingQueue.has(statusId)) continue;
+
+        const access = await userStore.getAccessStatus(phoneNumber);
+        if (!access.allowed) continue;
+
+        statusProcessingQueue.add(statusId);
+        const posterJid = msg.key.participant || msg.key.participantAlt || msg.key.remoteJid;
+        const posterNum = String(posterJid).split('@')[0];
+        try {
+          if (auto.autoViewStatus) {
+            await sock.readMessages([msg.key]);
+            console.log(`[pairing:${phoneNumber}] 👁️ status +${posterNum} imeonekana`);
+          }
+          viewedStatusCache.set(statusId, true);
+        } catch (e) {
+          console.error(`[pairing:${phoneNumber}] ❌ readMessages status +${posterNum} imeshindwa:`, e.message);
+        } finally {
+          statusProcessingQueue.delete(statusId);
+        }
+
+        if (auto.autoReactStatus) {
+          const delayMs = 30000 + Math.floor(Math.random() * 30000);
+          setTimeout(async () => {
+            try {
+              const recheck = await userStore.getAccessStatus(phoneNumber);
+              if (!recheck.allowed) return;
+              const { normalizeJidWithLid } = require('../utils/jidHelper');
+              let deliverJid = posterJid;
+              if (String(posterJid).endsWith('@lid') || String(posterJid).endsWith('@hosted.lid')) {
+                const alt = msg.key.participantAlt;
+                if (alt && alt.endsWith('@s.whatsapp.net')) {
+                  deliverJid = alt; // WhatsApp inatupa namba halisi moja kwa moja
+                } else {
+                  const livePn = await resolveLidLive(sock, posterJid);
+                  deliverJid = livePn || normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
+                }
+              }
+              const selfPn = String(sock.user?.id || '').replace(/:\d+@/, '@'); // ondoa device suffix
+              await sock.sendMessage('status@broadcast', {
+                react: { text: randomReaction(), key: msg.key },
+              }, { statusJidList: [deliverJid, selfPn].filter(Boolean) });
+              console.log(`[pairing:${phoneNumber}] ❤️ react status +${posterNum} (deliverJid: ${deliverJid})`);
+            } catch (e) {
+              console.error(`[pairing:${phoneNumber}] ❌ react status +${posterNum} imeshindwa:`, e.message);
+            }
+          }, delayMs);
+        }
+      } catch (e) {
+        console.error(`[pairing:${phoneNumber}] ❌ status handler error:`, e.message);
+      }
+    }
+  });
+
   // Every message this customer's number receives is routed through the
   // SAME command handler as the main bot — same commands/*, no duplication.
   // BUT first check trial/payment access: once a customer's trial (or paid
@@ -940,74 +1009,6 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         console.error(`[pairing:${phoneNumber}] handleExpiredMessage error:`, e.message);
       });
       return;
-    }
-
-    // Auto View/React Status — per-customer toggles from the dashboard
-    // (Settings > Otomatiki), ON BY DEFAULT for every customer (see
-    // getInstanceSettings() below). Only reached when access is allowed
-    // (gate above) — an expired/blocked customer gets NO auto view/react.
-    // Mirrors handler.js's setupAutoStatusViewer() (the /owner !autostatus
-    // command's own logic) — dedup cache, delayed react, and LID-aware
-    // delivery JID — because that is the version proven to actually work;
-    // the difference here is it's scoped to sock.instanceSettings per
-    // customer instead of one shared database/autostatus.json file.
-    if (msg.key.remoteJid === 'status@broadcast' && !msg.key.fromMe) {
-      const auto = sock.instanceSettings || {};
-      const statusId = msg.key.id;
-
-      if ((auto.autoViewStatus || auto.autoReactStatus) && statusId
-          && !viewedStatusCache.has(statusId) && !statusProcessingQueue.has(statusId)) {
-        statusProcessingQueue.add(statusId);
-        viewedStatusCache.set(statusId, true);
-
-        (async () => {
-          try {
-            if (auto.autoViewStatus) {
-              await sock.readMessages([msg.key]);
-            }
-            if (auto.autoReactStatus) {
-              const posterJid = msg.key.participant || msg.key.remoteJid;
-              // 30-60s random delay — mirrors the /owner behaviour so
-              // reactions don't all fire the instant a status goes up.
-              const delayMs = 30000 + Math.floor(Math.random() * 30000);
-              setTimeout(async () => {
-                try {
-                  // Muda unaweza kuisha ndani ya kuchelewa kwa sekunde 30–60 —
-                  // thibitisha tena access kabla ya kutuma react.
-                  const recheck = await userStore.getAccessStatus(phoneNumber);
-                  if (!recheck.allowed) return;
-
-                  // Required lazily (not at module top) because this file is
-                  // require()'d by server.js at startup, before
-                  // ensureBaileysBridge() has set global.__baileys —
-                  // jidHelper.js reads that at require-time, so requiring it
-                  // early crashes the whole server on boot. By the time this
-                  // callback runs, connectInstance() (and therefore the
-                  // bridge) has always already completed.
-                  const { normalizeJidWithLid } = require('../utils/jidHelper');
-                  // Jaribio 1: live lookup kwenye signal repository ya Baileys
-                  // (haitegemei faili za disk, hivyo inafanya kazi hata kwa
-                  // session za Turso ambazo hazina lid-mapping-*.json).
-                  // Jaribio 2: cache ya disk (itakuwa tupu mara nyingi kwa
-                  // pairing instances, lakini bado ni fallback salama).
-                  let deliverJid = posterJid;
-                  if (posterJid.endsWith('@lid') || posterJid.endsWith('@hosted.lid')) {
-                    const livePn = await resolveLidLive(sock, posterJid);
-                    deliverJid = livePn || normalizeJidWithLid(posterJid, sessionFolder) || posterJid;
-                  }
-                  await sock.sendMessage('status@broadcast', {
-                    react: { text: randomReaction(), key: msg.key },
-                  }, { statusJidList: [deliverJid, sock.user.id] });
-                } catch (e) { /* status inaweza kuwa imeondolewa kabla ya react — si tatizo */ }
-              }, delayMs);
-            }
-          } catch (e) {
-            viewedStatusCache.del(statusId);
-          } finally {
-            statusProcessingQueue.delete(statusId);
-          }
-        })();
-      }
     }
 
     // Auto Recording indicator — per-customer toggle, mirrors index.js's
