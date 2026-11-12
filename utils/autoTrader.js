@@ -97,6 +97,9 @@ const {
   ALLOWED_MULTIPLIERS,
   toDerivSymbol,
   MIN_STAKE_USD,
+  getAccountMode,
+  getAccountState,
+  onAccountSwitched,
 } = require('./derivTrader');
 // Turso (libSQL) — tayari inatumika na pairing/server.js kwa users/payments;
 // hapa tunatumia kuhifadhi openAutoTrades ili isipotee kila redeploy/restart
@@ -363,18 +366,23 @@ const peakProfitPct = new Map();
 // ⚠️ fx_auto_trades pia ina trades za WATEJA (ownerPhone = namba ya mteja, utils/derivTrades.js).
 // Query zote za owner/auto-trader hapa lazima zichuje `ownerPhone IS NULL` — vinginevyo trades za wateja
 // zingeingia kwenye ufuatiliaji/stats za akaunti ya owner.
+// Trades zinatenganishwa kwa akaunti (demo/real): history, stats na ufuatiliaji wa wazi vinaonyesha akaunti ya SASA tu.
+// Trades za zamani (accountMode NULL) zinahesabiwa kama za akaunti ya sasa.
+function modeSql() { return getAccountMode() ? ' AND (accountMode IS NULL OR accountMode = ?)' : ''; }
+function modeArgs() { const m = getAccountMode(); return m ? [m] : []; }
+
 async function dbSaveOpenTrade({ contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength }) {
   try {
     await fxTradesDb.initSchema();
     await fxTradesDb.query(
-      `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength, accountMode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(contractId) DO UPDATE SET
          code=excluded.code, symbol=excluded.symbol, direction=excluded.direction,
          stake=excluded.stake, buyPrice=excluded.buyPrice, slUsd=excluded.slUsd,
          tpUsd=excluded.tpUsd, openedAt=excluded.openedAt,
          signalStrength=COALESCE(excluded.signalStrength, fx_auto_trades.signalStrength)`,
-      [contractId, code, symbol, direction, stake, buyPrice ?? null, slUsd ?? null, tpUsd ?? null, openedAt, signalStrength ?? null]
+      [contractId, code, symbol, direction, stake, buyPrice ?? null, slUsd ?? null, tpUsd ?? null, openedAt, signalStrength ?? null, getAccountMode()]
     );
   } catch (err) {
     console.error('[autoTrader] DB: imeshindwa kuhifadhi trade mpya (inaendelea na RAM pekee):', err.message);
@@ -479,10 +487,10 @@ async function reconcileHistoryFromDeriv(force = false) {
       if (!m) continue; // si multiplier ya forex
       const code = m[2].toUpperCase();
       await fxTradesDb.query(
-        `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, openedAt, closedAt, sellPrice, profit)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(contractId) DO NOTHING`,
+        `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, openedAt, closedAt, sellPrice, profit, accountMode)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(contractId) DO NOTHING`,
         [id, code, 'frx' + code, m[1].toUpperCase() === 'MULTUP' ? 'BUY' : 'SELL', buy, buy,
-          (Number(t.purchase_time) || 0) * 1000, (Number(t.sell_time) || 0) * 1000 || Date.now(), sell, pl]
+          (Number(t.purchase_time) || 0) * 1000, (Number(t.sell_time) || 0) * 1000 || Date.now(), sell, pl, getAccountMode()]
       );
     }
     lastReconcileAt = Date.now();
@@ -509,8 +517,8 @@ async function getTradeHistory(limit = 200) {
   const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
   const result = await fxTradesDb.query(
     `SELECT contractId, code, direction, stake, buyPrice, sellPrice, profit, openedAt, closedAt, signalStrength
-       FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL ORDER BY closedAt DESC LIMIT ?`,
-    [lim]
+       FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL${modeSql()} ORDER BY closedAt DESC LIMIT ?`,
+    [...modeArgs(), lim]
   );
   return (result.rows || []).map((r) => ({
     contractId: String(r.contractId),
@@ -531,7 +539,8 @@ async function getWinRateStats() {
     await reconcileHistoryFromDeriv();
     await fxTradesDb.initSchema();
     const result = await fxTradesDb.query(
-      `SELECT signalStrength, profit FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL`
+      `SELECT signalStrength, profit FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL${modeSql()}`,
+      modeArgs()
     );
     const rows = result.rows || [];
 
@@ -730,8 +739,20 @@ async function restoreOpenTradesFromDb() {
   let rows = [];
   try {
     await fxTradesDb.initSchema();
+    // Jua akaunti ya sasa (demo/real) kwanza — trades za akaunti nyingine HAZIRUDISHWI kwenye ufuatiliaji.
+    // Mtandao ukikosa, inaendelea bila kichujio (tabia ya zamani).
+    try { await getAccountState(); } catch (_) { /* hakuna kichujio */ }
+    // Trades za zamani zilizo wazi (accountMode NULL, kabla ya swichi) → zipewe akaunti ya SASA, ili zisichanganywe
+    // na akaunti nyingine ukibadili baadaye.
+    if (getAccountMode()) {
+      await fxTradesDb.query(
+        'UPDATE fx_auto_trades SET accountMode = ? WHERE accountMode IS NULL AND closedAt IS NULL AND ownerPhone IS NULL',
+        [getAccountMode()]
+      );
+    }
     const result = await fxTradesDb.query(
-      'SELECT contractId, code, symbol, direction, stake, buyPrice, openedAt, slUsd, tpUsd FROM fx_auto_trades WHERE closedAt IS NULL AND ownerPhone IS NULL'
+      `SELECT contractId, code, symbol, direction, stake, buyPrice, openedAt, slUsd, tpUsd FROM fx_auto_trades WHERE closedAt IS NULL AND ownerPhone IS NULL${modeSql()}`,
+      modeArgs()
     );
     rows = result.rows || [];
   } catch (err) {
@@ -827,12 +848,15 @@ let consecutiveLosses = 0;
 let pausedUntil = null; // timestamp (ms) — null = hakuna pause
 let pauseReason = null; // 'daily_loss_limit' | 'consecutive_losses' | null
 
+const pnlByMode = {}; // { demo: {dailyPnL, consecutiveLosses}, real: {...} } — kila akaunti ina circuit breaker yake
+
 function ensureDailyResetIfNewDay() {
   const key = utcDateKey(Date.now());
   if (key === dailyKey) return;
   dailyKey = key;
   dailyPnL = 0;
   consecutiveLosses = 0;
+  for (const k of Object.keys(pnlByMode)) delete pnlByMode[k];
   // Siku mpya = anza upya — ondoa pause ya "hasara ya siku" (si ya cooldown).
   if (pauseReason === 'daily_loss_limit') {
     pausedUntil = null;
@@ -1503,6 +1527,24 @@ function stop() {
  * commands/utility/fxautostatus.js kuonyesha kama iko ON/OFF, jozi
  * zinazofuatiliwa, signal ya mwisho ya kila jozi, na trades wazi.
  */
+// Akaunti ya Deriv ikibadilika (demo <-> real): futa ufuatiliaji wa trades za akaunti ya zamani (ziko salama
+// kwenye DB na zinarudi ukirudi huko), pakia za akaunti mpya, na tumia circuit breaker ya akaunti hiyo.
+// Trades za akaunti ya zamani ZISIPOONDOLEWA hapa, pollClosedTrades() ingeziona "hazipo" na kuzifunga kimakosa.
+onAccountSwitched(async (newMode, prevMode) => {
+  if (prevMode) pnlByMode[prevMode] = { dailyPnL, consecutiveLosses };
+  const next = pnlByMode[newMode] || { dailyPnL: 0, consecutiveLosses: 0 };
+  dailyPnL = next.dailyPnL;
+  consecutiveLosses = next.consecutiveLosses;
+  const dropped = openAutoTrades.size;
+  openAutoTrades.clear();
+  peakProfitPct.clear();
+  closeMisses.clear();
+  console.log(`[autoTrader] 🔄 Akaunti: ${prevMode || '?'} → ${newMode}. Trades ${dropped} za akaunti ya zamani zimeachwa kwenye DB (hazifuatiliwi sasa).`);
+  await restoreOpenTradesFromDb();
+  await pollClosedTrades();
+  await adoptAllLivePositions();
+});
+
 function getStatus() {
   return {
     enabled: ENABLED,

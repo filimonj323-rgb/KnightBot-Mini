@@ -122,34 +122,200 @@ function checkEnv() {
   }
 }
 
-let cachedAccountId = ACCOUNT_ID || null;
+// ── Akaunti hai: DEMO au REAL ───────────────────────────────────────────
+// Uchaguzi (mode) unahifadhiwa kwenye DB (fx_auto_settings) ili ubaki baada ya redeploy.
+// Kipaumbele: mode iliyohifadhiwa > DERIV_ACCOUNT_ID (env) > DEMO ya kwanza (tabia ya zamani).
+// REAL ina kikomo chake cha stake (realMaxStake) kinachotekelezwa kwenye placeMultiplier().
+const { classify } = require('./derivValidate');
 
-// Badala ya kutegemea loginid ya kawaida (VRTC.../CR...) ambayo SI sahihi
-// kwenye mfumo huu mpya ("Options trading account"), tunauliza Deriv
-// yenyewe ni account ID gani ya kutumia — hii ndiyo sababu ya ile "404"
-// tuliyoiona (DERIV_ACCOUNT_ID iliyokisiwa haikutambulika).
-async function resolveAccountId() {
-  if (cachedAccountId) return cachedAccountId;
+const MODE_KEY = 'deriv_account_mode';
+const REAL_STAKE_KEY = 'deriv_real_max_stake';
+let cachedAccountId = null;
+let accountMode = null; // 'demo' | 'real' | null (bado haijaamuliwa)
+let modeLoaded = false;
+let savedModeChosen = false; // true = mtu amechagua mode waziwazi (DB)
+let realMaxStake = Number(process.env.DERIV_REAL_MAX_STAKE_USD || 5);
+let switching = false; // trades mpya zinazuiwa wakati wa kubadili akaunti
+const switchListeners = [];
+/** Moduli (mfano autoTrader) zinajisajili kupokea taarifa akaunti ikibadilika: fn(newMode, prevMode). */
+function onAccountSwitched(fn) { if (typeof fn === 'function') switchListeners.push(fn); }
 
+const modeFromId = (id) => (/^VRT/i.test(String(id || '')) ? 'demo' : 'real');
+const fxDb = () => require('../pairing/db'); // lazy — epuka circular require
+
+async function readSetting(key) {
+  const db = fxDb();
+  await db.initSchema();
+  const r = await db.query('SELECT settingValue FROM fx_auto_settings WHERE settingKey = ?', [key]);
+  return (r.rows || [])[0]?.settingValue ?? null;
+}
+async function writeSetting(key, value) {
+  const db = fxDb();
+  await db.initSchema();
+  await db.query(
+    `INSERT INTO fx_auto_settings (settingKey, settingValue, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(settingKey) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = excluded.updatedAt`,
+    [key, String(value), Date.now()]
+  );
+}
+
+async function loadModeFromDb() {
+  if (modeLoaded) return;
+  try {
+    const m = await readSetting(MODE_KEY);
+    if (m === 'demo' || m === 'real') { accountMode = m; savedModeChosen = true; }
+    const cap = Number(await readSetting(REAL_STAKE_KEY));
+    if (Number.isFinite(cap) && cap > 0) realMaxStake = cap;
+    modeLoaded = true; // ikishindwa DB, tutajaribu tena wakati mwingine
+  } catch (err) {
+    console.error('[derivTrader] Imeshindwa kusoma mode ya akaunti kutoka DB (inatumia default):', err.message);
+  }
+}
+
+async function fetchOptionsAccounts() {
   const { data } = await axios.get(`${API_BASE}/trading/v1/options/accounts`, {
-    headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
-      'Deriv-App-ID': APP_ID,
-    },
+    headers: { Authorization: `Bearer ${API_TOKEN}`, 'Deriv-App-ID': APP_ID },
     timeout: REST_TIMEOUT_MS,
   });
-
   const accounts = data?.data || data?.accounts || [];
   if (!Array.isArray(accounts) || !accounts.length) {
     throw new Error('Hakuna Options trading account iliyopatikana kwenye Deriv (angalia DERIV_APP_ID/DERIV_API_TOKEN)');
   }
+  return accounts.map((a) => {
+    const c = classify(a);
+    const legacyDemo = !!(a.is_virtual || a.demo || a.account_type === 'demo');
+    return { id: c.id || a.account_id || a.id, demo: c.demo, legacyDemo, raw: a };
+  });
+}
 
-  const acc = accounts.find((a) => a.is_virtual || a.demo || a.account_type === 'demo') || accounts[0];
-  cachedAccountId = acc.account_id || acc.id;
-  if (!cachedAccountId) {
-    throw new Error('Account ID haikupatikana kwenye response ya Deriv (muundo umebadilika?)');
+// DEMO: classify() === true (au bendera ya zamani). REAL: classify() === false PEKEE (fail-closed:
+// kama haijulikani, HAIFAI kuwa REAL).
+function pickAccount(list, mode) {
+  if (mode === 'real') return list.find((x) => x.demo === false) || null;
+  return list.find((x) => x.demo === true) || list.find((x) => x.legacyDemo) || null;
+}
+
+async function resolveAccountId() {
+  if (cachedAccountId) return cachedAccountId;
+  await loadModeFromDb();
+
+  if (!savedModeChosen && ACCOUNT_ID) { // tabia ya zamani: env inatawala ikiwa hakuna uchaguzi wa dashboard
+    cachedAccountId = ACCOUNT_ID;
+    accountMode = modeFromId(ACCOUNT_ID);
+    return cachedAccountId;
   }
+
+  const list = await fetchOptionsAccounts();
+  let acc = pickAccount(list, accountMode || 'demo');
+  if (!acc && !savedModeChosen) acc = list[0]; // tabia ya zamani tu (hakuna uchaguzi wa wazi)
+  if (!acc) {
+    throw new Error(accountMode === 'real'
+      ? 'Akaunti ya REAL haikupatikana kwenye Deriv (token yako haina REAL account?)'
+      : 'Akaunti ya DEMO haikupatikana kwenye Deriv');
+  }
+  cachedAccountId = acc.id;
+  if (!cachedAccountId) throw new Error('Account ID haikupatikana kwenye response ya Deriv (muundo umebadilika?)');
+  accountMode = acc.demo === true || acc.legacyDemo ? 'demo' : (acc.demo === false ? 'real' : modeFromId(cachedAccountId));
   return cachedAccountId;
+}
+
+function getAccountMode() {
+  return accountMode; // 'demo' | 'real' | null
+}
+
+/** Hali ya akaunti kwa dashboard. withAvailability=true inauliza Deriv akaunti zipi zipo. */
+async function getAccountState({ withAvailability = false } = {}) {
+  await resolveAccountId();
+  const st = { mode: accountMode, accountId: cachedAccountId, realMaxStake, maxStakeUsd: MAX_STAKE_USD };
+  if (withAvailability) {
+    try {
+      const list = await fetchOptionsAccounts();
+      st.demoAvailable = !!pickAccount(list, 'demo');
+      st.realAvailable = !!pickAccount(list, 'real');
+    } catch (err) {
+      st.availabilityError = err.message;
+    }
+  }
+  return st;
+}
+
+async function setRealMaxStake(value) {
+  const v = Number(value);
+  if (!Number.isFinite(v) || v < MIN_STAKE_USD || v > MAX_STAKE_USD) {
+    throw new Error(`Kikomo cha stake ya REAL lazima kiwe kati ya $${MIN_STAKE_USD} na $${MAX_STAKE_USD}.`);
+  }
+  realMaxStake = v;
+  await writeSetting(REAL_STAKE_KEY, v);
+  return realMaxStake;
+}
+
+/**
+ * Badilisha akaunti (demo <-> real). SALAMA:
+ *  - inakataa ikiwa kuna trades ZILIZO WAZI kwenye akaunti ya sasa (hazibadilishwi wala hazipotei;
+ *    zifunge au subiri zifungwe kwanza), au ikishindwa kuthibitisha hilo (fail-closed);
+ *  - REAL inahitaji akaunti ya REAL iliyothibitishwa wazi kuwa REAL (si "haijulikani");
+ *  - trades mpya zinazuiwa wakati wa kubadili (flag ya `switching`).
+ */
+async function switchAccount(mode) {
+  if (mode !== 'demo' && mode !== 'real') throw Object.assign(new Error('Mode lazima iwe demo au real.'), { code: 'BAD_MODE' });
+  if (switching) throw Object.assign(new Error('Kubadili akaunti kunaendelea tayari — subiri.'), { code: 'BUSY' });
+  switching = true;
+  try {
+    checkEnv();
+    await loadModeFromDb();
+    const list = await fetchOptionsAccounts();
+    const target = pickAccount(list, mode);
+    if (!target || !target.id) {
+      throw Object.assign(new Error(mode === 'real'
+        ? 'Hakuna akaunti ya REAL iliyothibitishwa kwenye token hii ya Deriv.'
+        : 'Hakuna akaunti ya DEMO kwenye token hii ya Deriv.'), { code: 'NO_ACCOUNT' });
+    }
+
+    let leftOpenDemo = 0;
+    const prevMode = accountMode;
+    if (cachedAccountId && target.id !== cachedAccountId) {
+      let open;
+      try {
+        open = await getOpenPositions();
+      } catch (err) {
+        throw Object.assign(new Error('Siwezi kuthibitisha kama kuna trades wazi (' + err.message + '). Jaribu tena.'), { code: 'CANNOT_VERIFY' });
+      }
+      // REAL zilizo wazi: HAZIRUHUSIWI kuachwa bila usimamizi wa bot (trailing/kufunga) — lazima zifungwe kwanza.
+      // DEMO zilizo wazi: zinaruhusiwa — zinaendelea Deriv kwa SL/TP zake; bot inazikumbuka (DB) na kuzisimamia
+      // tena ukirudi DEMO.
+      if (open.length && accountMode === 'real') {
+        throw Object.assign(new Error(`Kuna trades ${open.length} za REAL zilizo wazi. Zifunge kwanza (au subiri zifike SL/TP) kisha ubadilishe — bot haiwezi kuziacha bila usimamizi.`), { code: 'OPEN_POSITIONS', open: open.length });
+      }
+      leftOpenDemo = open.length;
+    }
+
+    await writeSetting(MODE_KEY, mode);
+    savedModeChosen = true;
+    const changed = target.id !== cachedAccountId;
+    cachedAccountId = target.id;
+    accountMode = mode;
+
+    if (changed) {
+      // Kata muunganiko wa zamani; ensureConnected() itaomba OTP mpya ya akaunti mpya.
+      const old = ws;
+      ws = null;
+      wsReady = false;
+      connectPromise = null;
+      stopHeartbeat();
+      rejectAllPending(new Error('Akaunti imebadilishwa'));
+      try { if (old) old.terminate(); } catch (_) { /* tayari imekufa */ }
+      console.log(`[derivTrader] 🔄 Akaunti imebadilishwa kuwa ${mode.toUpperCase()} (${cachedAccountId})`);
+      // Waambie wasikilizaji (autoTrader) WAKATI `switching` bado true — ili isifungue trade kabla
+      // ya kupakia upya trades za akaunti mpya.
+      for (const fn of switchListeners) {
+        try { await fn(mode, prevMode); }
+        catch (err) { console.error('[derivTrader] listener ya kubadili akaunti imeshindwa:', err.message); }
+      }
+    }
+    return { mode: accountMode, accountId: cachedAccountId, realMaxStake, changed, leftOpenDemo };
+  } finally {
+    switching = false;
+  }
 }
 
 function rejectAllPending(err) {
@@ -217,7 +383,9 @@ function connectWs(wsUrl) {
       }
     });
 
+    const mySock = ws;
     ws.on('close', () => {
+      if (ws !== mySock) return; // socket ya zamani (akaunti ilibadilishwa) — usiharibu muunganiko mpya
       wsReady = false;
       connectPromise = null;
       stopHeartbeat();
@@ -292,7 +460,13 @@ function toDerivSymbol(pair) {
 // tena "buy:1, parameters:{...}" moja kwa moja bila proposal).
 // ─────────────────────────────────────────────
 async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, multiplier }) {
-  const amt = Math.min(Number(stake), MAX_STAKE_USD);
+  if (switching) throw new Error('Akaunti inabadilishwa sasa hivi — jaribu tena baada ya sekunde chache.');
+  await resolveAccountId(); // inajaza accountMode (demo/real)
+  let amt = Math.min(Number(stake), MAX_STAKE_USD);
+  if (accountMode === 'real' && amt > realMaxStake) {
+    console.warn(`[derivTrader] ⚠️ REAL: stake $${amt} imepunguzwa hadi kikomo cha REAL $${realMaxStake}`);
+    amt = realMaxStake;
+  }
   if (!(amt > 0)) throw new Error('Stake si sahihi (lazima iwe namba > 0)');
 
   if (amt < MIN_STAKE_USD) {
@@ -660,6 +834,11 @@ module.exports = {
   closeContractWithPnL,
   closeAll,
   getBalance,
+  getAccountMode,
+  getAccountState,
+  switchAccount,
+  onAccountSwitched,
+  setRealMaxStake,
   MAX_STAKE_USD,
   MAX_MULTIPLIER,
   toDerivSymbol,
