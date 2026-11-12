@@ -156,7 +156,7 @@ function openTrade(phone, params, opts = {}) {
         throw new TradeError(`Hasara ya leo ($${stats.lossToday}) + Stop Loss ya trade hii ($${t.stopLoss}) ingezidi kikomo cha hasara ya siku ($${limits.maxDailyLoss}). Punguza SL/stake.`, 'LOSS_BUDGET');
       }
 
-      pendingId = await trades.reservePending(phone, { code: t.code, symbol, direction: t.direction, stake: t.stake, slUsd: t.stopLoss, tpUsd: t.takeProfit, signalStrength: auto ? opts.signalStrength : null });
+      pendingId = await trades.reservePending(phone, { code: t.code, symbol, direction: t.direction, stake: t.stake, slUsd: t.stopLoss, tpUsd: t.takeProfit, signalStrength: auto ? opts.signalStrength : null, accountMode: gate.isDemo ? 'demo' : 'real' });
 
       // Hundi ya mwisho kabla ya kununua (kill switch/idhini inaweza kubadilika wakati tunasubiri Deriv).
       const gate2 = await accounts.canTrade(phone, { auto });

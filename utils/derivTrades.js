@@ -13,13 +13,22 @@ const db = require('../pairing/db');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const startOfUtcDay = (ts) => Math.floor(ts / DAY_MS) * DAY_MS;
 
+/** Akaunti ya sasa ya mteja: 'demo' | 'real' (kutoka deriv_accounts.isDemo) au null kama hajaunganisha. */
+async function modeOf(phone) {
+  const r = await db.query('SELECT isDemo FROM deriv_accounts WHERE phoneNumber = ?', [String(phone)]);
+  const row = r.rows && r.rows[0];
+  if (!row) return null;
+  return Number(row.isDemo) === 1 ? 'demo' : 'real';
+}
+
 /** Inahifadhi nafasi ya trade KABLA ya kuinunua (contractId ya muda). Ikishindikana, trade haifunguliwi. */
-async function reservePending(phone, { code, symbol, direction, stake, slUsd, tpUsd, signalStrength = null }) {
+async function reservePending(phone, { code, symbol, direction, stake, slUsd, tpUsd, signalStrength = null, accountMode = null }) {
   const id = `pending:${phone}:${crypto.randomBytes(6).toString('hex')}`;
   await db.query(
-    `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, slUsd, tpUsd, openedAt, ownerPhone, signalStrength)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, code, symbol, direction, stake, slUsd, tpUsd, Date.now(), String(phone), Number.isFinite(Number(signalStrength)) && signalStrength !== null ? Number(signalStrength) : null]
+    `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, slUsd, tpUsd, openedAt, ownerPhone, signalStrength, accountMode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, code, symbol, direction, stake, slUsd, tpUsd, Date.now(), String(phone), Number.isFinite(Number(signalStrength)) && signalStrength !== null ? Number(signalStrength) : null,
+      accountMode === 'demo' || accountMode === 'real' ? accountMode : null]
   );
   return id;
 }
@@ -58,10 +67,11 @@ async function openRows(phone) {
  */
 async function todayStats(phone, now = Date.now()) {
   const from = startOfUtcDay(now);
-  const r = await db.query(
-    'SELECT stake, slUsd, profit, closedAt FROM fx_auto_trades WHERE ownerPhone = ? AND openedAt >= ?',
-    [String(phone), from]
-  );
+  const mode = await modeOf(phone);
+  // Vikomo vya hatari: akaunti ya SASA tu (hasara za demo hazizuii real). Rows zisizo na alama zinahesabiwa pia (upande salama).
+  const r = mode
+    ? await db.query('SELECT stake, slUsd, profit, closedAt FROM fx_auto_trades WHERE ownerPhone = ? AND openedAt >= ? AND (accountMode = ? OR accountMode IS NULL)', [String(phone), from, mode])
+    : await db.query('SELECT stake, slUsd, profit, closedAt FROM fx_auto_trades WHERE ownerPhone = ? AND openedAt >= ?', [String(phone), from]);
   let opened = 0, loss = 0, pnl = 0;
   for (const row of r.rows) {
     opened += 1;
@@ -75,10 +85,11 @@ async function todayStats(phone, now = Date.now()) {
 
 async function history(phone, limit = 20) {
   const n = Math.max(1, Math.min(Number(limit) || 20, 200));
+  const mode = await modeOf(phone);
   const r = await db.query(
     `SELECT contractId, code, direction, stake, buyPrice, sellPrice, profit, openedAt, closedAt
-     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL ORDER BY closedAt DESC LIMIT ?`,
-    [String(phone), n]
+     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL${mode ? ' AND accountMode = ?' : ''} ORDER BY closedAt DESC LIMIT ?`,
+    mode ? [String(phone), mode, n] : [String(phone), n]
   );
   return r.rows;
 }
@@ -87,10 +98,11 @@ async function history(phone, limit = 20) {
 async function historyPage(phone, { limit = 20, offset = 0 } = {}) {
   const n = Math.max(1, Math.min(Number(limit) || 20, 100));
   const o = Math.max(0, Math.min(Number(offset) || 0, 100000));
+  const mode = await modeOf(phone);
   const r = await db.query(
     `SELECT contractId, code, direction, stake, buyPrice, sellPrice, profit, openedAt, closedAt, signalStrength
-     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL ORDER BY closedAt DESC LIMIT ? OFFSET ?`,
-    [String(phone), n, o]
+     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL${mode ? ' AND accountMode = ?' : ''} ORDER BY closedAt DESC LIMIT ? OFFSET ?`,
+    mode ? [String(phone), mode, n, o] : [String(phone), n, o]
   );
   return r.rows.map((x) => ({
     contractId: String(x.contractId), code: x.code, direction: x.direction, stake: Number(x.stake),
@@ -102,14 +114,15 @@ async function historyPage(phone, { limit = 20, offset = 0 } = {}) {
 
 /** Muhtasari wa trades zote zilizofungwa za mteja: jumla, ushindi/hasara, win rate, P/L, na idadi ya auto vs mkono. */
 async function summary(phone) {
+  const mode = await modeOf(phone);
   const r = await db.query(
     `SELECT COUNT(*) AS n,
             SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END) AS losses,
             COALESCE(SUM(profit), 0) AS pnl,
             SUM(CASE WHEN signalStrength IS NOT NULL THEN 1 ELSE 0 END) AS autoN
-     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL`,
-    [String(phone)]
+     FROM fx_auto_trades WHERE ownerPhone = ? AND closedAt IS NOT NULL${mode ? ' AND accountMode = ?' : ''}`,
+    mode ? [String(phone), mode] : [String(phone)]
   );
   const x = r.rows[0] || {};
   const total = Number(x.n) || 0, wins = Number(x.wins) || 0, losses = Number(x.losses) || 0;
@@ -129,10 +142,12 @@ async function summary(phone) {
  */
 async function recentAuto(phone, limit = 3) {
   const n = Math.max(1, Math.min(Number(limit) || 3, 50));
+  const mode = await modeOf(phone);
+  // Cooldown ya hasara mfululizo: akaunti ya sasa tu (+ zisizo na alama, upande salama).
   const r = await db.query(
     `SELECT contractId, code, direction, profit, closedAt FROM fx_auto_trades
-     WHERE ownerPhone = ? AND signalStrength IS NOT NULL AND closedAt IS NOT NULL ORDER BY closedAt DESC LIMIT ?`,
-    [String(phone), n]
+     WHERE ownerPhone = ? AND signalStrength IS NOT NULL AND closedAt IS NOT NULL${mode ? ' AND (accountMode = ? OR accountMode IS NULL)' : ''} ORDER BY closedAt DESC LIMIT ?`,
+    mode ? [String(phone), mode, n] : [String(phone), n]
   );
   return r.rows;
 }

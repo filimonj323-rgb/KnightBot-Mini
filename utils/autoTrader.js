@@ -367,9 +367,31 @@ const peakProfitPct = new Map();
 // Query zote za owner/auto-trader hapa lazima zichuje `ownerPhone IS NULL` — vinginevyo trades za wateja
 // zingeingia kwenye ufuatiliaji/stats za akaunti ya owner.
 // Trades zinatenganishwa kwa akaunti (demo/real): history, stats na ufuatiliaji wa wazi vinaonyesha akaunti ya SASA tu.
-// Trades za zamani (accountMode NULL) zinahesabiwa kama za akaunti ya sasa.
-function modeSql() { return getAccountMode() ? ' AND (accountMode IS NULL OR accountMode = ?)' : ''; }
+// Kichujio ni KALI: demo inaona demo tu, real inaona real tu. Trades za zamani zisizo na alama (accountMode NULL)
+// HAZIHESABIWI popote hadi uzipange (dashboard: History -> "Weka kama DEMO/REAL") — zamani ziliingia kwenye akaunti zote mbili.
+function modeSql() { return getAccountMode() ? ' AND accountMode = ?' : ''; }
 function modeArgs() { const m = getAccountMode(); return m ? [m] : []; }
+// Hakikisha tunajua akaunti ya sasa kabla ya kusoma history/stats (vinginevyo kichujio kingeachwa).
+async function ensureModeResolved() {
+  if (getAccountMode()) return;
+  try { await getAccountState(); } catch (_) { /* hakuna kichujio */ }
+}
+
+// Alama ya "historia ilifutwa" kwa kila akaunti (ms). reconcileHistoryFromDeriv() haitarudisha trades zilizofungwa kabla ya muda huu.
+async function getClearedAt(mode) {
+  try {
+    const r = await fxTradesDb.query('SELECT settingValue FROM fx_auto_settings WHERE settingKey = ?', ['histClearedAt_' + mode]);
+    const v = Number(r.rows && r.rows[0] && r.rows[0].settingValue);
+    return Number.isFinite(v) ? v : 0;
+  } catch (_) { return 0; }
+}
+async function setClearedAt(mode, ts) {
+  await fxTradesDb.query(
+    `INSERT INTO fx_auto_settings (settingKey, settingValue, updatedAt) VALUES (?, ?, ?)
+     ON CONFLICT(settingKey) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = excluded.updatedAt`,
+    ['histClearedAt_' + mode, String(ts), ts]
+  );
+}
 
 async function dbSaveOpenTrade({ contractId, code, symbol, direction, stake, buyPrice, slUsd, tpUsd, openedAt, signalStrength }) {
   try {
@@ -458,9 +480,14 @@ async function reconcileHistoryFromDeriv(force = false) {
   if (reconcileRunning || (!force && Date.now() - lastReconcileAt < 20000)) return;
   reconcileRunning = true;
   try {
+    await ensureModeResolved();
+    const mode0 = getAccountMode(); // akaunti ambayo profit_table hii ni yake — usiichanganye ikibadilika katikati
+    if (!mode0) return;
     const txs = await getProfitTable(100);
     if (!txs.length) return;
+    if (getAccountMode() !== mode0) return; // akaunti ilibadilishwa wakati tunasubiri Deriv
     await fxTradesDb.initSchema();
+    const clearedAt = await getClearedAt(mode0);
     const ids = txs.map((t) => String(t.contract_id));
     const existing = await fxTradesDb.query(
       `SELECT contractId, closedAt, profit, ownerPhone FROM fx_auto_trades WHERE contractId IN (${ids.map(() => '?').join(',')})`,
@@ -486,11 +513,12 @@ async function reconcileHistoryFromDeriv(force = false) {
       const m = /^(MULTUP|MULTDOWN)_FRX([A-Z]{6})_/i.exec(String(t.shortcode || ''));
       if (!m) continue; // si multiplier ya forex
       const code = m[2].toUpperCase();
+      if (clearedAt && ((Number(t.sell_time) || 0) * 1000) <= clearedAt) continue; // ilifutwa kwa makusudi — isirudishwe
       await fxTradesDb.query(
         `INSERT INTO fx_auto_trades (contractId, code, symbol, direction, stake, buyPrice, openedAt, closedAt, sellPrice, profit, accountMode)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(contractId) DO NOTHING`,
         [id, code, 'frx' + code, m[1].toUpperCase() === 'MULTUP' ? 'BUY' : 'SELL', buy, buy,
-          (Number(t.purchase_time) || 0) * 1000, (Number(t.sell_time) || 0) * 1000 || Date.now(), sell, pl, getAccountMode()]
+          (Number(t.purchase_time) || 0) * 1000, (Number(t.sell_time) || 0) * 1000 || Date.now(), sell, pl, mode0]
       );
     }
     lastReconcileAt = Date.now();
@@ -511,7 +539,82 @@ async function recordClosedFromDashboard(contractId, { profit, soldFor } = {}) {
   lastReconcileAt = 0; // historia ijazwe upya (kama trade haikuwa kwenye DB)
 }
 
+// ── Kufuta historia + takwimu (owner) ───────────────────────────────────────────────
+// scope: 'demo' | 'real' (akaunti hiyo tu) | 'all' (zote mbili + zisizo na alama) | 'legacy' (zisizo na alama tu).
+// Trades zilizo WAZI hazifutwi kamwe. Circuit breaker (dailyPnL/hasara mfululizo) HAIGUSWI kwa makusudi — ni kinga ya hatari, si takwimu.
+function clearFilter(scope) {
+  const base = 'closedAt IS NOT NULL AND ownerPhone IS NULL';
+  if (scope === 'demo' || scope === 'real') return { where: base + ' AND accountMode = ?', params: [scope], label: 'Akaunti ya ' + scope.toUpperCase() };
+  if (scope === 'legacy') return { where: base + ' AND accountMode IS NULL', params: [], label: 'Trades za zamani zisizo na alama ya akaunti' };
+  if (scope === 'all') return { where: base, params: [], label: 'Historia YOTE (demo + real + zisizo na alama)' };
+  return { error: 'scope lazima iwe demo, real, legacy au all.' };
+}
+
+async function previewClearHistory(scope) {
+  const f = clearFilter(scope);
+  if (f.error) return { ok: false, error: f.error };
+  try {
+    await fxTradesDb.initSchema();
+    const r = await fxTradesDb.query(
+      `SELECT COUNT(*) AS n,
+              COALESCE(SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END), 0) AS wins,
+              COALESCE(SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END), 0) AS losses,
+              COALESCE(SUM(profit), 0) AS net
+         FROM fx_auto_trades WHERE ${f.where}`, f.params);
+    const x = (r.rows && r.rows[0]) || {};
+    const openQ = await fxTradesDb.query('SELECT COUNT(*) AS n FROM fx_auto_trades WHERE closedAt IS NULL AND ownerPhone IS NULL', []);
+    return {
+      ok: true, scope, label: f.label,
+      count: Number(x.n) || 0, wins: Number(x.wins) || 0, losses: Number(x.losses) || 0,
+      net: Math.round((Number(x.net) || 0) * 100) / 100,
+      openProtected: Number(openQ.rows && openQ.rows[0] && openQ.rows[0].n) || 0,
+    };
+  } catch (err) {
+    return { ok: false, error: `Database imeshindwa: ${err.message}` };
+  }
+}
+
+async function clearHistory(scope) {
+  const pv = await previewClearHistory(scope);
+  if (!pv.ok) return pv;
+  const f = clearFilter(scope);
+  try {
+    const now = Date.now();
+    const r = await fxTradesDb.query(`DELETE FROM fx_auto_trades WHERE ${f.where}`, f.params);
+    // Weka alama ya muda ili reconcileHistoryFromDeriv() isirudishe trades zilizofutwa kutoka profit_table ya Deriv.
+    if (scope === 'demo' || scope === 'real') await setClearedAt(scope, now);
+    else if (scope === 'all') { await setClearedAt('demo', now); await setClearedAt('real', now); }
+    else if (getAccountMode()) await setClearedAt(getAccountMode(), now); // legacy: profit_table ni ya akaunti ya sasa tu
+    const deleted = Number(r.rowsAffected);
+    return { ...pv, deleted: Number.isFinite(deleted) ? deleted : pv.count };
+  } catch (err) {
+    console.error('[autoTrader] clearHistory imeshindwa:', err.message);
+    return { ok: false, error: `Database imeshindwa: ${err.message}` };
+  }
+}
+
+async function countLegacyTrades() {
+  try {
+    await fxTradesDb.initSchema();
+    const r = await fxTradesDb.query('SELECT COUNT(*) AS n FROM fx_auto_trades WHERE ownerPhone IS NULL AND accountMode IS NULL AND closedAt IS NOT NULL', []);
+    return Number(r.rows && r.rows[0] && r.rows[0].n) || 0;
+  } catch (_) { return 0; }
+}
+
+// Panga trades za zamani zisizo na alama kwenye akaunti uliyochagua (mara moja tu, kwa makusudi).
+async function assignLegacyTrades(mode) {
+  if (mode !== 'demo' && mode !== 'real') return { ok: false, error: 'mode lazima iwe demo au real.' };
+  try {
+    await fxTradesDb.initSchema();
+    const r = await fxTradesDb.query('UPDATE fx_auto_trades SET accountMode = ? WHERE ownerPhone IS NULL AND accountMode IS NULL', [mode]);
+    return { ok: true, mode, assigned: Number(r.rowsAffected) || 0 };
+  } catch (err) {
+    return { ok: false, error: `Database imeshindwa: ${err.message}` };
+  }
+}
+
 async function getTradeHistory(limit = 200) {
+  await ensureModeResolved();
   await reconcileHistoryFromDeriv();
   await fxTradesDb.initSchema();
   const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
@@ -554,6 +657,7 @@ function finishBucket(b) {
 }
 async function getTradeSummary() {
   try {
+    await ensureModeResolved();
     await reconcileHistoryFromDeriv();
     await fxTradesDb.initSchema();
     const result = await fxTradesDb.query(
@@ -590,6 +694,7 @@ async function getTradeSummary() {
 
 async function getWinRateStats() {
   try {
+    await ensureModeResolved();
     await reconcileHistoryFromDeriv();
     await fxTradesDb.initSchema();
     const result = await fxTradesDb.query(
@@ -1753,6 +1858,10 @@ module.exports = {
   getWinRateStats,
   getTradeHistory,
   getTradeSummary,
+  previewClearHistory,
+  clearHistory,
+  countLegacyTrades,
+  assignLegacyTrades,
   recordClosedFromDashboard,
   reconcileHistoryFromDeriv,
   PAIRS,
