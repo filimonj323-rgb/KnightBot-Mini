@@ -1006,8 +1006,60 @@ async function handlePairingRequest(req, res) {
           ok: true,
           balance,
           positions,
+          account: { mode: typeof derivTrader.getAccountMode === 'function' ? derivTrader.getAccountMode() : null }, // 'demo' | 'real'
           autoTrade: autoTrader.getStatus(),
         });
+      }
+
+      // ── Swichi ya akaunti: DEMO <-> REAL ─────────────────────────────
+      // GET: hali ya sasa + akaunti zipi zinapatikana kwenye token ya Deriv.
+      if (req.method === 'GET' && req.url === '/api/admin/fx/account') {
+        const state = await derivTrader.getAccountState({ withAvailability: true });
+        return sendJson(res, 200, { ok: true, ...state, pinRequired: !!process.env.FX_REAL_PIN });
+      }
+
+      // POST { mode: 'demo'|'real', confirm?: 'REAL', pin?: string, realMaxStake?: number }
+      // Kwenda REAL: lazima uandike REAL (confirm) + PIN ikiwa FX_REAL_PIN imewekwa kwenye env.
+      // Kwenda DEMO: bila uthibitisho (ni mwelekeo salama).
+      if (req.method === 'POST' && req.url === '/api/admin/fx/account') {
+        const body = await readJsonBody(req);
+        const mode = String(body.mode || '').toLowerCase();
+        if (mode !== 'demo' && mode !== 'real') {
+          return sendJson(res, 400, { ok: false, error: 'mode lazima iwe demo au real.' });
+        }
+        if (mode === 'real') {
+          if (String(body.confirm || '').trim().toUpperCase() !== 'REAL') {
+            return sendJson(res, 400, { ok: false, error: 'Andika REAL kuthibitisha kubadili kwenda akaunti ya pesa halisi.' });
+          }
+          const requiredPin = process.env.FX_REAL_PIN;
+          if (requiredPin) {
+            const a = Buffer.from(String(body.pin || ''));
+            const b = Buffer.from(String(requiredPin));
+            const okPin = a.length === b.length && crypto.timingSafeEqual(a, b);
+            if (!okPin) return sendJson(res, 403, { ok: false, error: 'PIN si sahihi.' });
+          }
+          if (body.realMaxStake !== undefined && body.realMaxStake !== null && body.realMaxStake !== '') {
+            try { await derivTrader.setRealMaxStake(body.realMaxStake); }
+            catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+          }
+        }
+        let result;
+        try {
+          result = await derivTrader.switchAccount(mode);
+        } catch (err) {
+          const status = ['OPEN_POSITIONS', 'BUSY'].includes(err.code) ? 409 : (['NO_ACCOUNT', 'BAD_MODE'].includes(err.code) ? 400 : 502);
+          return sendJson(res, status, { ok: false, code: err.code, error: err.message });
+        }
+        if (result.changed) {
+          notifyOwnerWA(
+            `🔄 *AKAUNTI YA DERIV IMEBADILISHWA (Dashboard)*\n\n` +
+              `Sasa: ${mode === 'real' ? '🔴 *REAL (pesa halisi)*' : '🟢 *DEMO*'}\n` +
+              `Account: ${result.accountId}\n` +
+              (mode === 'real' ? `Kikomo cha stake (REAL): $${result.realMaxStake}\n` : '') +
+              `\n⚠️ Auto-trader itafanya trades kwenye akaunti hii mpya.`
+          );
+        }
+        return sendJson(res, 200, { ok: true, ...result });
       }
 
       // Win-rate ya auto-trader kwa "bucket" ya signal strength — angalia
