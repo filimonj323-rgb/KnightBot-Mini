@@ -384,8 +384,9 @@
         <div style="font-size:12px; color:var(--muted); margin-bottom:10px;">
           Trades zilizofungwa, zikigawanywa kwa nguvu ya signal iliyosababisha kufunguliwa —
           bucket ya juu (86-100%) inatakiwa iwe na win-rate ya juu zaidi ya bucket za chini
-          kama mkakati una maana. Trades zilizofunguliwa kwa mkono (bila signal) hazihesabiwi.
+          kama mkakati una maana. Kadi za juu zinahesabu trades ZOTE (auto + mkono); jedwali hili ni la trades za auto zenye signal tu.
         </div>
+        <div id="statsSummary" class="hist-summary" style="margin-bottom:14px;"></div>
         <div id="statsBox"><div class="empty">Inapakia...</div></div>
       </div>
     </div>
@@ -575,6 +576,7 @@
   let lastBalance = null;
   let lastPositions = [];
   let lastOkAt = 0;
+  let tradeSummary = null; // { all, auto, manual, today } kutoka /api/admin/fx/stats
 
   function todayKey(ms) {
     return new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Africa/Dar_es_Salaam' });
@@ -585,12 +587,20 @@
   function renderLiveBar() {
     const positions = lastPositions || [];
     const livePL = positions.reduce((sum, p) => sum + Number(p.profit || 0), 0);
-    const closed = historyTrades || [];
-    const tk = todayKey(Date.now());
-    const todayTrades = closed.filter((t) => t.closedAt && todayKey(t.closedAt) === tk);
-    const todayPL = todayTrades.reduce((s, t) => s + t.profit, 0);
-    const totalProfit = closed.filter((t) => t.profit > 0).reduce((s, t) => s + t.profit, 0);
-    const totalLoss = closed.filter((t) => t.profit < 0).reduce((s, t) => s + t.profit, 0);
+    // Jumla zote (auto + mkono) zinatoka server (tradeSummary) — si 300 za history pekee.
+    // Summary isipopatikana bado, tumia history iliyopo (trades zenye faida inayojulikana tu).
+    let todayPL, totalProfit, totalLoss;
+    if (tradeSummary) {
+      todayPL = tradeSummary.today.net;
+      totalProfit = tradeSummary.all.grossProfit;
+      totalLoss = tradeSummary.all.grossLoss;
+    } else {
+      const closed = (historyTrades || []).filter((t) => t.profitKnown !== false);
+      const tk = todayKey(Date.now());
+      todayPL = closed.filter((t) => t.closedAt && todayKey(t.closedAt) === tk).reduce((s, t) => s + t.profit, 0);
+      totalProfit = closed.filter((t) => t.profit > 0).reduce((s, t) => s + t.profit, 0);
+      totalLoss = closed.filter((t) => t.profit < 0).reduce((s, t) => s + t.profit, 0);
+    }
     const stale = !lastOkAt || Date.now() - lastOkAt > 20000;
 
     document.getElementById('liveBar').innerHTML = `
@@ -806,10 +816,39 @@
   }
 
   // ── 📈 Win Rate (kwa signal strength) ───────────────────────────────
+  const money = (n) => (Number(n) < 0 ? '-' : '') + '$' + fmt(Math.abs(Number(n) || 0));
+  const moneySigned = (n) => (Number(n) >= 0 ? '+' : '-') + '$' + fmt(Math.abs(Number(n) || 0));
+
+  // Kadi za muhtasari: Zote / Auto / Mkono / Leo — zinahesabu trades zote zilizofungwa
+  // (faida isiyojulikana haihesabiwi kama hasara; inaonyeshwa kando).
+  function renderStatsSummary(sm) {
+    const box = document.getElementById('statsSummary');
+    if (!box) return;
+    if (!sm) { box.innerHTML = ''; return; }
+    const card = (title, b) => {
+      const net = Number(b.net) || 0;
+      return `<div class="bt-stat" style="grid-column: span 2;">
+        <div class="l" style="margin:0 0 6px;">${title}</div>
+        <div class="n ${net >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(net)}</div>
+        <div class="muted" style="font-size:11px; margin-top:4px; line-height:1.5;">
+          Trades ${b.total} · ✅ ${b.wins} · ❌ ${b.losses}${b.breakeven ? ' · ➖ ' + b.breakeven : ''}<br>
+          Win ${b.winRatePct}% · Avg ${moneySigned(b.avgProfit)}<br>
+          Faida +$${fmt(b.grossProfit)} · Hasara -$${fmt(Math.abs(b.grossLoss))}
+          ${b.unknown ? `<br><span title="Deriv bado haijatoa faida halisi — haihesabiwi kwenye W/L">⏳ ${b.unknown} bila faida bado</span>` : ''}
+        </div>
+      </div>`;
+    };
+    box.innerHTML =
+      card('📊 Zote (Auto + Mkono)', sm.all) +
+      card('🤖 Auto-trader', sm.auto) +
+      card('✋ Mkono', sm.manual) +
+      card('📅 Leo', sm.today);
+  }
+
   function renderWinRate(stats) {
     const box = document.getElementById('statsBox');
     if (!stats || !stats.length) {
-      box.innerHTML = `<div class="empty">Hakuna trade zilizofungwa bado zenye rekodi ya signal strength.</div>`;
+      box.innerHTML = `<div class="empty">Hakuna trade za auto zilizofungwa bado zenye rekodi ya signal strength. (Trades za mkono zinaonekana kwenye kadi za juu.)</div>`;
       return;
     }
     const rows = stats.map((s) => {
@@ -820,8 +859,8 @@
         <td>${s.total}</td>
         <td>${s.wins}/${s.losses}</td>
         <td>${s.winRatePct}%</td>
-        <td class="${profitClass}">$${s.totalProfit}</td>
-        <td>$${s.avgProfit}</td>
+        <td class="${profitClass}">${money(s.totalProfit)}</td>
+        <td>${money(s.avgProfit)}</td>
       </tr>`;
     }).join('');
     box.innerHTML = `<div class="table-wrap"><table>
@@ -830,12 +869,19 @@
     </table></div>`;
   }
 
+  let statsSeq = 0;
   async function refreshStats() {
+    const my = ++statsSeq; // jibu la zamani lisifute jipya (requests zinaweza kuchelewa nje ya mpangilio)
     try {
       const data = await api('/api/admin/fx/stats');
+      if (my !== statsSeq) return;
+      tradeSummary = data.summary || null;
+      renderStatsSummary(tradeSummary);
       renderWinRate(data.stats || []);
+      renderLiveBar();
     } catch (e) {
-      document.getElementById('statsBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+      if (my !== statsSeq) return;
+      document.getElementById('statsBox').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`;
     }
   }
 
@@ -1124,7 +1170,9 @@
         acctMode = out.mode; renderAcct();
         back.remove();
         posToast('Akaunti sasa ni ' + (out.mode === 'real' ? 'REAL 🔴' : 'DEMO 🟢'), true);
+        tradeSummary = null; historyTrades = [];
         refresh();
+        refreshAllStats();
       } catch (err) {
         errEl.textContent = err.message;
         btn.disabled = false; btn.textContent = toReal ? 'Badili kwenda REAL' : 'Badili kwenda DEMO';
@@ -1179,7 +1227,7 @@
     } finally {
       actionBusy = false;
       refresh();
-      try { refreshStats(); refreshHistory(); } catch (_) {}
+      try { refreshAllStats(); setTimeout(refreshAllStats, 4000); } catch (_) {}
     }
   }
 
@@ -1201,7 +1249,7 @@
     } finally {
       actionBusy = false;
       refresh();
-      try { refreshStats(); refreshHistory(); } catch (_) {}
+      try { refreshAllStats(); setTimeout(refreshAllStats, 4000); } catch (_) {}
     }
   }
 
@@ -1328,6 +1376,8 @@
   let historyTrades = [];
   let histResult = 'all'; // all | win | loss
   let histPair = 'all';
+  let histSource = 'all'; // all | auto | manual
+  let historySeq = 0;
 
   function fmtHistDate(ms) {
     if (!ms) return '—';
@@ -1351,9 +1401,16 @@
       { key: 'win', label: '✅ Faida' },
       { key: 'loss', label: '❌ Hasara' },
     ];
+    const sources = [
+      { key: 'all', label: 'Zote' },
+      { key: 'auto', label: '🤖 Auto' },
+      { key: 'manual', label: '✋ Mkono' },
+    ];
     const pairs = Array.from(new Set(historyTrades.map((t) => t.code))).sort();
     document.getElementById('histFilters').innerHTML =
       results.map((o) => `<button class="${histResult === o.key ? 'active' : 'ghost'}" onclick="setHistResult('${o.key}')">${o.label}</button>`).join('') +
+      '<span class="muted" style="margin:0 2px;">|</span>' +
+      sources.map((o) => `<button class="${histSource === o.key ? 'active' : 'ghost'}" onclick="setHistSource('${o.key}')">${o.label}</button>`).join('') +
       `<select onchange="setHistPair(this.value)">
         <option value="all">Jozi zote</option>
         ${pairs.map((c) => `<option value="${c}" ${histPair === c ? 'selected' : ''}>${c}</option>`).join('')}
@@ -1362,8 +1419,9 @@
 
   function filteredHistory() {
     let trades = historyTrades;
-    if (histResult === 'win') trades = trades.filter((t) => t.profit > 0);
-    if (histResult === 'loss') trades = trades.filter((t) => t.profit <= 0);
+    if (histResult === 'win') trades = trades.filter((t) => t.profitKnown !== false && t.profit > 0);
+    if (histResult === 'loss') trades = trades.filter((t) => t.profitKnown !== false && t.profit < 0);
+    if (histSource !== 'all') trades = trades.filter((t) => (t.source || (t.signalStrength != null ? 'auto' : 'manual')) === histSource);
     if (histPair !== 'all') trades = trades.filter((t) => t.code === histPair);
     return trades;
   }
@@ -1385,7 +1443,7 @@
         opened: TradeExport.tz(t.openedAt), closed: TradeExport.tz(t.closedAt),
         durMin: t.openedAt && t.closedAt ? Math.round((t.closedAt - t.openedAt) / 60000) : '',
         signal: t.signalStrength != null ? t.signalStrength : '',
-        result: t.profit > 0 ? 'WIN' : 'LOSS', profit: t.profit,
+        result: t.profitKnown === false ? 'OPEN' : t.profit > 0 ? 'WIN' : t.profit < 0 ? 'LOSS' : 'BE', profit: t.profitKnown === false ? '' : t.profit,
       }));
       const used = await TradeExport.run(kind, {
         title: 'FX Trading — Trading History', filename: 'fx-trading-history', rows,
@@ -1427,25 +1485,26 @@
 
   function setHistResult(k) { histResult = k; renderHistory(); }
   function setHistPair(k) { histPair = k; renderHistory(); }
+  function setHistSource(k) { histSource = k; renderHistory(); }
 
   function renderHistory() {
     renderHistoryFilters();
-    let trades = historyTrades;
-    if (histResult === 'win') trades = trades.filter((t) => t.profit > 0);
-    if (histResult === 'loss') trades = trades.filter((t) => t.profit <= 0);
-    if (histPair !== 'all') trades = trades.filter((t) => t.code === histPair);
+    const trades = filteredHistory();
 
+    const known = trades.filter((t) => t.profitKnown !== false);
     const total = trades.length;
-    const wins = trades.filter((t) => t.profit > 0).length;
-    const totalPL = trades.reduce((s, t) => s + t.profit, 0);
-    const best = total ? Math.max(...trades.map((t) => t.profit)) : 0;
-    const worst = total ? Math.min(...trades.map((t) => t.profit)) : 0;
+    const wins = known.filter((t) => t.profit > 0).length;
+    const losses = known.filter((t) => t.profit < 0).length;
+    const unknown = total - known.length;
+    const totalPL = known.reduce((s, t) => s + t.profit, 0);
+    const best = known.length ? Math.max(...known.map((t) => t.profit)) : 0;
+    const worst = known.length ? Math.min(...known.map((t) => t.profit)) : 0;
     document.getElementById('histSummary').innerHTML = `
-      <div class="bt-stat"><div class="n">${total}</div><div class="l">Trades</div></div>
-      <div class="bt-stat"><div class="n">${total ? Math.round((wins / total) * 1000) / 10 : 0}%</div><div class="l">Win Rate</div></div>
-      <div class="bt-stat"><div class="n ${totalPL >= 0 ? 'pl-pos' : 'pl-neg'}">${totalPL >= 0 ? '+' : ''}$${fmt(totalPL)}</div><div class="l">P/L Jumla</div></div>
+      <div class="bt-stat"><div class="n">${total}</div><div class="l">Trades${unknown ? ` (${unknown} bila faida)` : ''}</div></div>
+      <div class="bt-stat"><div class="n">${known.length ? Math.round((wins / known.length) * 1000) / 10 : 0}%</div><div class="l">Win Rate (${wins}W/${losses}L)</div></div>
+      <div class="bt-stat"><div class="n ${totalPL >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(totalPL)}</div><div class="l">P/L Jumla</div></div>
       <div class="bt-stat"><div class="n pl-pos">+$${fmt(Math.max(best, 0))}</div><div class="l">Bora</div></div>
-      <div class="bt-stat"><div class="n pl-neg">$${fmt(Math.min(worst, 0))}</div><div class="l">Mbaya</div></div>
+      <div class="bt-stat"><div class="n pl-neg">-$${fmt(Math.abs(Math.min(worst, 0)))}</div><div class="l">Mbaya</div></div>
     `;
 
     if (!total) {
@@ -1454,7 +1513,8 @@
     }
     const rows = trades.map((t) => {
       const dirClass = t.direction === 'BUY' ? 'dir-buy' : 'dir-sell';
-      const plClass = t.profit >= 0 ? 'pl-pos' : 'pl-neg';
+      const pending = t.profitKnown === false;
+      const plClass = pending ? 'muted' : t.profit >= 0 ? 'pl-pos' : 'pl-neg';
       return `<tr>
         <td><strong>${t.code}</strong></td>
         <td class="${dirClass}">${t.direction}</td>
@@ -1463,7 +1523,7 @@
         <td>${fmtHistDate(t.closedAt)}</td>
         <td class="muted">${fmtDuration(t.openedAt, t.closedAt)}</td>
         <td>${t.signalStrength != null ? t.signalStrength + '%' : '<span class="muted">mkono</span>'}</td>
-        <td class="${plClass}">${t.profit >= 0 ? '+' : ''}$${fmt(t.profit)}</td>
+        <td class="${plClass}">${pending ? '⏳ inasubiri' : moneySigned(t.profit)}</td>
       </tr>`;
     }).join('');
     document.getElementById('historyBox').innerHTML = `
@@ -1476,16 +1536,21 @@
   }
 
   async function refreshHistory() {
+    const my = ++historySeq; // jibu la zamani lisifute jipya
     try {
       const data = await api('/api/admin/fx/history?limit=300');
-      historyTrades = data.trades || [];
+      if (my !== historySeq) return;
+      historyTrades = Array.isArray(data.trades) ? data.trades : [];
       renderHistory();
       renderLiveBar();
     } catch (e) {
-      document.getElementById('historyBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
+      if (my !== historySeq) return;
+      document.getElementById('historyBox').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`;
     }
   }
 
+  // Trade ikifungwa (auto, mkono, SL/TP) — sasisha history + stats pamoja.
+  function refreshAllStats() { refreshHistory(); refreshStats(); }
 
   // ── Group la signals + matokeo (profit/loss) ─────────────────────────
   const tgEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1556,7 +1621,9 @@
     // (calendar: cache dakika 15 upande wa server; predictions: cache dakika
     // ~20 + Groq call; stats: inabadilika tu trade ikifungwa) — kila dakika 1
     // kwenye dashboard inatosha, hakuna sababu ya sekunde 5.
-    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); refreshStats(); }, 60000);
+    slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); }, 60000);
+    if (window._statsTimer) clearInterval(window._statsTimer);
+    window._statsTimer = setInterval(refreshStats, 15000); // trade ya auto ikifungwa — kadi za stats zisasishwe haraka
     if (window._histTimer) clearInterval(window._histTimer);
     window._histTimer = setInterval(refreshHistory, 15000); // faida/hasara ya trades zilizofungwa — sasisha mara nyingi
   }
