@@ -1067,7 +1067,16 @@
   async function openAcctModal() {
     let st;
     try { st = await api('/api/admin/fx/account'); }
-    catch (e) { posToast('Imeshindwa kusoma akaunti: ' + e.message, false); return; }
+    catch (e) {
+      // Onyesha kosa DIRISHANI (toast inaweza kuwa nje ya skrini) — kosa la 404 = server.js ya zamani, n.k.
+      const eb = document.createElement('div');
+      eb.className = 'modal-back';
+      eb.innerHTML = '<div class="modal-box"><p><strong>Imeshindwa kusoma akaunti</strong></p><p class="acct-err"></p><p style="font-size:11px;color:var(--muted)">Hakikisha server.js, derivTrader.js, autoTrader.js na db.js mpya vyote vimewekwa kisha redeploy.</p><button class="ghost" style="width:100%">Sawa</button></div>';
+      eb.querySelector('.acct-err').textContent = e.message;
+      eb.addEventListener('click', (ev) => { if (ev.target === eb || ev.target.tagName === 'BUTTON') eb.remove(); });
+      document.body.appendChild(eb);
+      return;
+    }
     acctMode = st.mode; renderAcct();
     const toReal = st.mode !== 'real';
     const available = toReal ? st.realAvailable : st.demoAvailable;
@@ -1150,6 +1159,8 @@
       renderSignals();
     } catch (e) {
       console.error('[fxtrading] refresh error:', e.message);
+      const atb = document.getElementById('autoTraderBox');
+      if (atb && !atb.innerHTML.trim()) atb.innerHTML = '<div class="muted">⚠️ Imeshindwa kusoma data ya auto-trader: ' + String(e.message).replace(/</g, '&lt;') + '</div>';
       renderLiveBar(); // itaonyesha OFFLINE kama data ni ya zamani
     }
   }
