@@ -270,6 +270,13 @@ async function initSchema() {
   } catch (e) {
     // Column already exists — expected on every run after the first.
   }
+  // Migration: fx_auto_trades.accountMode — 'demo' | 'real' (akaunti ya Deriv ya owner wakati trade ilipofunguliwa).
+  // NULL = trades za zamani (kabla ya swichi ya Demo/Real) — zinahesabiwa kama za akaunti ya sasa.
+  try {
+    await client.execute('ALTER TABLE fx_auto_trades ADD COLUMN accountMode TEXT');
+  } catch (e) {
+    // Column already exists — expected on every run after the first.
+  }
   try {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_owner ON fx_auto_trades(ownerPhone, closedAt)');
   } catch (e) {
