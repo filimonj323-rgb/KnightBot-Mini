@@ -1068,8 +1068,8 @@ async function handlePairingRequest(req, res) {
       // utils/autoTrader.js -> getWinRateStats() na commands/utility/autostats.js
       // (command ya WhatsApp yenye taarifa ile ile).
       if (req.method === 'GET' && req.url === '/api/admin/fx/stats') {
-        const [stats, summary] = await Promise.all([autoTrader.getWinRateStats(), autoTrader.getTradeSummary()]);
-        return sendJson(res, 200, { ok: true, stats, summary });
+        const [stats, summary, legacy] = await Promise.all([autoTrader.getWinRateStats(), autoTrader.getTradeSummary(), autoTrader.countLegacyTrades()]);
+        return sendJson(res, 200, { ok: true, stats, summary, legacy, mode: derivTrader.getAccountMode() });
       }
 
       // Historia ya trade zilizofungwa (auto-trader) — tab ya History.
@@ -1077,6 +1077,40 @@ async function handlePairingRequest(req, res) {
         const q = new URL(req.url, 'http://x').searchParams;
         const trades = await autoTrader.getTradeHistory(q.get('limit') || 200);
         return sendJson(res, 200, { ok: true, trades });
+      }
+
+      // Futa historia + takwimu za Deriv (owner). Hatua 2: preview (hakuna kinachofutwa) kisha delete (confirm:true).
+      // Body: { scope: 'demo'|'real'|'legacy'|'all', confirm?, expectCount? }. Trades zilizo wazi hazifutwi.
+      if (req.method === 'POST' && (req.url === '/api/admin/fx/history/preview' || req.url === '/api/admin/fx/history/delete')) {
+        const body = await readJsonBody(req);
+        const scope = String(body.scope || '');
+        if (req.url.endsWith('/preview')) {
+          const pv = await autoTrader.previewClearHistory(scope);
+          return sendJson(res, pv.ok ? 200 : 400, pv);
+        }
+        if (body.confirm !== true) return sendJson(res, 400, { ok: false, error: 'Uthibitisho unahitajika (confirm).' });
+        if (body.expectCount != null) {
+          const now = await autoTrader.previewClearHistory(scope);
+          if (!now.ok) return sendJson(res, 400, now);
+          if (now.count !== Number(body.expectCount)) {
+            return sendJson(res, 409, { ok: false, error: `Data imebadilika tangu preview (ilikuwa ${body.expectCount}, sasa ${now.count}). Bonyeza "Angalia" tena.` });
+          }
+        }
+        const del = await autoTrader.clearHistory(scope);
+        if (!del.ok) return sendJson(res, 400, del);
+        notifyOwnerWA(
+          `🖥️ *Historia ya Deriv imefutwa (Dashboard)*\n` +
+            `🗑️ ${del.label}: *${del.deleted}* (W${del.wins}/L${del.losses}, P/L ${del.net >= 0 ? '+' : '-'}$${Math.abs(del.net).toFixed(2)})`,
+          'dashboard'
+        );
+        return sendJson(res, 200, { ok: true, ...del });
+      }
+
+      // Panga trades za zamani zisizo na alama ya akaunti kwenye DEMO au REAL. Body: { mode: 'demo'|'real' }
+      if (req.method === 'POST' && req.url === '/api/admin/fx/legacy/assign') {
+        const body = await readJsonBody(req);
+        const out = await autoTrader.assignLegacyTrades(String(body.mode || '').toLowerCase());
+        return sendJson(res, out.ok ? 200 : 400, out);
       }
 
       // Uchambuzi wa AI (Groq) wa historia ya trades: jozi imara + strength bora.

@@ -277,6 +277,17 @@ async function initSchema() {
   } catch (e) {
     // Column already exists — expected on every run after the first.
   }
+  // Backfill: trades za WATEJA wa zamani wasioruhusiwa kamwe REAL (realAllowed = 0 na akaunti DEMO) zote ni za demo — zipewe alama.
+  // Wengine (waliowahi kuruhusiwa real) wanabaki NULL kwa sababu hatuwezi kujua kwa uhakika.
+  try {
+    await client.execute(
+      `UPDATE fx_auto_trades SET accountMode = 'demo'
+         WHERE ownerPhone IS NOT NULL AND accountMode IS NULL
+           AND ownerPhone IN (SELECT phoneNumber FROM deriv_accounts WHERE isDemo = 1 AND realAllowed = 0)`
+    );
+  } catch (e) {
+    console.warn('[db] backfill accountMode ya wateja:', e.message);
+  }
   try {
     await client.execute('CREATE INDEX IF NOT EXISTS idx_fx_auto_trades_owner ON fx_auto_trades(ownerPhone, closedAt)');
   } catch (e) {
