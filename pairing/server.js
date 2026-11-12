@@ -1068,8 +1068,8 @@ async function handlePairingRequest(req, res) {
       // utils/autoTrader.js -> getWinRateStats() na commands/utility/autostats.js
       // (command ya WhatsApp yenye taarifa ile ile).
       if (req.method === 'GET' && req.url === '/api/admin/fx/stats') {
-        const stats = await autoTrader.getWinRateStats();
-        return sendJson(res, 200, { ok: true, stats });
+        const [stats, summary] = await Promise.all([autoTrader.getWinRateStats(), autoTrader.getTradeSummary()]);
+        return sendJson(res, 200, { ok: true, stats, summary });
       }
 
       // Historia ya trade zilizofungwa (auto-trader) — tab ya History.
