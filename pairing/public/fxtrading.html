@@ -213,6 +213,15 @@
   .lb-live { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); padding: 0 4px; }
   .lb-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse 2s infinite; }
   .lb-live.stale .dot { background: var(--red); box-shadow: 0 0 6px var(--red); animation: none; }
+  /* Swichi ya akaunti DEMO/REAL */
+  .acct-btn { font-weight: 700; letter-spacing: 0.05em; }
+  .acct-btn.demo { border-color: rgba(57,255,136,0.5); color: var(--accent); }
+  .acct-btn.real { border-color: var(--red); background: rgba(255,85,102,0.18); color: var(--red); }
+  .real-banner { display: none; background: var(--red); color: #1a0307; font-size: 12px; font-weight: 700; text-align: center; padding: 4px 10px; letter-spacing: 0.04em; }
+  .real-banner.on { display: block; }
+  .acct-form label { display: block; font-size: 11px; color: var(--muted); margin: 10px 0 3px; }
+  .acct-form input { width: 100%; box-sizing: border-box; }
+  .acct-err { color: var(--red); font-size: 12px; min-height: 16px; margin-top: 8px; }
   @media (max-width: 560px) { .live-bar { padding: 8px 12px; } .topbar { padding: 10px 12px; } }
 </style>
 </head>
@@ -236,10 +245,12 @@
       <strong>FX TRADING · Deriv Multipliers</strong>
     </div>
     <div style="display:flex; gap:8px;">
+      <button class="ghost acct-btn" id="acctBtn" onclick="openAcctModal()" title="Badili akaunti Demo/Real">…</button>
       <button class="ghost" onclick="location.href='admin.html'">← Ops Console</button>
       <button class="ghost" onclick="logout()">Toka</button>
     </div>
   </div>
+    <div class="real-banner" id="realBanner">🔴 AKAUNTI YA REAL — PESA HALISI ZINATUMIKA</div>
     <div class="live-bar" id="liveBar"></div>
   </div>
 
@@ -1042,9 +1053,81 @@
     }
   }
 
+  // ── 🔄 Swichi ya akaunti DEMO / REAL ──────────────────────────────────
+  let acctMode = null;
+  function renderAcct() {
+    const btn = document.getElementById('acctBtn');
+    const banner = document.getElementById('realBanner');
+    if (!btn) return;
+    btn.className = 'ghost acct-btn' + (acctMode ? ' ' + acctMode : '');
+    btn.textContent = acctMode === 'real' ? '🔴 REAL' : acctMode === 'demo' ? '🟢 DEMO' : '… AKAUNTI';
+    if (banner) banner.classList.toggle('on', acctMode === 'real');
+  }
+
+  async function openAcctModal() {
+    let st;
+    try { st = await api('/api/admin/fx/account'); }
+    catch (e) { posToast('Imeshindwa kusoma akaunti: ' + e.message, false); return; }
+    acctMode = st.mode; renderAcct();
+    const toReal = st.mode !== 'real';
+    const available = toReal ? st.realAvailable : st.demoAvailable;
+
+    const back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = `<div class="modal-box acct-form">
+      <p><strong>Akaunti ya sasa: ${st.mode === 'real' ? '🔴 REAL' : '🟢 DEMO'}</strong><br><span style="color:var(--muted);font-size:11px">${st.accountId || ''}</span></p>
+      <p style="font-size:12px">${toReal
+        ? '⚠️ Kubadili kwenda <strong>REAL</strong>: auto-trader na trades za mkono zitatumia <strong>pesa halisi</strong>.'
+        : 'Kubadili kwenda <strong>DEMO</strong> (pesa za majaribio).'}<br>
+        <span style="color:var(--muted)">${st.mode === 'real'
+          ? 'Ikiwa kuna trades za REAL zilizo wazi, kubadili kunakataliwa — zifunge kwanza.'
+          : 'Trades za DEMO zilizo wazi zinaendelea Deriv kwa SL/TP zake, lakini bot haitazisimamia hadi urudi DEMO.'}</span></p>
+      ${available === false ? `<div class="acct-err">Token yako ya Deriv haina akaunti ya ${toReal ? 'REAL' : 'DEMO'} iliyothibitishwa.</div>` : ''}
+      ${toReal ? `
+        <label>Andika <strong>REAL</strong> kuthibitisha</label>
+        <input id="acctConfirm" type="text" autocomplete="off" placeholder="REAL" />
+        ${st.pinRequired ? '<label>PIN ya REAL</label><input id="acctPin" type="password" autocomplete="off" />' : ''}
+        <label>Kikomo cha stake kwa trade moja (REAL), $1–$${st.maxStakeUsd}</label>
+        <input id="acctStake" type="number" min="1" max="${st.maxStakeUsd}" step="1" value="${st.realMaxStake}" />
+      ` : ''}
+      <div class="acct-err" id="acctErr"></div>
+      <div class="grid2" style="margin-top:12px">
+        <button class="ghost" data-r="0">Ghairi</button>
+        <button class="${toReal ? 'danger' : 'primary'}" data-r="1" ${available === false ? 'disabled' : ''}>${toReal ? 'Badili kwenda REAL' : 'Badili kwenda DEMO'}</button>
+      </div></div>`;
+    back.addEventListener('click', async (e) => {
+      const r = e.target.getAttribute && e.target.getAttribute('data-r');
+      if (r === null && e.target !== back) return;
+      if (r !== '1') { back.remove(); return; }
+      const errEl = back.querySelector('#acctErr');
+      errEl.textContent = '';
+      const btn = e.target;
+      btn.disabled = true; btn.textContent = 'Inabadilisha…';
+      try {
+        const body = { mode: toReal ? 'real' : 'demo' };
+        if (toReal) {
+          body.confirm = back.querySelector('#acctConfirm').value;
+          const pinEl = back.querySelector('#acctPin');
+          if (pinEl) body.pin = pinEl.value;
+          body.realMaxStake = back.querySelector('#acctStake').value;
+        }
+        const out = await api('/api/admin/fx/account', { method: 'POST', body: JSON.stringify(body) });
+        acctMode = out.mode; renderAcct();
+        back.remove();
+        posToast('Akaunti sasa ni ' + (out.mode === 'real' ? 'REAL 🔴' : 'DEMO 🟢'), true);
+        refresh();
+      } catch (err) {
+        errEl.textContent = err.message;
+        btn.disabled = false; btn.textContent = toReal ? 'Badili kwenda REAL' : 'Badili kwenda DEMO';
+      }
+    });
+    document.body.appendChild(back);
+  }
+
   async function refresh() {
     try {
       const data = await api('/api/admin/fx/overview');
+      if (data.account) { acctMode = data.account.mode; renderAcct(); }
       lastBalance = data.balance;
       lastPositions = data.positions || [];
       lastOkAt = Date.now();
