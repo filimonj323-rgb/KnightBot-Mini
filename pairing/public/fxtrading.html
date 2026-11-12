@@ -461,6 +461,24 @@
         <div id="histSummary" class="hist-summary"></div>
         <div id="historyBox"><div class="empty">Inapakia...</div></div>
       </div>
+
+      <div class="card" id="clearCard">
+        <div class="section-label">🗑️ Futa Historia &amp; Takwimu</div>
+        <div id="legacyBox"></div>
+        <div class="hist-filters">
+          <select id="clrScope" onchange="clrInvalidate()">
+            <option value="demo">🟢 DEMO tu</option>
+            <option value="real">🔴 REAL tu</option>
+            <option value="legacy">⚪ Za zamani zisizo na alama</option>
+            <option value="all">⚠️ Zote (demo + real + za zamani)</option>
+          </select>
+          <button class="ghost" onclick="clrPreview(this)">🔍 Angalia kitakachofutwa</button>
+          <button class="danger" id="clrGo" onclick="clrRun(this)" disabled>🗑️ Futa</button>
+        </div>
+        <div id="clrSummary" class="hist-summary"></div>
+        <div id="clrBox"></div>
+        <div class="muted" style="font-size:11px;">Historia na takwimu (Win Rate, P/L) zinatoka kwenye rekodi zile zile, kwa hiyo kufuta kunasafisha zote mbili. Trades zilizo WAZI hazifutwi. Trades zilizofutwa hazitarudishwa kutoka Deriv. Kikomo cha hasara ya siku (circuit breaker) hakiguswi.</div>
+      </div>
     </div>
   </div>
 </div>
@@ -878,6 +896,7 @@
       tradeSummary = data.summary || null;
       renderStatsSummary(tradeSummary);
       renderWinRate(data.stats || []);
+      renderLegacyBanner(Number(data.legacy) || 0);
       renderLiveBar();
     } catch (e) {
       if (my !== statsSeq) return;
@@ -1551,6 +1570,72 @@
 
   // Trade ikifungwa (auto, mkono, SL/TP) — sasisha history + stats pamoja.
   function refreshAllStats() { refreshHistory(); refreshStats(); }
+
+  // ── Futa historia + takwimu / panga trades za zamani ─────────────────
+  let clrPending = null; // { scope, count, label }
+  function clrInvalidate() { clrPending = null; const g = document.getElementById('clrGo'); if (g) g.disabled = true; }
+  function renderLegacyBanner(n) {
+    const box = document.getElementById('legacyBox');
+    if (!box) return;
+    if (!n) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="empty" style="text-align:left; margin-bottom:10px;">⚪ Trades <b>${n}</b> za zamani hazina alama ya akaunti, kwa hiyo hazionyeshwi kwenye history/stats za DEMO wala REAL.
+      Zipange kwenye akaunti sahihi:
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+        <button class="ghost" onclick="assignLegacy('demo', this)">🟢 Weka kama DEMO</button>
+        <button class="ghost" onclick="assignLegacy('real', this)">🔴 Weka kama REAL</button>
+      </div></div>`;
+  }
+  async function assignLegacy(mode, btn) {
+    const ok = await askConfirm('Trades zote za zamani zisizo na alama zitawekwa kama ' + mode.toUpperCase() + '. Fanya hivi tu kama una uhakika zilikuwa za akaunti hiyo.', 'Ndiyo, weka ' + mode.toUpperCase());
+    if (!ok) return;
+    btn.disabled = true;
+    try {
+      const r = await api('/api/admin/fx/legacy/assign', { method: 'POST', body: JSON.stringify({ mode }) });
+      posToast('✅ Trades ' + r.assigned + ' zimewekwa kama ' + mode.toUpperCase(), true);
+      refreshAllStats();
+    } catch (e) { posToast('❌ ' + e.message, false); btn.disabled = false; }
+  }
+  async function clrPreview(btn) {
+    const scope = document.getElementById('clrScope').value;
+    const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ ...';
+    clrInvalidate();
+    try {
+      const r = await api('/api/admin/fx/history/preview', { method: 'POST', body: JSON.stringify({ scope }) });
+      const dec = r.wins + r.losses;
+      document.getElementById('clrSummary').innerHTML =
+        `<div class="bt-stat"><div class="n">${r.count}</div><div class="l">Zitafutwa</div></div>` +
+        `<div class="bt-stat"><div class="n pl-pos">${r.wins}</div><div class="l">Win</div></div>` +
+        `<div class="bt-stat"><div class="n pl-neg">${r.losses}</div><div class="l">Loss</div></div>` +
+        `<div class="bt-stat"><div class="n">${dec ? Math.round((r.wins / dec) * 1000) / 10 : 0}%</div><div class="l">Win rate</div></div>` +
+        `<div class="bt-stat"><div class="n ${r.net >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(r.net)}</div><div class="l">P/L</div></div>`;
+      document.getElementById('clrBox').innerHTML = `<div class="muted" style="margin:0 0 8px;">${tgEsc(r.label)}: <b>${r.count}</b> trades zilizofungwa.` +
+        (r.openProtected ? ` ⏳ Trades ${r.openProtected} zilizo wazi hazitafutwa.` : '') + (r.count ? '' : ' Hakuna kinachofanana.') + '</div>';
+      if (r.count) { clrPending = { scope, count: r.count, label: r.label }; document.getElementById('clrGo').disabled = false; }
+    } catch (e) {
+      document.getElementById('clrSummary').innerHTML = '';
+      document.getElementById('clrBox').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`;
+    }
+    btn.disabled = false; btn.textContent = label;
+  }
+  async function clrRun(btn) {
+    if (!clrPending || clrPending.scope !== document.getElementById('clrScope').value) { clrInvalidate(); posToast('Bonyeza "Angalia kitakachofutwa" kwanza.', false); return; }
+    const p = clrPending;
+    let ok = await askConfirm(`Utafuta ${p.label}: trades ${p.count} kutoka database (HAIWEZI kurudishwa).`, 'Ndiyo, futa');
+    if (ok && (p.scope === 'all' || p.scope === 'real')) ok = await askConfirm('Una uhakika? Hii inafuta rekodi za ' + (p.scope === 'all' ? 'AKAUNTI ZOTE' : 'REAL (pesa halisi)') + '.', 'Ndiyo, nina uhakika');
+    if (!ok) { posToast('Kufuta kumeghairiwa.', false); return; }
+    const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Inafuta...';
+    try {
+      const r = await api('/api/admin/fx/history/delete', { method: 'POST', body: JSON.stringify({ scope: p.scope, confirm: true, expectCount: p.count }) });
+      posToast('✅ Imefutwa trades ' + r.deleted + '. Rekodi mpya imeanza.', true);
+      clrInvalidate();
+      document.getElementById('clrSummary').innerHTML = ''; document.getElementById('clrBox').innerHTML = '';
+      tradeSummary = null; historyTrades = [];
+      refreshAllStats();
+    } catch (e) {
+      posToast('❌ ' + e.message, false);
+    }
+    btn.textContent = label;
+  }
 
   // ── Group la signals + matokeo (profit/loss) ─────────────────────────
   const tgEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
