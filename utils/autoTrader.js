@@ -528,10 +528,64 @@ async function getTradeHistory(limit = 200) {
     buyPrice: r.buyPrice === null ? null : Number(r.buyPrice),
     sellPrice: r.sellPrice === null ? null : Number(r.sellPrice),
     profit: Number(r.profit) || 0,
+    // profit = NULL kwenye DB (Deriv bado haijatoa faida halisi) → isihesabiwe kama hasara kwenye stats.
+    profitKnown: r.profit !== null && r.profit !== undefined && Number.isFinite(Number(r.profit)),
     openedAt: Number(r.openedAt) || null,
     closedAt: Number(r.closedAt) || null,
     signalStrength: r.signalStrength === null || r.signalStrength === undefined ? null : Number(r.signalStrength),
+    source: r.signalStrength === null || r.signalStrength === undefined ? 'manual' : 'auto',
   }));
+}
+
+// Muhtasari wa trades ZOTE zilizofungwa (auto + mkono) — si mdogo kwa 300 za history.
+// Inatumiwa na cards za stats kwenye fxtrading.html. Faida isiyojulikana (NULL) inahesabiwa kando (unknown).
+function emptyBucket() {
+  return { total: 0, wins: 0, losses: 0, breakeven: 0, unknown: 0, grossProfit: 0, grossLoss: 0, net: 0, best: 0, worst: 0 };
+}
+function finishBucket(b) {
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const decided = b.wins + b.losses + b.breakeven;
+  return {
+    ...b,
+    grossProfit: r2(b.grossProfit), grossLoss: r2(b.grossLoss), net: r2(b.net), best: r2(b.best), worst: r2(b.worst),
+    winRatePct: decided ? Math.round((b.wins / decided) * 1000) / 10 : 0,
+    avgProfit: decided ? r2(b.net / decided) : 0,
+  };
+}
+async function getTradeSummary() {
+  try {
+    await reconcileHistoryFromDeriv();
+    await fxTradesDb.initSchema();
+    const result = await fxTradesDb.query(
+      `SELECT signalStrength, profit, closedAt FROM fx_auto_trades WHERE closedAt IS NOT NULL AND ownerPhone IS NULL${modeSql()}`,
+      modeArgs()
+    );
+    const dayKey = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Africa/Dar_es_Salaam' });
+    const todayK = dayKey(Date.now());
+    const acc = { all: emptyBucket(), auto: emptyBucket(), manual: emptyBucket(), today: emptyBucket() };
+    for (const r of result.rows || []) {
+      const isAuto = r.signalStrength !== null && r.signalStrength !== undefined;
+      const known = r.profit !== null && r.profit !== undefined && Number.isFinite(Number(r.profit));
+      const p = known ? Number(r.profit) : 0;
+      const closedAt = Number(r.closedAt);
+      const targets = [acc.all, isAuto ? acc.auto : acc.manual];
+      if (closedAt && dayKey(closedAt) === todayK) targets.push(acc.today);
+      for (const b of targets) {
+        b.total += 1;
+        if (!known) { b.unknown += 1; continue; }
+        if (p > 0) { b.wins += 1; b.grossProfit += p; }
+        else if (p < 0) { b.losses += 1; b.grossLoss += p; }
+        else b.breakeven += 1;
+        b.net += p;
+        if (p > b.best) b.best = p;
+        if (p < b.worst) b.worst = p;
+      }
+    }
+    return { all: finishBucket(acc.all), auto: finishBucket(acc.auto), manual: finishBucket(acc.manual), today: finishBucket(acc.today) };
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kupata trade summary:', err.message);
+    return null;
+  }
 }
 
 async function getWinRateStats() {
@@ -549,7 +603,8 @@ async function getWinRateStats() {
       const strength = r.signalStrength === null || r.signalStrength === undefined ? null : Number(r.signalStrength);
       const bucket = bucketFor(strength);
       if (!bucket) continue; // trade iliyofunguliwa kwa mkono (bila signal) — haihesabiwi kwenye ubora wa signal
-      const profit = Number(r.profit) || 0;
+      if (r.profit === null || r.profit === undefined || !Number.isFinite(Number(r.profit))) continue; // faida bado haijulikani — usihesabu kama hasara
+      const profit = Number(r.profit);
       const g = grouped.get(bucket) || { total: 0, wins: 0, totalProfit: 0 };
       g.total += 1;
       if (profit > 0) g.wins += 1;
@@ -1697,6 +1752,7 @@ module.exports = {
   placeManualTrade,
   getWinRateStats,
   getTradeHistory,
+  getTradeSummary,
   recordClosedFromDashboard,
   reconcileHistoryFromDeriv,
   PAIRS,
