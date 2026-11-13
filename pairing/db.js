@@ -136,14 +136,21 @@ async function initSchema() {
       sellPrice    REAL,
       profit       REAL,
       exitType     TEXT,
-      accountMode  TEXT
+      accountMode  TEXT,
+      lagSec       INTEGER,
+      lagExact     INTEGER,
+      entryMovePct REAL,
+      costUsd      REAL,
+      costEst      INTEGER
     )`,
     // Matukio ya habari yaliyoshughulikiwa tayari (dedupe — kila tukio linafanyiwa maamuzi MARA MOJA).
     `CREATE TABLE IF NOT EXISTS fx_news_events (
       eventKey  TEXT PRIMARY KEY,
       handledAt INTEGER NOT NULL,
       outcome   TEXT,
-      detail    TEXT
+      detail    TEXT,
+      lagSec    INTEGER,
+      lagExact  INTEGER
     )`,
     // Pocket Option (Binary/Turbo): kila order iliyofunguliwa kupitia bot
     // (.pobuy/.posell) inahifadhiwa hapa kutoka kufunguliwa hadi kufungwa,
@@ -305,6 +312,18 @@ async function initSchema() {
     await client.execute('ALTER TABLE fx_auto_trades ADD COLUMN accountMode TEXT');
   } catch (e) {
     // Column already exists — expected on every run after the first.
+  }
+  // Migration: News Trading — lag ya feed, mwendo wa bei tangu release, na gharama ya kuingia (kwa DB zilizoundwa kabla ya hili).
+  for (const stmt of [
+    'ALTER TABLE fx_news_trades ADD COLUMN lagSec INTEGER',
+    'ALTER TABLE fx_news_trades ADD COLUMN lagExact INTEGER',
+    'ALTER TABLE fx_news_trades ADD COLUMN entryMovePct REAL',
+    'ALTER TABLE fx_news_trades ADD COLUMN costUsd REAL',
+    'ALTER TABLE fx_news_trades ADD COLUMN costEst INTEGER',
+    'ALTER TABLE fx_news_events ADD COLUMN lagSec INTEGER',
+    'ALTER TABLE fx_news_events ADD COLUMN lagExact INTEGER',
+  ]) {
+    try { await client.execute(stmt); } catch (e) { /* column tayari ipo — kawaida baada ya mara ya kwanza */ }
   }
   // Backfill: trades za WATEJA wa zamani wasioruhusiwa kamwe REAL (realAllowed = 0 na akaunti DEMO) zote ni za demo — zipewe alama.
   // Wengine (waliowahi kuruhusiwa real) wanabaki NULL kwa sababu hatuwezi kujua kwa uhakika.
