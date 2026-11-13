@@ -263,6 +263,7 @@
       <div class="section-tab" data-section="stats"><span class="icon">📈</span>Win Rate</div>
       <div class="section-tab" data-section="backtest"><span class="icon">🧪</span>Backtest</div>
       <div class="section-tab" data-section="history"><span class="icon">🕘</span>History</div>
+      <div class="section-tab" data-section="news"><span class="icon">📰</span>News Trade</div>
     </div>
 
     <div class="page-section active" id="section-overview">
@@ -480,6 +481,70 @@
         <div class="muted" style="font-size:11px;">Historia na takwimu (Win Rate, P/L) zinatoka kwenye rekodi zile zile, kwa hiyo kufuta kunasafisha zote mbili. Trades zilizo WAZI hazifutwi. Trades zilizofutwa hazitarudishwa kutoka Deriv. Kikomo cha hasara ya siku (circuit breaker) hakiguswi.</div>
       </div>
     </div>
+
+    <div class="page-section" id="section-news">
+      <div class="card">
+        <div class="section-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>📰 News Trading (Economic Calendar)</span>
+          <span class="ai-tag" id="newsMode"></span>
+        </div>
+        <div id="newsStatus"></div>
+        <div class="grid2" style="margin-top:10px;">
+          <button class="primary" id="newsToggle" onclick="newsToggle(this)">…</button>
+          <button class="ghost" onclick="refreshNews()">🔄 Sasisha</button>
+        </div>
+        <div class="muted" style="font-size:11px; margin-top:10px;">Tukio la habari likitoka, bot inalinganisha <b>actual</b> na <b>forecast</b>. Currency ikipata surprise kubwa ya kutosha, inafungua trade ya jozi husika kuelekea upande huo, na kuifunga kwa SL/TP au baada ya muda uliopangwa. Data ya <i>actual</i> inatoka feed ya bure ambayo inaweza kuchelewa dakika chache. Hatari ni kubwa kuliko trade za kawaida — anza na DEMO.</div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">⚙️ Mipangilio</div>
+        <div class="grid3">
+          <div><label>Stake ($)</label><input type="number" id="nStake" step="0.5" min="1" /></div>
+          <div><label>Multiplier</label><select id="nMult"></select></div>
+          <div><label>Max trades wazi</label><input type="number" id="nMaxOpen" min="1" max="5" step="1" /></div>
+          <div><label>Stop Loss (% ya stake)</label><input type="number" id="nSl" min="10" max="100" step="5" /></div>
+          <div><label>Take Profit (% ya stake)</label><input type="number" id="nTp" min="10" max="500" step="5" /></div>
+          <div><label>Funga baada ya (dakika)</label><input type="number" id="nHold" min="1" max="120" step="1" /></div>
+          <div><label>Surprise ya chini (%)</label><input type="number" id="nSurprise" min="1" max="500" step="1" /></div>
+          <div><label>Dirisha baada ya release (dk)</label><input type="number" id="nWindow" min="1" max="30" step="1" /></div>
+          <div><label>Hasara ya juu ya siku ($)</label><input type="number" id="nMaxLoss" min="1" step="1" /></div>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin:12px 0 6px; cursor:pointer; font-size:12px;"><input type="checkbox" id="nMedium" style="width:auto; margin:0;" /> Jumuisha pia matukio ya Medium impact</label>
+        <label style="display:flex; align-items:center; gap:8px; margin:0 0 12px; cursor:pointer; font-size:12px; color:var(--red);"><input type="checkbox" id="nReal" style="width:auto; margin:0;" /> 🔴 Ruhusu kufanya trade kwenye akaunti ya REAL (pesa halisi)</label>
+        <button class="primary" onclick="newsSave(this)">💾 Hifadhi Mipangilio</button>
+      </div>
+
+      <div class="card">
+        <div class="section-label">⏳ Matukio Yanayokuja (High impact)</div>
+        <div id="newsUpcoming" style="max-height:340px; overflow-y:auto;"><div class="empty">Inapakia...</div></div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">📊 Takwimu za News Trading (akaunti ya sasa) &amp; Trades Wazi</div>
+        <div class="hist-summary" id="newsStats"></div>
+        <div id="newsOpen"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">🕘 Historia ya News Trades</div>
+        <div id="newsHistory"><div class="empty">Inapakia...</div></div>
+        <div class="hist-filters" style="margin-top:10px;">
+          <select id="nClrScope" onchange="newsClrInvalidate()">
+            <option value="demo">🟢 DEMO tu</option>
+            <option value="real">🔴 REAL tu</option>
+            <option value="all">⚠️ Zote</option>
+          </select>
+          <button class="ghost" onclick="newsClrPreview(this)">🔍 Angalia kitakachofutwa</button>
+          <button class="danger" id="nClrGo" onclick="newsClrRun(this)" disabled>🗑️ Futa</button>
+        </div>
+        <div id="nClrBox"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">🧾 Maamuzi ya Mwisho ya Bot</div>
+        <div id="newsDecisions"><div class="empty">Hakuna bado.</div></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -571,6 +636,7 @@
     document.querySelectorAll('.page-section').forEach((x) => x.classList.remove('active'));
     btn.classList.add('active');
     pane.classList.add('active');
+    if (name === 'news' && typeof refreshNews === 'function') refreshNews();
     return true;
   }
   document.querySelectorAll('.section-tab').forEach((t) => {
@@ -1571,6 +1637,188 @@
   // Trade ikifungwa (auto, mkono, SL/TP) — sasisha history + stats pamoja.
   function refreshAllStats() { refreshHistory(); refreshStats(); }
 
+  // ── News Trading ──────────────────────────────────────────────────────
+  let newsState = null;
+  let newsFormLoaded = false;
+  let nClrPending = null;
+  const newsActive = () => document.getElementById('section-news').classList.contains('active');
+
+  function fillNewsForm(c, limits) {
+    const mult = document.getElementById('nMult');
+    if (limits && limits.multipliers && !mult.options.length) {
+      mult.innerHTML = limits.multipliers.map((m) => `<option value="${m}">x${m}</option>`).join('');
+    }
+    document.getElementById('nStake').value = c.stake;
+    mult.value = String(c.multiplier);
+    document.getElementById('nMaxOpen').value = c.maxOpen;
+    document.getElementById('nSl').value = c.slPct;
+    document.getElementById('nTp').value = c.tpPct;
+    document.getElementById('nHold').value = c.maxHoldMin;
+    document.getElementById('nSurprise').value = c.minSurprisePct;
+    document.getElementById('nWindow').value = c.windowMin;
+    document.getElementById('nMaxLoss').value = c.maxDailyLossUsd;
+    document.getElementById('nMedium').checked = !!c.includeMedium;
+    document.getElementById('nReal').checked = !!c.allowReal;
+  }
+
+  function fmtMin(m) {
+    const a = Math.abs(m);
+    const t = a >= 60 ? Math.floor(a / 60) + 'h ' + (a % 60) + 'm' : a + 'm';
+    return m >= 0 ? 'baada ya ' + t : t + ' iliyopita';
+  }
+
+  function renderNews() {
+    const d = newsState;
+    if (!d) return;
+    const c = d.config;
+    const real = d.mode === 'real';
+    document.getElementById('newsMode').innerHTML = d.mode ? (real ? '🔴 REAL' : '🟢 DEMO') : '—';
+    const tg = document.getElementById('newsToggle');
+    tg.textContent = c.enabled ? '⏹️ Zima News Trading' : '▶️ Washa News Trading';
+    tg.className = c.enabled ? 'danger' : 'primary';
+    const lastTick = d.lastTickAt ? Math.round((Date.now() - d.lastTickAt) / 1000) + 's iliyopita' : 'bado';
+    document.getElementById('newsStatus').innerHTML =
+      `<div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <span class="badge ${c.enabled ? 'on' : 'off'}">${c.enabled ? 'IMEWASHWA' : 'IMEZIMWA'}</span>
+        <span class="muted">Ukaguzi wa mwisho: ${lastTick}</span>
+      </div>` +
+      (d.blocked ? `<div class="empty" style="text-align:left; padding:10px 0 0;">⛔ ${tgEsc(d.blocked)}</div>` : '') +
+      (real && !c.allowReal ? `<div class="empty" style="text-align:left; padding:10px 0 0;">🔒 Akaunti ni REAL — haitafanya trade hadi uruhusu REAL kwenye mipangilio.</div>` : '');
+
+    // Matukio yanayokuja
+    document.getElementById('newsUpcoming').innerHTML = d.upcoming.length ? d.upcoming.map((e) => {
+      const nums = [e.actual != null && e.actual !== '' ? `Actual: <strong>${tgEsc(e.actual)}</strong>` : '',
+        e.forecast != null ? `Forecast: ${tgEsc(e.forecast)}` : '', e.previous != null ? `<span class="muted">Prev: ${tgEsc(e.previous)}</span>` : ''].filter(Boolean).join(' · ');
+      const plan = e.pair && e.numeric
+        ? `<div class="muted" style="font-size:11px;">Ikiimarika ${e.currency}: <b>${e.ifBeat} ${e.pair}</b> · ikidhoofika: <b>${e.ifBeat === 'BUY' ? 'SELL' : 'BUY'} ${e.pair}</b></div>`
+        : `<div class="muted" style="font-size:11px;">Hakuna forecast ya namba — bot itapuuza.</div>`;
+      return `<div class="cal-row impact-${e.impact} ${e.minutesFromNow < 0 ? 'past' : ''}">
+        <span class="impact-dot"></span>
+        <div class="cal-main"><div class="cal-title">${e.currency} — ${tgEsc(e.title)}</div>
+          <div class="cal-numbers">${nums || '<span class="muted">Data bado</span>'}</div>${plan}</div>
+        <div class="cal-time">${fmtEventTime(e.date)}<br>${fmtMin(e.minutesFromNow)}</div></div>`;
+    }).join('') : `<div class="empty">📭 Hakuna matukio ya High impact ya masaa 48 yajayo.</div>`;
+
+    // Takwimu
+    const s = d.summary;
+    document.getElementById('newsStats').innerHTML = s
+      ? `<div class="bt-stat"><div class="n">${s.closed}</div><div class="l">Zilizofungwa</div></div>` +
+        `<div class="bt-stat"><div class="n pl-pos">${s.wins}</div><div class="l">Win</div></div>` +
+        `<div class="bt-stat"><div class="n pl-neg">${s.losses}</div><div class="l">Loss</div></div>` +
+        `<div class="bt-stat"><div class="n">${s.winRate}%</div><div class="l">Win rate</div></div>` +
+        `<div class="bt-stat"><div class="n ${s.net >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(s.net)}</div><div class="l">P/L jumla</div></div>` +
+        `<div class="bt-stat"><div class="n ${s.today >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(s.today)}</div><div class="l">Leo</div></div>`
+      : '';
+    document.getElementById('newsOpen').innerHTML = d.open.length
+      ? `<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Jozi</th><th>Upande</th><th>Stake</th><th>SL/TP</th><th>Itafungwa</th></tr></thead><tbody>` +
+        d.open.map((o) => {
+          const left = Math.max(0, Math.round((Number(o.openedAt) + Number(o.maxHoldMin) * 60000 - Date.now()) / 60000));
+          return `<tr><td>${tgEsc(o.pair)}</td><td>${o.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}</td><td>$${fmt(o.stake)}</td><td>$${fmt(o.slUsd)} / $${fmt(o.tpUsd)}</td><td>~${left}m</td></tr>`;
+        }).join('') + `</tbody></table></div>`
+      : `<div class="empty">Hakuna news trade iliyo wazi.</div>`;
+
+    // Maamuzi
+    document.getElementById('newsDecisions').innerHTML = d.decisions.length
+      ? d.decisions.map((x) => `<div class="cal-row"><div class="cal-main"><div class="cal-title" style="font-weight:400;">${tgEsc(x.text)}</div></div><div class="cal-time">${new Date(x.at).toLocaleTimeString('sw-TZ', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Dar_es_Salaam' })}</div></div>`).join('')
+      : `<div class="empty">Hakuna bado.</div>`;
+  }
+
+  async function refreshNews() {
+    try {
+      const d = await api('/api/admin/fx/news/status');
+      newsState = d;
+      if (!newsFormLoaded) { fillNewsForm(d.config, d.limits); newsFormLoaded = true; }
+      renderNews();
+    } catch (e) {
+      document.getElementById('newsStatus').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`;
+    }
+    refreshNewsHistory();
+  }
+
+  async function refreshNewsHistory() {
+    try {
+      const d = await api('/api/admin/fx/news/history?limit=100');
+      const t = d.trades || [];
+      document.getElementById('newsHistory').innerHTML = t.length
+        ? `<div class="table-wrap" style="max-height:340px; overflow-y:auto;"><table><thead><tr><th>Imefungwa</th><th>Jozi</th><th>Upande</th><th>Tukio</th><th>P/L</th></tr></thead><tbody>` +
+          t.map((x) => {
+            const p = x.profit;
+            return `<tr><td>${fmtHistDate(Number(x.closedAt))}</td><td>${tgEsc(x.pair)}</td><td>${x.direction === 'BUY' ? '🟢' : '🔴'}</td>` +
+              `<td style="max-width:180px; white-space:normal;">${tgEsc(x.currency)}: ${tgEsc(String(x.eventTitles || '').slice(0, 60))}</td>` +
+              `<td class="${p == null ? '' : p >= 0 ? 'pl-pos' : 'pl-neg'}">${p == null ? '—' : moneySigned(p)}</td></tr>`;
+          }).join('') + `</tbody></table></div>`
+        : `<div class="empty">Hakuna news trades zilizofungwa kwenye akaunti hii bado.</div>`;
+    } catch (e) {
+      document.getElementById('newsHistory').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`;
+    }
+  }
+
+  async function newsPost(patch) {
+    const r = await api('/api/admin/fx/news/config', { method: 'POST', body: JSON.stringify(patch) });
+    return r.config;
+  }
+
+  async function newsToggle(btn) {
+    if (!newsState) return;
+    const turningOn = !newsState.config.enabled;
+    if (turningOn) {
+      const real = newsState.mode === 'real' && newsState.config.allowReal;
+      const ok = await askConfirm(real
+        ? '🔴 Akaunti ni REAL na REAL imeruhusiwa — News Trading itafanya trades kwa PESA HALISI.'
+        : 'Washa News Trading? Bot itafungua trades kiotomatiki matukio ya habari yakitoka (' + (newsState.mode || '?').toUpperCase() + ').', 'Ndiyo, washa');
+      if (!ok) return;
+    }
+    btn.disabled = true;
+    try { await newsPost({ enabled: turningOn }); posToast(turningOn ? '✅ News Trading imewashwa' : '⏹️ News Trading imezimwa', true); }
+    catch (e) { posToast('❌ ' + e.message, false); }
+    btn.disabled = false;
+    refreshNews();
+  }
+
+  async function newsSave(btn) {
+    const v = (id) => Number(document.getElementById(id).value);
+    const patch = {
+      stake: v('nStake'), multiplier: v('nMult'), maxOpen: v('nMaxOpen'), slPct: v('nSl'), tpPct: v('nTp'),
+      maxHoldMin: v('nHold'), minSurprisePct: v('nSurprise'), windowMin: v('nWindow'), maxDailyLossUsd: v('nMaxLoss'),
+      includeMedium: document.getElementById('nMedium').checked, allowReal: document.getElementById('nReal').checked,
+    };
+    if (patch.allowReal && !(newsState && newsState.config.allowReal)) {
+      const ok = await askConfirm('🔴 Unaruhusu News Trading kutumia akaunti ya REAL (pesa halisi). Una uhakika?', 'Ndiyo, ruhusu REAL');
+      if (!ok) return;
+    }
+    btn.disabled = true;
+    try { await newsPost(patch); posToast('✅ Mipangilio imehifadhiwa', true); newsFormLoaded = false; }
+    catch (e) { posToast('❌ ' + e.message, false); }
+    btn.disabled = false;
+    refreshNews();
+  }
+
+  function newsClrInvalidate() { nClrPending = null; const g = document.getElementById('nClrGo'); if (g) g.disabled = true; }
+  async function newsClrPreview(btn) {
+    const scope = document.getElementById('nClrScope').value;
+    const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ ...';
+    newsClrInvalidate();
+    try {
+      const r = await api('/api/admin/fx/news/history/preview', { method: 'POST', body: JSON.stringify({ scope }) });
+      document.getElementById('nClrBox').innerHTML = `<div class="muted" style="margin:8px 0;">${tgEsc(r.label)}: <b>${r.count}</b> trades (W${r.wins}/L${r.losses}, P/L ${moneySigned(r.net)}). Trades zilizo wazi hazifutwi.</div>`;
+      if (r.count) { nClrPending = { scope, count: r.count, label: r.label }; document.getElementById('nClrGo').disabled = false; }
+    } catch (e) { document.getElementById('nClrBox').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`; }
+    btn.disabled = false; btn.textContent = label;
+  }
+  async function newsClrRun(btn) {
+    if (!nClrPending || nClrPending.scope !== document.getElementById('nClrScope').value) { newsClrInvalidate(); posToast('Bonyeza "Angalia kitakachofutwa" kwanza.', false); return; }
+    const p = nClrPending;
+    const ok = await askConfirm(`Utafuta ${p.label}: trades ${p.count} (HAIWEZI kurudishwa).`, 'Ndiyo, futa');
+    if (!ok) { posToast('Kufuta kumeghairiwa.', false); return; }
+    btn.disabled = true;
+    try {
+      const r = await api('/api/admin/fx/news/history/delete', { method: 'POST', body: JSON.stringify({ scope: p.scope, confirm: true, expectCount: p.count }) });
+      posToast('✅ Imefutwa trades ' + r.deleted, true);
+      newsClrInvalidate(); document.getElementById('nClrBox').innerHTML = '';
+      refreshNews();
+    } catch (e) { posToast('❌ ' + e.message, false); }
+  }
+
   // ── Futa historia + takwimu / panga trades za zamani ─────────────────
   let clrPending = null; // { scope, count, label }
   function clrInvalidate() { clrPending = null; const g = document.getElementById('clrGo'); if (g) g.disabled = true; }
@@ -1707,6 +1955,8 @@
     // ~20 + Groq call; stats: inabadilika tu trade ikifungwa) — kila dakika 1
     // kwenye dashboard inatosha, hakuna sababu ya sekunde 5.
     slowPollTimer = setInterval(() => { refreshCalendar(); refreshPredictions(); }, 60000);
+    if (window._newsTimer) clearInterval(window._newsTimer);
+    window._newsTimer = setInterval(() => { if (newsActive()) refreshNews(); }, 10000); // News tab: sekunde 10 ikiwa wazi
     if (window._statsTimer) clearInterval(window._statsTimer);
     window._statsTimer = setInterval(refreshStats, 15000); // trade ya auto ikifungwa — kadi za stats zisasishwe haraka
     if (window._histTimer) clearInterval(window._histTimer);
