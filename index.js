@@ -864,6 +864,9 @@ async function _startBot() {
         const ownerRaw = Array.isArray(config.ownerNumber) ? config.ownerNumber[0] : config.ownerNumber;
         const ownerJid = ownerRaw?.includes('@') ? ownerRaw : `${ownerRaw}@s.whatsapp.net`;
         autoTrader.start({ sock, notifyJid: ownerJid });
+        // News Trading (economic calendar) — default IMEZIMWA, inawashwa kwenye dashboard (tab ya News Trade).
+        require('./utils/newsTrader').start({ sock, notifyJid: ownerJid })
+          .catch((err) => console.error('❌ Imeshindwa kuanzisha news-trader:', err.message));
       } catch (err) {
         console.error('❌ Imeshindwa kuanzisha auto-trader:', err.message);
       }
