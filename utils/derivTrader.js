@@ -548,7 +548,9 @@ async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, m
   // Rudisha SL/TP HALISI zilizotumika (zinaweza kuwa zimerekebishwa hapo
   // juu) ili mwito wa nje (mfano autoTrader.js) aonyeshe namba sahihi
   // kwenye notification, si zile alizoomba awali.
-  return { ...buyRes.buy, stop_loss: slUsed, take_profit: tpUsed };
+  // commission: gharama ya kufungua kutoka Deriv (kama ipo) — News Trading inaitumia kuonyesha gharama ya kuingia.
+  const commission = Number(proposal.commission);
+  return { ...buyRes.buy, stop_loss: slUsed, take_profit: tpUsed, ...(Number.isFinite(commission) ? { commission } : {}) };
 }
 
 // Inachambua ujumbe wa hitilafu wa Deriv kutafuta kikomo (kiwango cha

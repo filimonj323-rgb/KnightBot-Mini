@@ -18,6 +18,13 @@
  *   - Kila tukio linashughulikiwa MARA MOJA tu (fx_news_events) — restart haitarudia.
  *   - Trades za habari zina table yake (fx_news_trades) — haziingii stats za auto-trader.
  *
+ * KUCHELEWA KWA DATA (actual):
+ *   - Kila tukio linapimwa: muda kati ya release na bot kuona `actual` kwenye feed (lag). "exact" = bot ilikuwa
+ *     inaangalia kabla ya actual kutoka (usahihi ~sekunde 60); vinginevyo ni "≤" (bot iliona actual tayari ipo).
+ *   - Lag ikizidi `maxLagMin` → trade inarukwa. Bei ikishasogea `maxMovePct` kuelekea upande wa trade tangu
+ *     release → inarukwa (mwendo umeshafanyika). Actual isipofika ndani ya dirisha → inarekodiwa "no_actual".
+ *   - Gharama ya kuingia (commission) inarekodiwa kwa kila trade (halisi kutoka Deriv ikipatikana, vinginevyo makadirio).
+ *
  * ⚠️ Mipaka inayojulikana: data ya `actual` inatoka kwenye feed ya bure ya ForexFactory, ambayo inaweza
  * kuchelewa dakika chache baada ya release; bei inaweza kuwa imeshasogea kabla hatujaingia. Slippage/spread
  * wakati wa habari ni kubwa. Hii SI ushauri wa kifedha — anza na DEMO.
@@ -32,6 +39,7 @@ const {
   closeContractWithPnL,
   getAccountMode,
   getAccountState,
+  getCandles,
   ALLOWED_MULTIPLIERS,
   MIN_STAKE_USD,
   MAX_STAKE_USD,
@@ -41,6 +49,8 @@ const TICK_MS = Math.max(5000, Number(process.env.NEWS_TRADE_TICK_MS || 15000));
 const SETTLE_MIN = 3;                 // subiri hadi dakika 3 ili matukio yote ya kundi yapate `actual`
 const FRESH_FEED_MS = 60 * 1000;      // wakati wa release, lazimisha feed isiyozidi dakika 1 (si cache ya dakika 15)
 const MAX_MISSES = 40;                // ticks (~10 min) za kusubiri profit_table kabla ya kuweka "unknown"
+// Makadirio ya commission ya Multipliers (~0.02% ya stake×multiplier, kutoka nyaraka za Deriv) — hutumika tu kama Deriv haikutoa namba.
+const COMMISSION_RATE_EST = Number(process.env.NEWS_COMMISSION_RATE) > 0 ? Number(process.env.NEWS_COMMISSION_RATE) : 0.0002;
 
 // Currency → jozi inayotumika kuifanyia trade (zote ziko kwenye PAIRS za auto-trader / FX_SYMBOL_MAP).
 const CURRENCY_PAIR = {
@@ -68,6 +78,8 @@ const DEFAULTS = {
   maxDailyLossUsd: 5,
   allowReal: false,
   includeMedium: false,
+  maxLagMin: 3,       // actual ikionekana baada ya dakika hizi tangu release → usiingie (imechelewa)
+  maxMovePct: 0.15,   // bei ishasogea % hii kuelekea upande wa trade tangu release → usiingie (0 = zima kinga)
 };
 
 let cfg = { ...DEFAULTS };
@@ -83,6 +95,8 @@ const handled = new Set();            // eventKey zilizoshughulikiwa
 const newsContractIds = new Set();    // contract IDs zote za habari (auto-trader inazipuuza)
 const missCount = new Map();          // contractId -> ticks bila kupata data ya kufungwa
 const decisions = [];                 // ring buffer ya maamuzi ya mwisho (kwa dashboard)
+const pendingSeen = new Map();        // eventKey -> {currency, t}: bot iliona kundi BILA actual (inaruhusu kupima lag kwa usahihi)
+const lagSeen = new Map();            // eventKey -> {lagSec, exact}: lini bot iliona actual kwa mara ya kwanza
 
 function isNewsContract(id) { return newsContractIds.has(String(id)); }
 
@@ -121,6 +135,8 @@ function validateConfig(input) {
     maxDailyLossUsd: num(c.maxDailyLossUsd, 'Hasara ya juu ya siku ($)', 1, 1000),
     allowReal: c.allowReal === true,
     includeMedium: c.includeMedium === true,
+    maxLagMin: num(c.maxLagMin, 'Lag ya juu (dakika)', 1, 30),
+    maxMovePct: num(c.maxMovePct, 'Mwendo wa juu uliopita (%)', 0, 5),
   };
   if (!ALLOWED_MULTIPLIERS.includes(out.multiplier)) {
     throw new Error(`Multiplier lazima iwe mojawapo ya: ${ALLOWED_MULTIPLIERS.join(', ')}.`);
@@ -174,13 +190,14 @@ async function resolveMode() {
   return m || null;
 }
 
-async function markHandled(key, outcome, detail = '') {
+async function markHandled(key, outcome, detail = '', lag = null) {
   handled.add(key);
+  pendingSeen.delete(key);
   try {
     await db.query(
-      `INSERT INTO fx_news_events (eventKey, handledAt, outcome, detail) VALUES (?, ?, ?, ?)
+      `INSERT INTO fx_news_events (eventKey, handledAt, outcome, detail, lagSec, lagExact) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(eventKey) DO NOTHING`,
-      [key, Date.now(), outcome, String(detail).slice(0, 500)]
+      [key, Date.now(), outcome, String(detail).slice(0, 500), lag ? lag.lagSec : null, lag ? (lag.exact ? 1 : 0) : null]
     );
   } catch (err) { console.error('[newsTrader] markHandled imeshindwa:', err.message); }
 }
@@ -246,6 +263,28 @@ function evaluateGroup(g) {
   };
 }
 
+// ── Kuchelewa kwa data & mwendo wa bei ─────────────────────────────────────────────────────────
+function fmtLag(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  return s >= 90 ? `${r2(s / 60)} dk` : `${s}s`;
+}
+
+/** Mwendo wa bei tangu release (candles za dakika 1 za Deriv). dirPct = % kuelekea upande wa trade (+ = mwendo umeshafanyika). */
+async function priceMoveSince(pair, releaseMs, direction) {
+  const candles = await getCandles(pair, '1min', 45);
+  if (!Array.isArray(candles) || candles.length < 2) return null;
+  const startMs = Math.floor(releaseMs / 60000) * 60000;
+  const at = (c) => Date.parse(String(c.datetime).replace(' ', 'T') + 'Z');
+  const first = candles.find((c) => at(c) >= startMs);
+  const last = candles[candles.length - 1];
+  if (!first || !last || at(first) - startMs > 2 * 60000) return null; // hakuna candle ya dakika ya release
+  const p0 = Number(first.open);
+  const p1 = Number(last.close);
+  if (!(p0 > 0) || !(p1 > 0)) return null;
+  const pct = ((p1 - p0) / p0) * 100;
+  return { p0, p1, pct: r2(pct * 1000) / 1000, dirPct: Math.round((direction === 'BUY' ? pct : -pct) * 1000) / 1000 };
+}
+
 // ── Kufungua trade ────────────────────────────────────────────────────────────────────────────
 async function dailyPnl(mode) {
   const r = await db.query(
@@ -260,7 +299,9 @@ async function openCount(mode) {
   return Number(r.rows && r.rows[0] && r.rows[0].n) || 0;
 }
 
-async function placeFor(g, ev, mode) {
+async function placeFor(g, ev, mode, extra = {}) {
+  const lag = extra.lag || null;
+  const move = extra.move || null;
   const stake = Math.min(cfg.stake, MAX_STAKE_USD);
   const slUsd = Math.max(0.01, r2(stake * cfg.slPct / 100));
   const tpUsd = Math.max(0.01, r2(stake * cfg.tpPct / 100));
@@ -268,32 +309,40 @@ async function placeFor(g, ev, mode) {
     pair: ev.pair, direction: ev.direction, stake, stopLoss: slUsd, takeProfit: tpUsd, multiplier: cfg.multiplier,
   });
   const slFinal = Number.isFinite(result.stop_loss) ? result.stop_loss : slUsd;
+  // Gharama ya kuingia: commission halisi kutoka Deriv ikiwepo, vinginevyo makadirio (stake × multiplier × kiwango).
+  const dCommission = Number(result.commission);
+  const costEst = !(Number.isFinite(dCommission) && dCommission >= 0);
+  const costUsd = costEst ? Math.round(stake * cfg.multiplier * COMMISSION_RATE_EST * 10000) / 10000 : Math.round(dCommission * 10000) / 10000;
   const tpFinal = Number.isFinite(result.take_profit) ? result.take_profit : tpUsd;
   const id = String(result.contract_id);
   newsContractIds.add(id);
   const openedAt = Date.now();
   // Trade ISHAFUNGULIWA Deriv — usiitupe kimya kimya DB ikishindwa; tuma onyo na uendelee (tukio lisirudiwe).
-  await markHandled(g.key, 'traded', `${ev.pair} ${ev.direction}`);
+  await markHandled(g.key, 'traded', `${ev.pair} ${ev.direction}`, lag);
   try {
     await db.query(
       `INSERT INTO fx_news_trades (contractId, eventKey, currency, eventTitles, pair, direction, stake, slUsd, tpUsd, multiplier,
-         maxHoldMin, surprisePct, buyPrice, openedAt, accountMode)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         maxHoldMin, surprisePct, buyPrice, openedAt, accountMode, lagSec, lagExact, entryMovePct, costUsd, costEst)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(contractId) DO NOTHING`,
       [id, g.key, g.currency, ev.titles.slice(0, 300), ev.pair, ev.direction, stake, slFinal, tpFinal, cfg.multiplier,
-        cfg.maxHoldMin, ev.surprisePct, Number(result.buy_price) || null, openedAt, mode]
+        cfg.maxHoldMin, ev.surprisePct, Number(result.buy_price) || null, openedAt, mode,
+        lag ? lag.lagSec : null, lag ? (lag.exact ? 1 : 0) : null, move ? move.dirPct : null, costUsd, costEst ? 1 : 0]
     );
   } catch (dbErr) {
     console.error('[newsTrader] Trade imefunguliwa lakini DB imeshindwa kuihifadhi:', dbErr.message);
     await notify(`⚠️ News trade ${ev.pair} ${ev.direction} (🆔 ${id}) imefunguliwa Deriv lakini HAIKUHIFADHIWA kwenye database (${dbErr.message}). Ifuatilie/ifunge kwa mkono.`);
   }
-  pushDecision('trade', `📰 ${g.currency}: ${ev.direction} ${ev.pair} — ${ev.summary}`, { contractId: id });
+  pushDecision('trade', `📰 ${g.currency}: ${ev.direction} ${ev.pair} — ${ev.summary}${lag ? ` (lag ${lag.exact ? '' : '≤ '}${fmtLag(lag.lagSec)})` : ''}`, { contractId: id });
   await notify(
     `📰 *NEWS TRADE IMEFUNGULIWA* (${mode.toUpperCase()})\n\n` +
       `Currency: *${g.currency}* ${ev.bullish ? '🟢 inaimarika' : '🔴 inadhoofika'}\n` +
       `Jozi: *${ev.pair}* ${ev.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'}\n` +
       `Surprise: ${ev.surprisePct}%\n` +
       `Stake: $${r2(stake)} | SL: $${r2(slFinal)} | TP: $${r2(tpFinal)} | x${cfg.multiplier}\n` +
+      (lag ? `⏱️ Actual ilionekana ${lag.exact ? '' : '≤ '}${fmtLag(lag.lagSec)} baada ya release\n` : '') +
+      (move ? `📈 Bei imesogea ${move.dirPct >= 0 ? '+' : ''}${move.dirPct}% kuelekea upande wa trade tangu release\n` : '') +
+      `💸 Gharama ya kuingia: ~$${costUsd.toFixed(4)}${costEst ? ' (makadirio)' : ''}\n` +
       `Funga kwa muda baada ya: dakika ${cfg.maxHoldMin}\n` +
       `📊 ${ev.summary}\n🆔 ${id}\n\n⚠️ Trade ya habari — hatari kubwa. SI ushauri wa kifedha.`
   );
@@ -319,16 +368,33 @@ async function scanAndTrade(mode) {
     if (fresh.available) { view = fresh; groups = buildGroups(view.events, Date.now()).filter((g) => !handled.has(g.key)); }
   }
 
+  const nowTs = Date.now();
   for (const g of groups) {
+    // Pima lag: bot iliona kundi hili BILA actual (pendingSeen) kisha ikaona actual → lag halisi (exact); vinginevyo "≤".
+    if (!g.events.some((e) => hasValue(e.actual))) {
+      pendingSeen.set(g.key, { currency: g.currency, t: g.t });
+    } else if (!lagSeen.has(g.key)) {
+      lagSeen.set(g.key, { lagSec: Math.max(0, Math.round((nowTs - g.t) / 1000)), exact: pendingSeen.has(g.key) });
+    }
+    const lag = lagSeen.get(g.key) || null;
+
     const ev = evaluateGroup(g);
     if (ev.state === 'pending') continue;
     if (ev.state === 'done') {
-      await markHandled(g.key, ev.outcome, ev.text);
-      pushDecision('skip', `⏭️ ${g.currency}: ${ev.text}`);
+      await markHandled(g.key, ev.outcome, ev.text, lag);
+      pushDecision('skip', `⏭️ ${g.currency}: ${ev.text}${lag ? ` (lag ${lag.exact ? '' : '≤ '}${fmtLag(lag.lagSec)})` : ''}`);
       continue;
     }
 
-    // Walinzi kabla ya kufungua (hali za muda mfupi HAZIWEKI alama ya "handled" — tutajaribu tena ndani ya dirisha).
+    // KINGA 1: actual ilichelewa kupita kikomo → mwendo wa habari huenda umeshaisha.
+    if (lag && lag.lagSec > cfg.maxLagMin * 60) {
+      const txt = `actual ilionekana ${fmtLag(lag.lagSec)} baada ya release (kikomo ${cfg.maxLagMin} dk) — imerukwa (${ev.direction} ${ev.pair})`;
+      await markHandled(g.key, 'late_lag', txt, lag);
+      pushDecision('skip', `⏱️ ${g.currency}: ${txt}`);
+      continue;
+    }
+
+    // Walinzi wa muda mfupi (HAWAWEKI alama ya "handled" — tutajaribu tena ndani ya dirisha).
     if ((await openCount(mode)) >= cfg.maxOpen) { lastBlocked = `Trades wazi zimejaa (${cfg.maxOpen}).`; continue; }
     let live;
     try { live = await getOpenPositions(); } catch (err) { lastBlocked = 'Deriv haipatikani (positions) — sifungui trade.'; return; }
@@ -337,13 +403,41 @@ async function scanAndTrade(mode) {
       lastBlocked = `${ev.pair} ina position wazi tayari — subiri ifungwe.`;
       continue;
     }
+
+    // KINGA 2: bei tayari imesogea kuelekea upande wa trade tangu release → tungekuwa tunanunua juu ya spike.
+    let move = null;
+    try { move = await priceMoveSince(ev.pair, g.t, ev.direction); } catch (err) { move = null; }
+    if (move && cfg.maxMovePct > 0 && move.dirPct >= cfg.maxMovePct) {
+      const txt = `bei ishasogea ${move.dirPct}% kuelekea ${ev.direction} ${ev.pair} tangu release (kikomo ${cfg.maxMovePct}%) — mwendo umeshafanyika, imerukwa`;
+      await markHandled(g.key, 'late_move', txt, lag);
+      pushDecision('skip', `📉 ${g.currency}: ${txt}`);
+      continue;
+    }
+    if (!move && cfg.maxMovePct > 0 && mode === 'real') {
+      lastBlocked = 'Bei ya kuthibitisha mwendo haipatikani (REAL) — sifungui trade.'; // REAL: usiingie bila kinga
+      continue;
+    }
+    if (!move) pushDecision('info', `⚠️ ${g.currency}: kinga ya bei haikupatikana (candles) — naendelea (DEMO).`);
+
     try {
-      await placeFor(g, ev, mode);
+      await placeFor(g, ev, mode, { lag, move });
     } catch (err) {
       console.error(`[newsTrader] Imeshindwa kufungua ${ev.pair}:`, err.message);
-      await markHandled(g.key, 'error', err.message);
+      await markHandled(g.key, 'error', err.message, lag);
       pushDecision('error', `❌ ${g.currency}: ${ev.pair} imeshindwa — ${err.message}`);
       await notify(`❌ News trade ya ${ev.pair} imeshindwa: ${err.message}`);
+    }
+  }
+}
+
+// Kundi lililoonekana bila actual na dirisha likaisha → actual HAIKUFIKA kwa wakati (feed imechelewa kupita dirisha lote).
+async function expirePending() {
+  for (const [key, info] of [...pendingSeen]) {
+    if (handled.has(key)) { pendingSeen.delete(key); continue; }
+    if (Date.now() - info.t > cfg.windowMin * 60000) {
+      const txt = `actual haikufika ndani ya dakika ${cfg.windowMin} baada ya release — feed imechelewa kupita dirisha`;
+      await markHandled(key, 'no_actual', txt, null);
+      pushDecision('skip', `⌛ ${info.currency}: ${txt}`);
     }
   }
 }
@@ -417,6 +511,7 @@ async function tick() {
     if (!mode) { lastBlocked = 'Akaunti ya Deriv haijulikani bado.'; return; }
     await trackOpenTrades(mode);          // trades zilizo wazi zinasimamiwa HATA ukizima News Trading
     if (!cfg.enabled) { lastBlocked = null; return; }
+    await expirePending();
     await scanAndTrade(mode);
   } catch (err) {
     console.error('[newsTrader] tick error:', err.message);
@@ -455,17 +550,46 @@ async function getSummary(mode) {
     `SELECT COUNT(*) AS n,
             COALESCE(SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END), 0) AS wins,
             COALESCE(SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END), 0) AS losses,
-            COALESCE(SUM(profit), 0) AS net
+            COALESCE(SUM(profit), 0) AS net,
+            COALESCE(SUM(costUsd), 0) AS cost,
+            COALESCE(SUM(CASE WHEN costEst = 1 THEN 1 ELSE 0 END), 0) AS costEstN
        FROM fx_news_trades WHERE closedAt IS NOT NULL AND accountMode = ?`, [mode]);
   const x = (r.rows && r.rows[0]) || {};
   const wins = Number(x.wins) || 0;
   const losses = Number(x.losses) || 0;
+  const net = r2(Number(x.net) || 0);
+  const cost = r2(Number(x.cost) || 0);
   return {
     closed: Number(x.n) || 0, wins, losses,
     winRate: wins + losses ? r2((wins / (wins + losses)) * 100) : 0,
-    net: r2(Number(x.net) || 0),
+    net,
     today: r2(await dailyPnl(mode)),
+    costTotal: cost,                 // jumla ya gharama za kuingia (commission)
+    costEstimated: Number(x.costEstN) > 0, // kuna trades ambazo gharama ni makadirio
+    grossBeforeCost: r2(net + cost), // P/L ikiwa gharama zisingekuwepo (takriban)
   };
+}
+
+/** Takwimu za lag ya feed (matukio ambayo bot iliyaona BILA actual kisha actual ikatoka = lag halisi) + idadi ya yaliyorukwa. */
+async function getLagStats() {
+  const r = await db.query('SELECT lagSec FROM fx_news_events WHERE lagSec IS NOT NULL AND lagExact = 1 ORDER BY handledAt DESC LIMIT 50', []);
+  const arr = (r.rows || []).map((x) => Number(x.lagSec)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  const out = { count: arr.length, avgSec: null, medianSec: null, maxSec: null, noActual: 0, lateLag: 0, lateMove: 0 };
+  if (arr.length) {
+    out.avgSec = Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+    out.medianSec = arr[Math.floor(arr.length / 2)];
+    out.maxSec = arr[arr.length - 1];
+  }
+  const c = await db.query(
+    "SELECT outcome, COUNT(*) AS n FROM fx_news_events WHERE handledAt >= ? AND outcome IN ('no_actual','late_lag','late_move') GROUP BY outcome",
+    [Date.now() - 7 * 86400000]
+  );
+  for (const row of c.rows || []) {
+    if (row.outcome === 'no_actual') out.noActual = Number(row.n) || 0;
+    if (row.outcome === 'late_lag') out.lateLag = Number(row.n) || 0;
+    if (row.outcome === 'late_move') out.lateMove = Number(row.n) || 0;
+  }
+  return out;
 }
 
 async function getStatus() {
@@ -485,7 +609,9 @@ async function getStatus() {
       .slice(0, 14)
       .map(({ e, t }) => {
         const bull = pairDirection(e.country, true);
+        const lg = lagSeen.get(`${e.country}|${new Date(t).toISOString().slice(0, 16)}`) || null;
         return {
+          lagSec: lg ? lg.lagSec : null, lagExact: lg ? lg.exact : null,
           title: e.title, currency: e.country, impact: e.impact, date: e.date,
           minutesFromNow: Math.round((t - now) / 60000),
           forecast: e.forecast ?? null, previous: e.previous ?? null, actual: e.actual ?? null,
@@ -507,6 +633,7 @@ async function getStatus() {
     blocked: lastBlocked,
     open,
     summary: await getSummary(mode),
+    lag: await getLagStats(),
     upcoming,
     decisions: decisions.slice(0, 25),
     limits: { minStake: MIN_STAKE_USD, maxStake: MAX_STAKE_USD, multipliers: ALLOWED_MULTIPLIERS },
@@ -519,7 +646,8 @@ async function getHistory(limit = 100) {
   if (!mode) return [];
   const n = Math.max(1, Math.min(Number(limit) || 100, 500));
   const r = await db.query(
-    `SELECT contractId, currency, eventTitles, pair, direction, stake, surprisePct, openedAt, closedAt, profit, exitType
+    `SELECT contractId, currency, eventTitles, pair, direction, stake, surprisePct, openedAt, closedAt, profit, exitType,
+            lagSec, lagExact, entryMovePct, costUsd, costEst
        FROM fx_news_trades WHERE closedAt IS NOT NULL AND accountMode = ? ORDER BY closedAt DESC LIMIT ?`,
     [mode, n]
   );
@@ -572,4 +700,6 @@ module.exports = {
   _evaluateGroup: evaluateGroup,
   _buildGroups: buildGroups,
   _pairDirection: pairDirection,
+  _priceMoveSince: priceMoveSince,
+  _getLagStats: getLagStats,
 };
