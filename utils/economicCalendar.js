@@ -81,9 +81,10 @@ function parseNumeric(v) {
   return Number.isNaN(n) ? null : n;
 }
 
-async function fetchCalendarRaw() {
+async function fetchCalendarRaw(maxAgeMs = CACHE_MS) {
   const now = Date.now();
-  if (cache.data && now - cache.at < CACHE_MS) return cache.data;
+  // maxAgeMs ndogo (mfano News Trading wakati wa release) inalazimisha data mpya zaidi; rate-limit cooldown bado inaheshimiwa.
+  if (cache.data && now - cache.at < maxAgeMs) return cache.data;
 
   // Tuko kwenye "cooldown" (429/hitilafu ya hivi karibuni) — usigonge feed
   // tena; tumia data ya zamani kama ipo, vinginevyo tupa error.
@@ -271,12 +272,12 @@ const MAJOR_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD'
  *
  * Haitupi error kamwe kwa juu — ikishindwa, inarudisha { available:false }.
  */
-async function getWeekView(currencies = MAJOR_CURRENCIES) {
+async function getWeekView(currencies = MAJOR_CURRENCIES, { maxAgeMs } = {}) {
   const wanted = currencies.filter(Boolean).map((c) => c.toUpperCase());
 
   let events;
   try {
-    events = await fetchCalendarRaw();
+    events = await fetchCalendarRaw(Number.isFinite(maxAgeMs) ? maxAgeMs : CACHE_MS);
   } catch (err) {
     if (Date.now() - lastErrLoggedAt > ERROR_COOLDOWN_MS) {
       lastErrLoggedAt = Date.now();
@@ -310,6 +311,8 @@ module.exports = {
   getCalendarContext,
   computeCalendarVote,
   getWeekView,
+  isInverseIndicator,
+  parseNumeric,
   MAJOR_CURRENCIES,
   NEWS_RISK_WINDOW_MIN,
   SURPRISE_WINDOW_MIN,

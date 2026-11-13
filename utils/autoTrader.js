@@ -107,6 +107,8 @@ const {
 // "auto-trade inafungua mara mbili kwa jozi ile ile baada ya redeploy").
 const fxTradesDb = require('../pairing/db');
 const signalTargets = require('./signalTargets');
+// News Trading (utils/newsTrader.js) ina table na ufuatiliaji wake — auto-trader isi-adopt wala isi-import trades hizo.
+const newsTrader = require('./newsTrader');
 
 const ENABLED = String(process.env.AUTO_TRADE_ENABLED || 'false').toLowerCase() === 'true';
 const CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 * 60 * 1000); // saa 1
@@ -496,6 +498,7 @@ async function reconcileHistoryFromDeriv(force = false) {
     const byId = new Map((existing.rows || []).map((r) => [String(r.contractId), r]));
     for (const t of txs) {
       const id = String(t.contract_id);
+      if (newsTrader.isNewsContract(id)) continue; // trade ya News Trading — ina table yake
       const buy = Number(t.buy_price);
       const sell = Number(t.sell_price);
       if (!Number.isFinite(buy) || !Number.isFinite(sell)) continue;
@@ -1169,7 +1172,9 @@ async function evaluatePairInner(pairInfo) {
   try {
     const derivSymbol = toDerivSymbol(code);
     livePositions = await getOpenPositions();
-    livePosition = livePositions.find((p) => p.symbol === derivSymbol);
+    livePosition = livePositions.find((p) => p.symbol === derivSymbol && !newsTrader.isNewsContract(p.contract_id));
+    // Jozi ina trade ya News Trading pekee — usi-adopt, na usifungue nyingine kwa jozi hii.
+    if (!livePosition && livePositions.some((p) => p.symbol === derivSymbol)) return null;
   } catch (err) {
     console.error(
       `[autoTrader] ${code}: imeshindwa kuangalia positions za Deriv — SIFUNGUI trade mpya mzunguko huu (kuzuia marudio):`,
@@ -1771,6 +1776,7 @@ async function adoptAllLivePositions() {
   for (const p of live) {
     const id = String(p.contract_id);
     if (openAutoTrades.has(id)) continue;
+    if (newsTrader.isNewsContract(id)) continue; // trade ya News Trading
     const code = String(p.symbol || '').replace(/^frx/i, '').toUpperCase();
     if (!PAIRS.some((x) => x.code === code)) continue; // si jozi ya FX yetu
     const info = {
