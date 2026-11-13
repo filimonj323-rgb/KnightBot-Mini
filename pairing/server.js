@@ -84,6 +84,7 @@ const autoTrader = require('../utils/autoTrader');
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = require('../utils/forexSignal');
 const { runBacktest } = require('../utils/backtest');
 const economicCalendar = require('../utils/economicCalendar');
+const newsTrader = require('../utils/newsTrader');
 const fxPredictions = require('../utils/fxPredictions');
 const tradeAnalysis = require('../utils/tradeAnalysis');
 const notifyPrefs = require('../utils/notifyPrefs');
@@ -1077,6 +1078,43 @@ async function handlePairingRequest(req, res) {
         const q = new URL(req.url, 'http://x').searchParams;
         const trades = await autoTrader.getTradeHistory(q.get('limit') || 200);
         return sendJson(res, 200, { ok: true, trades });
+      }
+
+      // ── News Trading (utils/newsTrader.js) — tab ya "News Trade" ─────────────────────────────────
+      if (req.method === 'GET' && req.url.split('?')[0] === '/api/admin/fx/news/status') {
+        return sendJson(res, 200, { ok: true, ...(await newsTrader.getStatus()) });
+      }
+      if (req.method === 'GET' && req.url.split('?')[0] === '/api/admin/fx/news/history') {
+        const q = new URL(req.url, 'http://x').searchParams;
+        return sendJson(res, 200, { ok: true, trades: await newsTrader.getHistory(q.get('limit') || 100) });
+      }
+      // Body: sehemu yoyote ya config (enabled, stake, multiplier, slPct, tpPct, maxHoldMin, minSurprisePct, windowMin, maxOpen, maxDailyLossUsd, allowReal, includeMedium)
+      if (req.method === 'POST' && req.url === '/api/admin/fx/news/config') {
+        const body = await readJsonBody(req);
+        try {
+          const config = await newsTrader.setConfig(body || {});
+          return sendJson(res, 200, { ok: true, config });
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: err.message });
+        }
+      }
+      if (req.method === 'POST' && (req.url === '/api/admin/fx/news/history/preview' || req.url === '/api/admin/fx/news/history/delete')) {
+        const body = await readJsonBody(req);
+        const scope = String(body.scope || '');
+        if (req.url.endsWith('/preview')) {
+          const pv = await newsTrader.previewClear(scope);
+          return sendJson(res, pv.ok ? 200 : 400, pv);
+        }
+        if (body.confirm !== true) return sendJson(res, 400, { ok: false, error: 'Uthibitisho unahitajika (confirm).' });
+        if (body.expectCount != null) {
+          const now = await newsTrader.previewClear(scope);
+          if (!now.ok) return sendJson(res, 400, now);
+          if (now.count !== Number(body.expectCount)) {
+            return sendJson(res, 409, { ok: false, error: `Data imebadilika tangu preview (ilikuwa ${body.expectCount}, sasa ${now.count}). Bonyeza "Angalia" tena.` });
+          }
+        }
+        const del = await newsTrader.clearHistory(scope);
+        return sendJson(res, del.ok ? 200 : 400, del);
       }
 
       // Futa historia + takwimu za Deriv (owner). Hatua 2: preview (hakuna kinachofutwa) kisha delete (confirm:true).

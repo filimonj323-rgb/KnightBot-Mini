@@ -116,6 +116,35 @@ async function initSchema() {
       settingValue TEXT NOT NULL,
       updatedAt   INTEGER NOT NULL
     )`,
+    // News Trading (utils/newsTrader.js): trades za habari zina table yao wenyewe ili zisichanganyike na stats za auto-trader.
+    `CREATE TABLE IF NOT EXISTS fx_news_trades (
+      contractId   TEXT PRIMARY KEY,
+      eventKey     TEXT,
+      currency     TEXT,
+      eventTitles  TEXT,
+      pair         TEXT NOT NULL,
+      direction    TEXT NOT NULL,
+      stake        REAL,
+      slUsd        REAL,
+      tpUsd        REAL,
+      multiplier   INTEGER,
+      maxHoldMin   INTEGER,
+      surprisePct  REAL,
+      buyPrice     REAL,
+      openedAt     INTEGER NOT NULL,
+      closedAt     INTEGER,
+      sellPrice    REAL,
+      profit       REAL,
+      exitType     TEXT,
+      accountMode  TEXT
+    )`,
+    // Matukio ya habari yaliyoshughulikiwa tayari (dedupe — kila tukio linafanyiwa maamuzi MARA MOJA).
+    `CREATE TABLE IF NOT EXISTS fx_news_events (
+      eventKey  TEXT PRIMARY KEY,
+      handledAt INTEGER NOT NULL,
+      outcome   TEXT,
+      detail    TEXT
+    )`,
     // Pocket Option (Binary/Turbo): kila order iliyofunguliwa kupitia bot
     // (.pobuy/.posell) inahifadhiwa hapa kutoka kufunguliwa hadi kufungwa,
     // ili restart/redeploy isipoteze kumbukumbu ya trades.
