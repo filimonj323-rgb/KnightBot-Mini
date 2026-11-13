@@ -507,8 +507,11 @@
           <div><label>Funga baada ya (dakika)</label><input type="number" id="nHold" min="1" max="120" step="1" /></div>
           <div><label>Surprise ya chini (%)</label><input type="number" id="nSurprise" min="1" max="500" step="1" /></div>
           <div><label>Dirisha baada ya release (dk)</label><input type="number" id="nWindow" min="1" max="30" step="1" /></div>
+          <div><label>Lag ya juu ya actual (dk)</label><input type="number" id="nLag" min="1" max="30" step="1" /></div>
+          <div><label>Mwendo wa juu uliopita (%)</label><input type="number" id="nMove" min="0" max="5" step="0.05" /></div>
           <div><label>Hasara ya juu ya siku ($)</label><input type="number" id="nMaxLoss" min="1" step="1" /></div>
         </div>
+        <div class="muted" style="font-size:11px; margin:8px 0 0;">Lag ya juu: actual ikionekana baada ya dakika hizi tangu release, bot haiingii. Mwendo wa juu: bei ikishasogea % hii kuelekea upande wa trade tangu release, bot haiingii (0 = zima kinga hii).</div>
         <label style="display:flex; align-items:center; gap:8px; margin:12px 0 6px; cursor:pointer; font-size:12px;"><input type="checkbox" id="nMedium" style="width:auto; margin:0;" /> Jumuisha pia matukio ya Medium impact</label>
         <label style="display:flex; align-items:center; gap:8px; margin:0 0 12px; cursor:pointer; font-size:12px; color:var(--red);"><input type="checkbox" id="nReal" style="width:auto; margin:0;" /> 🔴 Ruhusu kufanya trade kwenye akaunti ya REAL (pesa halisi)</label>
         <button class="primary" onclick="newsSave(this)">💾 Hifadhi Mipangilio</button>
@@ -1657,8 +1660,16 @@
     document.getElementById('nSurprise').value = c.minSurprisePct;
     document.getElementById('nWindow').value = c.windowMin;
     document.getElementById('nMaxLoss').value = c.maxDailyLossUsd;
+    document.getElementById('nLag').value = c.maxLagMin;
+    document.getElementById('nMove').value = c.maxMovePct;
     document.getElementById('nMedium').checked = !!c.includeMedium;
     document.getElementById('nReal').checked = !!c.allowReal;
+  }
+
+  function fmtLagS(sec) {
+    if (sec == null) return '—';
+    const s = Math.max(0, Math.round(Number(sec)));
+    return s >= 90 ? (s / 60).toFixed(1) + ' dk' : s + 's';
   }
 
   function fmtMin(m) {
@@ -1684,11 +1695,21 @@
       </div>` +
       (d.blocked ? `<div class="empty" style="text-align:left; padding:10px 0 0;">⛔ ${tgEsc(d.blocked)}</div>` : '') +
       (real && !c.allowReal ? `<div class="empty" style="text-align:left; padding:10px 0 0;">🔒 Akaunti ni REAL — haitafanya trade hadi uruhusu REAL kwenye mipangilio.</div>` : '');
+    const L = d.lag;
+    if (L) {
+      document.getElementById('newsStatus').innerHTML += L.count
+        ? `<div class="muted" style="font-size:12px; margin-top:10px;">⏱️ <b>Lag ya feed</b> (matukio ${L.count}): wastani ${fmtLagS(L.avgSec)} · kati ${fmtLagS(L.medianSec)} · juu ${fmtLagS(L.maxSec)}</div>` +
+          (L.count < 5 ? `<div class="muted" style="font-size:11px;">Data bado ni chache — subiri matukio zaidi ya 5 kabla ya kuamini wastani.</div>` : '')
+        : `<div class="muted" style="font-size:12px; margin-top:10px;">⏱️ Lag ya feed: bado hakuna kipimo (inapimwa tukio la kwanza likitoka).</div>`;
+      document.getElementById('newsStatus').innerHTML +=
+        `<div class="muted" style="font-size:12px;">Siku 7: actual haikufika ndani ya dirisha: <b>${L.noActual}</b> · yaliyorukwa kwa kuchelewa: <b>${L.lateLag}</b> · kwa mwendo wa bei: <b>${L.lateMove}</b></div>`;
+    }
 
     // Matukio yanayokuja
     document.getElementById('newsUpcoming').innerHTML = d.upcoming.length ? d.upcoming.map((e) => {
       const nums = [e.actual != null && e.actual !== '' ? `Actual: <strong>${tgEsc(e.actual)}</strong>` : '',
-        e.forecast != null ? `Forecast: ${tgEsc(e.forecast)}` : '', e.previous != null ? `<span class="muted">Prev: ${tgEsc(e.previous)}</span>` : ''].filter(Boolean).join(' · ');
+        e.forecast != null ? `Forecast: ${tgEsc(e.forecast)}` : '', e.previous != null ? `<span class="muted">Prev: ${tgEsc(e.previous)}</span>` : '',
+        e.lagSec != null ? `<span class="muted">⏱️ lag ${e.lagExact ? '' : '≤ '}${fmtLagS(e.lagSec)}</span>` : ''].filter(Boolean).join(' · ');
       const plan = e.pair && e.numeric
         ? `<div class="muted" style="font-size:11px;">Ikiimarika ${e.currency}: <b>${e.ifBeat} ${e.pair}</b> · ikidhoofika: <b>${e.ifBeat === 'BUY' ? 'SELL' : 'BUY'} ${e.pair}</b></div>`
         : `<div class="muted" style="font-size:11px;">Hakuna forecast ya namba — bot itapuuza.</div>`;
@@ -1707,7 +1728,9 @@
         `<div class="bt-stat"><div class="n pl-neg">${s.losses}</div><div class="l">Loss</div></div>` +
         `<div class="bt-stat"><div class="n">${s.winRate}%</div><div class="l">Win rate</div></div>` +
         `<div class="bt-stat"><div class="n ${s.net >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(s.net)}</div><div class="l">P/L jumla</div></div>` +
-        `<div class="bt-stat"><div class="n ${s.today >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(s.today)}</div><div class="l">Leo</div></div>`
+        `<div class="bt-stat"><div class="n ${s.today >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(s.today)}</div><div class="l">Leo</div></div>` +
+        `<div class="bt-stat"><div class="n">$${fmt(s.costTotal)}</div><div class="l">Gharama za kuingia${s.costEstimated ? ' (est.)' : ''}</div></div>` +
+        `<div class="bt-stat"><div class="n ${s.grossBeforeCost >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(s.grossBeforeCost)}</div><div class="l">P/L kabla ya gharama</div></div>`
       : '';
     document.getElementById('newsOpen').innerHTML = d.open.length
       ? `<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Jozi</th><th>Upande</th><th>Stake</th><th>SL/TP</th><th>Itafungwa</th></tr></thead><tbody>` +
@@ -1740,13 +1763,16 @@
       const d = await api('/api/admin/fx/news/history?limit=100');
       const t = d.trades || [];
       document.getElementById('newsHistory').innerHTML = t.length
-        ? `<div class="table-wrap" style="max-height:340px; overflow-y:auto;"><table><thead><tr><th>Imefungwa</th><th>Jozi</th><th>Upande</th><th>Tukio</th><th>P/L</th></tr></thead><tbody>` +
+        ? `<div class="table-wrap" style="max-height:340px; overflow-y:auto;"><table><thead><tr><th>Imefungwa</th><th>Jozi</th><th>Upande</th><th>Tukio</th><th>Lag</th><th>Mwendo</th><th>Gharama</th><th>P/L</th></tr></thead><tbody>` +
           t.map((x) => {
             const p = x.profit;
             return `<tr><td>${fmtHistDate(Number(x.closedAt))}</td><td>${tgEsc(x.pair)}</td><td>${x.direction === 'BUY' ? '🟢' : '🔴'}</td>` +
               `<td style="max-width:180px; white-space:normal;">${tgEsc(x.currency)}: ${tgEsc(String(x.eventTitles || '').slice(0, 60))}</td>` +
+              `<td>${x.lagSec == null ? '—' : (x.lagExact ? '' : '≤ ') + fmtLagS(x.lagSec)}</td>` +
+              `<td>${x.entryMovePct == null ? '—' : (x.entryMovePct >= 0 ? '+' : '') + x.entryMovePct + '%'}</td>` +
+              `<td>${x.costUsd == null ? '—' : '$' + Number(x.costUsd).toFixed(3) + (x.costEst ? '*' : '')}</td>` +
               `<td class="${p == null ? '' : p >= 0 ? 'pl-pos' : 'pl-neg'}">${p == null ? '—' : moneySigned(p)}</td></tr>`;
-          }).join('') + `</tbody></table></div>`
+          }).join('') + `</tbody></table></div><div class="muted" style="font-size:11px; margin-top:6px;">Lag = muda kati ya release na bot kuona actual (≤ = bot iliona actual tayari ipo). Mwendo = % bei ilivyosogea kuelekea upande wa trade tangu release, wakati wa kuingia. Gharama = commission ya kuingia (* = makadirio ~0.02% ya stake × multiplier; si namba ya Deriv). P/L tayari inajumuisha gharama.</div>`
         : `<div class="empty">Hakuna news trades zilizofungwa kwenye akaunti hii bado.</div>`;
     } catch (e) {
       document.getElementById('newsHistory').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`;
@@ -1780,6 +1806,7 @@
     const patch = {
       stake: v('nStake'), multiplier: v('nMult'), maxOpen: v('nMaxOpen'), slPct: v('nSl'), tpPct: v('nTp'),
       maxHoldMin: v('nHold'), minSurprisePct: v('nSurprise'), windowMin: v('nWindow'), maxDailyLossUsd: v('nMaxLoss'),
+      maxLagMin: v('nLag'), maxMovePct: v('nMove'),
       includeMedium: document.getElementById('nMedium').checked, allowReal: document.getElementById('nReal').checked,
     };
     if (patch.allowReal && !(newsState && newsState.config.allowReal)) {
