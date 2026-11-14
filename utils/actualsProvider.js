@@ -292,29 +292,75 @@ async function getActuals(maxAgeMs = 5 * 60 * 1000) {
   return inflight;
 }
 
+// ── Ulinganishaji wa majina (vyanzo vinaandika majina tofauti: "CPI y/y" vs "Consumer Price Index (YoY)") ──
+const ALIASES = [
+  [/\bconsumer price index\b/g, 'cpi'], [/\bproducer price index\b/g, 'ppi'], [/\bgross domestic product\b/g, 'gdp'],
+  [/\bnon[- ]?farm payrolls?\b/g, 'nfp'], [/\bnonfarm\b/g, 'nfp'], [/\bunemployment rate\b/g, 'unemployment'],
+  [/\by\/y\b|\byear[- ]over[- ]year\b|\byoy\b/g, 'yoy'], [/\bm\/m\b|\bmonth[- ]over[- ]month\b|\bmom\b/g, 'mom'],
+  [/\bq\/q\b|\bquarter[- ]over[- ]quarter\b|\bqoq\b/g, 'qoq'],
+];
+const STOP = new Set(['the', 'of', 'and', 'in', 'for', 'to', 'a', 'german', 'germany', 'us', 'uk', 'eu', 'eurozone', 'australian', 'canadian', 'swiss', 'japanese', 'final', 'prelim', 'preliminary', 'flash', 'adv', 'advance', 'revised']);
+const PERIODS = ['yoy', 'mom', 'qoq'];
+function tokens(title) {
+  let t = String(title || '').toLowerCase().replace(/[()]/g, ' ');
+  for (const [re, to] of ALIASES) t = t.replace(re, to);
+  return new Set(t.replace(/[^a-z0-9%]+/g, ' ').split(' ').filter((w) => w && !STOP.has(w)));
+}
+function titleScore(a, b) {
+  const A = tokens(a), B = tokens(b);
+  if (!A.size || !B.size) return 0;
+  for (const p of PERIODS) if (A.has(p) !== B.has(p) && (A.has(p) || B.has(p)) && PERIODS.some((q) => A.has(q)) && PERIODS.some((q) => B.has(q))) return 0;
+  if (A.has('core') !== B.has('core')) return 0;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+  return inter / Math.min(A.size, B.size);
+}
+
+let lastMerge = { matched: 0, total: 0, unmatched: [] };
+
 /**
  * Unganisha actuals kwenye matukio ya feed (nakala mpya, hazibadilishi cache ya feed).
- * Mechi = currency + title (iliyosafishwa) + muda ndani ya saa 3.
+ * Mechi: (1) currency + title sawa + muda ndani ya saa 3; (2) currency + muda ndani ya dakika 5 +
+ * majina yanayofanana (alias: CPI/Consumer Price Index, y/y/YoY, n.k.).
  */
 function mergeActuals(events, actuals) {
   if (!Array.isArray(events) || !actuals || !actuals.length) return events;
-  const idx = new Map();
+  const exact = new Map();
   for (const a of actuals) {
     const k = `${a.country}|${normTitle(a.title)}`;
-    if (!idx.has(k)) idx.set(k, []);
-    idx.get(k).push(a);
+    if (!exact.has(k)) exact.set(k, []);
+    exact.get(k).push(a);
   }
-  return events.map((e) => {
+  const byCur = new Map();
+  for (const a of actuals) { if (!byCur.has(a.country)) byCur.set(a.country, []); byCur.get(a.country).push(a); }
+
+  let matched = 0;
+  const unmatched = [];
+  const now = Date.now();
+  const res = events.map((e) => {
     const t = new Date(e.date).getTime();
-    const cands = idx.get(`${String(e.country || '').toUpperCase()}|${normTitle(e.title)}`);
-    if (!cands || !Number.isFinite(t)) return e;
+    const cur = String(e.country || '').toUpperCase();
+    if (!Number.isFinite(t)) return e;
     let best = null;
     let bestD = 3 * 3600 * 1000 + 1;
-    for (const c of cands) {
+    for (const c of exact.get(`${cur}|${normTitle(e.title)}`) || []) {
       const d = Math.abs(c.ts - t);
       if (d < bestD) { best = c; bestD = d; }
     }
-    if (!best) return e;
+    if (!best) {
+      let bestScore = 0;
+      for (const c of byCur.get(cur) || []) {
+        const d = Math.abs(c.ts - t);
+        if (d > 5 * 60000) continue;
+        const sc = titleScore(e.title, c.title);
+        if (sc >= 0.5 && (sc > bestScore || (sc === bestScore && best && d < Math.abs(best.ts - t)))) { best = c; bestScore = sc; }
+      }
+    }
+    if (!best) {
+      if (t < now && ['high', 'medium'].includes(String(e.impact || '').toLowerCase()) && unmatched.length < 8) unmatched.push(`${cur} ${e.title} @${new Date(t).toISOString().slice(0, 16)}`);
+      return e;
+    }
+    matched++;
     const out = { ...e };
     if (best.id) out.ffId = best.id;
     if (!hasValue(out.actual) && hasValue(best.actual)) { out.actual = best.actual; out.actualSource = state.source || 'ff'; }
@@ -322,6 +368,9 @@ function mergeActuals(events, actuals) {
     if (!hasValue(out.previous) && hasValue(best.previous)) out.previous = best.previous;
     return out;
   });
+  lastMerge = { matched, total: events.length, unmatched };
+  if (unmatched.length) logOnce(`actualsProvider: mechi ${matched}/${events.length}; hazikupata mechi (High/Medium zilizopita): ${unmatched.join(' | ')}`);
+  return res;
 }
 
 /** Kama feed kuu imeshindwa kabisa, tengeneza matukio ya msingi kutoka actuals (FF kama chanzo kikuu). */
@@ -334,7 +383,7 @@ function toBaseEvents(actuals) {
 }
 
 function getStatus() {
-  return { source: state.source, lastFetchAt: state.at || null, count: state.data ? state.data.length : 0, lastError: state.lastError, blockedUntil: blockedUntil || null, enabled: FF_ENABLED || FXS_ENABLED || !!CUSTOM_URL };
+  return { source: state.source, lastFetchAt: state.at || null, count: state.data ? state.data.length : 0, lastError: state.lastError, blockedUntil: blockedUntil || null, merge: lastMerge, enabled: FF_ENABLED || FXS_ENABLED || !!CUSTOM_URL };
 }
 
 module.exports = { getActuals, mergeActuals, toBaseEvents, getStatus, parseFfPage, parseFfEmbedded, parseFfRows, parseCustom, parseFxstreet, normTitle };
