@@ -817,6 +817,29 @@ async function getCandles(pair, interval, count) {
   }));
 }
 
+/**
+ * Candles za kihistoria kati ya epoch mbili (sekunde) — kwa backtest ya News Trading.
+ * Inarudisha [{ epoch, open, high, low, close }] (namba, zimepangwa kwa muda). Hitilafu ya Deriv inatupwa nje.
+ */
+async function getCandlesBetween(pair, interval, startSec, endSec) {
+  const granularity = GRANULARITY_BY_INTERVAL[String(interval).toLowerCase()];
+  if (!granularity) throw new Error(`Interval "${interval}" haitambuliki`);
+  const symbol = toDerivSymbol(String(pair).replace(/[^A-Za-z]/g, ''));
+  const res = await send({
+    ticks_history: symbol,
+    start: Math.floor(Number(startSec)),
+    end: Math.floor(Number(endSec)),
+    granularity,
+    style: 'candles',
+  });
+  const raw = res && res.candles;
+  if (!Array.isArray(raw)) throw new Error(`Deriv haikurudisha candles kwa ${symbol}`);
+  return raw
+    .map((c) => ({ epoch: Number(c.epoch ?? c.open_time ?? c.time), open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close) }))
+    .filter((c) => Number.isFinite(c.epoch) && c.open > 0 && c.high > 0 && c.low > 0 && c.close > 0)
+    .sort((a, b) => a.epoch - b.epoch);
+}
+
 async function getBalance() {
   const res = await send({ balance: 1 });
   return res.balance; // { balance, currency, ... }
@@ -845,4 +868,5 @@ module.exports = {
   MAX_MULTIPLIER,
   toDerivSymbol,
   getCandles,
+  getCandlesBetween,
 };

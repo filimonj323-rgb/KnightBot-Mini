@@ -32,6 +32,7 @@
 
 const db = require('../pairing/db');
 const economicCalendar = require('./economicCalendar');
+const newsObserver = require('./newsObserver');
 const {
   placeMultiplier,
   getOpenPositions,
@@ -52,17 +53,8 @@ const MAX_MISSES = 40;                // ticks (~10 min) za kusubiri profit_tabl
 // Makadirio ya commission ya Multipliers (~0.02% ya stake×multiplier, kutoka nyaraka za Deriv) — hutumika tu kama Deriv haikutoa namba.
 const COMMISSION_RATE_EST = Number(process.env.NEWS_COMMISSION_RATE) > 0 ? Number(process.env.NEWS_COMMISSION_RATE) : 0.0002;
 
-// Currency → jozi inayotumika kuifanyia trade (zote ziko kwenye PAIRS za auto-trader / FX_SYMBOL_MAP).
-const CURRENCY_PAIR = {
-  USD: 'EURUSD',
-  EUR: 'EURUSD',
-  GBP: 'GBPUSD',
-  JPY: 'USDJPY',
-  AUD: 'AUDUSD',
-  CAD: 'USDCAD',
-  CHF: 'USDCHF',
-  NZD: 'NZDUSD',
-};
+// Currency → jozi, pairDirection na kura ya surprise ziko kwenye newsLogic.js (zinashirikiwa na backtest).
+const { CURRENCY_PAIR, pairDirection, scoreEvents } = require('./newsLogic');
 const CURRENCIES = Object.keys(CURRENCY_PAIR);
 
 const DEFAULTS = {
@@ -177,13 +169,6 @@ async function setConfig(patch = {}) {
 const r2 = (n) => Math.round(Number(n) * 100) / 100;
 function startOfUtcDay(ts) { const d = new Date(ts); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); }
 
-function pairDirection(currency, bullish) {
-  const code = CURRENCY_PAIR[currency];
-  if (!code) return null;
-  const isBase = code.slice(0, 3) === currency;
-  return { pair: code, direction: bullish === isBase ? 'BUY' : 'SELL' };
-}
-
 async function resolveMode() {
   let m = getAccountMode();
   if (!m) { try { await getAccountState(); } catch (_) { /* hakuna */ } m = getAccountMode(); }
@@ -233,22 +218,7 @@ function evaluateGroup(g) {
   const usable = withForecast.filter((e) => economicCalendar.parseNumeric(e.actual) != null);
   if (!usable.length) return { state: 'pending' }; // bado hakuna actual — subiri hadi dirisha liishe
 
-  let net = 0;
-  let maxPct = 0;
-  const lines = [];
-  for (const e of usable) {
-    const actual = economicCalendar.parseNumeric(e.actual);
-    const forecast = economicCalendar.parseNumeric(e.forecast);
-    const diff = actual - forecast;
-    const pct = (Math.abs(diff) / Math.max(Math.abs(forecast), 0.1)) * 100;
-    let vote = diff > 0 ? 1 : diff < 0 ? -1 : 0;
-    if (economicCalendar.isInverseIndicator(e.title)) vote = -vote;
-    if (pct < cfg.minSurprisePct) vote = 0;
-    net += vote;
-    if (vote !== 0) maxPct = Math.max(maxPct, pct);
-    lines.push(`${e.title}: ${e.actual} vs ${e.forecast} (${r2(pct)}%${vote === 0 ? ', haitoshi' : vote > 0 ? ', ↑' : ', ↓'})`);
-  }
-  const summary = lines.join(' | ');
+  const { net, maxPct, summary } = scoreEvents(usable, cfg.minSurprisePct);
   if (net === 0) return { state: 'done', outcome: 'no_edge', text: `hakuna mwelekeo wazi (surprise ndogo au zinapingana) — ${summary}` };
 
   const pd = pairDirection(g.currency, net > 0);
@@ -535,6 +505,7 @@ async function start({ sock, notifyJid } = {}) {
   } catch (err) {
     console.error('[newsTrader] Imeshindwa kuanza kutoka DB:', err.message);
   }
+  newsObserver.start().catch((e) => console.error('[newsObserver] imeshindwa kuanza:', e.message)); // kurekodi muda wa actual (hata News Trading ikiwa imezimwa)
   console.log(`[newsTrader] ✅ Imeanza — ${cfg.enabled ? 'IMEWASHWA' : 'imezimwa (washa kwenye dashboard)'}, tick kila sekunde ${Math.round(TICK_MS / 1000)}.`);
   timer = setInterval(() => { tick().catch((e) => console.error('[newsTrader] tick:', e.message)); }, TICK_MS);
   if (timer.unref) timer.unref();
@@ -598,28 +569,57 @@ async function getStatus() {
   const mode = getAccountMode() || (await resolveMode());
   const now = Date.now();
 
+  // Matukio: yanayokuja (masaa 48) + yaliyopita (masaa 24) — kila moja na actual, muda wa actual kupatikana,
+  // uamuzi wa bot na trade (kama ipo). UI inayaonyesha kama mistari inayofunguka (tap).
   let upcoming = [];
+  let recent = [];
   try {
     const view = await economicCalendar.getWeekView(CURRENCIES);
     const impacts = cfg.includeMedium ? ['high', 'medium'] : ['high'];
-    upcoming = (view.events || [])
+    const inRange = (view.events || [])
       .filter((e) => impacts.includes(String(e.impact).toLowerCase()))
       .map((e) => ({ e, t: new Date(e.date).getTime() }))
-      .filter((x) => Number.isFinite(x.t) && x.t >= now - cfg.windowMin * 60000 && x.t <= now + 48 * 3600000)
-      .slice(0, 14)
-      .map(({ e, t }) => {
-        const bull = pairDirection(e.country, true);
-        const lg = lagSeen.get(`${e.country}|${new Date(t).toISOString().slice(0, 16)}`) || null;
-        return {
-          lagSec: lg ? lg.lagSec : null, lagExact: lg ? lg.exact : null,
-          title: e.title, currency: e.country, impact: e.impact, date: e.date,
-          minutesFromNow: Math.round((t - now) / 60000),
-          forecast: e.forecast ?? null, previous: e.previous ?? null, actual: e.actual ?? null,
-          pair: bull ? bull.pair : null,
-          ifBeat: bull ? bull.direction : null, // direction ikiwa currency itaimarika
-          numeric: economicCalendar.parseNumeric(e.forecast) != null,
-        };
-      });
+      .filter((x) => Number.isFinite(x.t) && x.t >= now - 24 * 3600000 && x.t <= now + 48 * 3600000);
+    const attached = await newsObserver.attach(inRange.map((x) => x.e));
+    const keys = [...new Set(inRange.map((x) => `${x.e.country}|${new Date(x.t).toISOString().slice(0, 16)}`))];
+    const outcomes = new Map();
+    const tradeByKey = new Map();
+    if (keys.length) {
+      const ph = keys.map(() => '?').join(',');
+      for (const row of (await db.query(`SELECT eventKey, outcome, detail FROM fx_news_events WHERE eventKey IN (${ph})`, keys)).rows || []) outcomes.set(String(row.eventKey), row);
+      for (const row of (await db.query(`SELECT eventKey, pair, direction, profit, closedAt FROM fx_news_trades WHERE eventKey IN (${ph}) ORDER BY openedAt DESC`, keys)).rows || []) {
+        if (!tradeByKey.has(String(row.eventKey))) tradeByKey.set(String(row.eventKey), row);
+      }
+    }
+    const rows = inRange.map(({ e, t }, i) => {
+      const ev = attached[i] || e;
+      const gk = `${e.country}|${new Date(t).toISOString().slice(0, 16)}`;
+      const bull = pairDirection(e.country, true);
+      const fNum = economicCalendar.parseNumeric(ev.forecast);
+      const aNum = economicCalendar.parseNumeric(ev.actual);
+      let deviationPct = null;
+      let signal = null;
+      if (fNum != null && aNum != null) {
+        deviationPct = r2((Math.abs(aNum - fNum) / Math.max(Math.abs(fNum), 0.1)) * 100);
+        const sc = scoreEvents([ev], cfg.minSurprisePct);
+        signal = sc.net > 0 ? 'bullish' : sc.net < 0 ? 'bearish' : 'neutral';
+      }
+      const oc = outcomes.get(gk);
+      const tr = tradeByKey.get(gk);
+      const lg = lagSeen.get(gk) || null;
+      return {
+        key: gk, title: e.title, currency: e.country, impact: e.impact, date: e.date, minutesFromNow: Math.round((t - now) / 60000),
+        forecast: ev.forecast ?? null, previous: ev.previous ?? null, actual: ev.actual ?? null, actualSource: ev.actualSource || null,
+        obs: ev.obs || null, lagSec: lg ? lg.lagSec : null, lagExact: lg ? lg.exact : null,
+        pair: bull ? bull.pair : null, ifBeat: bull ? bull.direction : null, // direction ikiwa currency itaimarika
+        numeric: fNum != null, deviationPct, signal,
+        outcome: oc ? { code: oc.outcome, text: oc.detail } : null,
+        trade: tr ? { pair: tr.pair, direction: tr.direction, profit: tr.profit == null ? null : Number(tr.profit), closed: tr.closedAt != null } : null,
+        t,
+      };
+    });
+    upcoming = rows.filter((x) => x.t > now).sort((a, b) => a.t - b.t).slice(0, 14);
+    recent = rows.filter((x) => x.t <= now).sort((a, b) => b.t - a.t).slice(0, 25);
   } catch (_) { /* calendar haipatikani */ }
 
   const open = mode
@@ -634,7 +634,9 @@ async function getStatus() {
     open,
     summary: await getSummary(mode),
     lag: await getLagStats(),
+    coverage: newsObserver.getCoverage(), // matukio yaliyokwisha toka yenye actual vs yasiyo nayo (kutambua kama feed haitoi actual)
     upcoming,
+    recent,
     decisions: decisions.slice(0, 25),
     limits: { minStake: MIN_STAKE_USD, maxStake: MAX_STAKE_USD, multipliers: ALLOWED_MULTIPLIERS },
   };
