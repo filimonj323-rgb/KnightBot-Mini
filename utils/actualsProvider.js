@@ -8,7 +8,8 @@
  * actual/forecast/previous kwenye matukio ya feed. Vyanzo (kwa mpangilio):
  *   1) NEWS_ACTUALS_URL (hiari) — JSON array yako mwenyewe; kila kipengele:
  *        { title, country|currency, date (ISO) | timestamp (sekunde), actual, forecast, previous, impact, id }
- *   2) ForexFactory: https://www.forexfactory.com/calendar?week=this
+ *   2) FXStreet (default, API ya umma ya calendar; zima kwa NEWS_FXSTREET=false)
+ *   3) ForexFactory: https://www.forexfactory.com/calendar?week=this
  *        - inasoma JSON iliyopachikwa (`calendarComponentStates`), na kama haipo, inasoma safu za HTML.
  *      Zima kwa NEWS_FF_SCRAPE=false.
  *
@@ -179,6 +180,40 @@ function parseCustom(data) {
   return out.length ? out : null;
 }
 
+
+// ── FXStreet (API ya umma ya calendar yao; haina Cloudflare ya ukurasa) ───────────────────
+const FXS_ENABLED = String(process.env.NEWS_FXSTREET || 'true').toLowerCase() !== 'false';
+function fxsUrl() {
+  const from = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10) + 'T00:00:00Z';
+  const to = new Date(Date.now() + 8 * 86400000).toISOString().slice(0, 10) + 'T23:59:59Z';
+  return process.env.NEWS_FXSTREET_URL || `https://calendar-api.fxstreet.com/en/api/v1/eventDates/${from}/${to}`;
+}
+function fxsVal(v, unit) {
+  if (v === null || v === undefined || v === '') return null;
+  const u = unit && !['', '%'].includes(unit) ? unit : '';
+  return String(v) + (unit === '%' ? '%' : u);
+}
+function parseFxstreet(data) {
+  const arr = Array.isArray(data) ? data : [];
+  const out = [];
+  for (const e of arr) {
+    const ts = new Date(e.dateUtc).getTime();
+    const country = String(e.currencyCode || '').toUpperCase();
+    if (!Number.isFinite(ts) || !e.name || !country || e.isAllDay) continue;
+    out.push({
+      id: null, // FXStreet id si ya ForexFactory — usiweke kiungo cha FF
+      title: clean(e.name),
+      country,
+      ts,
+      impact: normImpact(e.volatility),
+      actual: clean(fxsVal(e.actual, e.unit)),
+      forecast: clean(fxsVal(e.consensus, e.unit)),
+      previous: clean(fxsVal(e.previous, e.unit)),
+    });
+  }
+  return out.length ? out : null;
+}
+
 function logOnce(msg) {
   if (Date.now() - lastLogAt > 5 * 60 * 1000) { lastLogAt = Date.now(); console.error(msg); }
 }
@@ -204,19 +239,35 @@ async function fetchSources() {
     }
   }
 
-  if (FF_ENABLED) {
-    const r = await axios.get(FF_URL, axiosOpts);
-    const parsed = parseFfPage(String(r.data || ''));
-    if (!parsed) throw new Error('ForexFactory: ukurasa umepatikana lakini hakuna matukio yaliyosomeka (muundo umebadilika au ukurasa wa Cloudflare)');
-    return { data: parsed, source: 'forexfactory' };
+  const errors = [];
+  if (FXS_ENABLED) {
+    try {
+      const r = await axios.get(fxsUrl(), { ...axiosOpts, headers: { ...HEADERS, Accept: 'application/json', Origin: 'https://www.fxstreet.com', Referer: 'https://www.fxstreet.com/' } });
+      const parsed = parseFxstreet(typeof r.data === 'string' ? JSON.parse(r.data) : r.data);
+      if (parsed) return { data: parsed, source: 'fxstreet' };
+      errors.push('FXStreet: data tupu/muundo usiojulikana');
+    } catch (err) {
+      errors.push(`FXStreet: ${err.response ? 'HTTP ' + err.response.status : err.message}`);
+    }
   }
+  if (FF_ENABLED) {
+    try {
+      const r = await axios.get(FF_URL, axiosOpts);
+      const parsed = parseFfPage(String(r.data || ''));
+      if (parsed) return { data: parsed, source: 'forexfactory' };
+      errors.push('ForexFactory: ukurasa hauna matukio yaliyosomeka');
+    } catch (err) {
+      errors.push(`ForexFactory: ${err.response ? 'HTTP ' + err.response.status : err.message}`);
+    }
+  }
+  if (errors.length) { const e = new Error(errors.join(' | ')); e.allFailed = true; throw e; }
   return null;
 }
 
 /** Rudisha matukio yenye actual (au null). Haitupi error. maxAgeMs = umri wa juu wa cache. */
 async function getActuals(maxAgeMs = 5 * 60 * 1000) {
   const now = Date.now();
-  if (!FF_ENABLED && !CUSTOM_URL) return null;
+  if (!FF_ENABLED && !FXS_ENABLED && !CUSTOM_URL) return null;
   const age = now - state.at;
   if (state.data && age < Math.max(maxAgeMs, MIN_GAP_MS)) return state.data;
   if (now < blockedUntil) return state.data;
@@ -229,10 +280,10 @@ async function getActuals(maxAgeMs = 5 * 60 * 1000) {
       blockedUntil = 0;
     } catch (err) {
       const status = err.response && err.response.status;
-      const wait = status === 403 || status === 429 ? BLOCK_COOLDOWN_MS : ERROR_COOLDOWN_MS;
+      const wait = /403|429/.test(err.message) || status === 403 || status === 429 ? BLOCK_COOLDOWN_MS : ERROR_COOLDOWN_MS;
       blockedUntil = Date.now() + wait;
       state.lastError = status ? `HTTP ${status}` : err.message;
-      logOnce(`actualsProvider: ${state.lastError}${status === 403 ? ' (Cloudflare imezuia IP ya server — tumia NEWS_ACTUALS_URL au NEWS_FF_PROXY_URL)' : ''}; nitajaribu tena baada ya dakika ${Math.round(wait / 60000 * 10) / 10}.`);
+      logOnce(`actualsProvider: ${state.lastError}${/403/.test(state.lastError) ? ' (chanzo kimezuia IP ya server — tumia NEWS_ACTUALS_URL au NEWS_FF_PROXY_URL)' : ''}; nitajaribu tena baada ya dakika ${Math.round(wait / 60000 * 10) / 10}.`);
     } finally {
       inflight = null;
     }
@@ -283,7 +334,7 @@ function toBaseEvents(actuals) {
 }
 
 function getStatus() {
-  return { source: state.source, lastFetchAt: state.at || null, count: state.data ? state.data.length : 0, lastError: state.lastError, blockedUntil: blockedUntil || null, enabled: FF_ENABLED || !!CUSTOM_URL };
+  return { source: state.source, lastFetchAt: state.at || null, count: state.data ? state.data.length : 0, lastError: state.lastError, blockedUntil: blockedUntil || null, enabled: FF_ENABLED || FXS_ENABLED || !!CUSTOM_URL };
 }
 
-module.exports = { getActuals, mergeActuals, toBaseEvents, getStatus, parseFfPage, parseFfEmbedded, parseFfRows, parseCustom, normTitle };
+module.exports = { getActuals, mergeActuals, toBaseEvents, getStatus, parseFfPage, parseFfEmbedded, parseFfRows, parseCustom, parseFxstreet, normTitle };
