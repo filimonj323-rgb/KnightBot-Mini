@@ -143,6 +143,22 @@ async function initSchema() {
       costUsd      REAL,
       costEst      INTEGER
     )`,
+    // Kumbukumbu ya matukio ya calendar: lini actual ilionekana (observer) na data ya kihistoria iliyoingizwa (backtest).
+    `CREATE TABLE IF NOT EXISTS fx_calendar_obs (
+      eventKey    TEXT PRIMARY KEY,
+      currency    TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      impact      TEXT,
+      scheduledAt INTEGER NOT NULL,
+      forecast    TEXT,
+      previous    TEXT,
+      actual      TEXT,
+      firstSeenAt INTEGER,
+      lagSec      INTEGER,
+      exact       INTEGER,
+      source      TEXT,
+      updatedAt   INTEGER
+    )`,
     // Matukio ya habari yaliyoshughulikiwa tayari (dedupe — kila tukio linafanyiwa maamuzi MARA MOJA).
     `CREATE TABLE IF NOT EXISTS fx_news_events (
       eventKey  TEXT PRIMARY KEY,

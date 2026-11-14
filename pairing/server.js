@@ -85,6 +85,8 @@ const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = requi
 const { runBacktest } = require('../utils/backtest');
 const economicCalendar = require('../utils/economicCalendar');
 const newsTrader = require('../utils/newsTrader');
+const newsObserver = require('../utils/newsObserver');
+const newsBacktest = require('../utils/newsBacktest');
 const fxPredictions = require('../utils/fxPredictions');
 const tradeAnalysis = require('../utils/tradeAnalysis');
 const notifyPrefs = require('../utils/notifyPrefs');
@@ -1117,6 +1119,42 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, del.ok ? 200 : 400, del);
       }
 
+      // ── Data ya kihistoria (kwa backtest) + backtest ya News Trading ─────────────────────────────
+      if (req.method === 'GET' && req.url === '/api/admin/fx/news/data') {
+        return sendJson(res, 200, { ok: true, stats: await newsObserver.getDataStats(), coverage: newsObserver.getCoverage() });
+      }
+      // Body: { text: "<CSV au JSON>", utcOffsetMin?: namba (dakika mbele ya UTC za saa zilizomo kwenye faili, mfano 180 = EAT) }
+      if (req.method === 'POST' && req.url === '/api/admin/fx/news/data/import') {
+        const body = await readJsonBody(req, 3e6);
+        try {
+          const out = await newsObserver.importEvents(String(body.text || ''), { utcOffsetMin: Number(body.utcOffsetMin) || 0 });
+          return sendJson(res, 200, { ...out, stats: await newsObserver.getDataStats() });
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: err.message });
+        }
+      }
+      if (req.method === 'POST' && req.url === '/api/admin/fx/news/data/clear') {
+        const body = await readJsonBody(req);
+        if (body.confirm !== true) return sendJson(res, 400, { ok: false, error: 'Uthibitisho unahitajika (confirm).' });
+        const out = await newsObserver.clearImported();
+        return sendJson(res, 200, { ...out, stats: await newsObserver.getDataStats() });
+      }
+      // Body: vigezo vya backtest (stake, multiplier, slPct, tpPct, maxHoldMin, minSurprisePct, maxLagMin, maxMovePct, includeMedium, delays[], daysBack...)
+      if (req.method === 'POST' && req.url === '/api/admin/fx/news/backtest/run') {
+        const body = await readJsonBody(req);
+        try {
+          return sendJson(res, 200, { ok: true, job: await newsBacktest.start(body || {}) });
+        } catch (err) {
+          return sendJson(res, /inaendelea/.test(err.message) ? 409 : 400, { ok: false, error: err.message });
+        }
+      }
+      if (req.method === 'GET' && req.url === '/api/admin/fx/news/backtest/status') {
+        return sendJson(res, 200, { ok: true, job: await newsBacktest.getStatus() });
+      }
+      if (req.method === 'POST' && req.url === '/api/admin/fx/news/backtest/cancel') {
+        return sendJson(res, 200, { ok: true, cancelled: newsBacktest.cancel() });
+      }
+
       // Futa historia + takwimu za Deriv (owner). Hatua 2: preview (hakuna kinachofutwa) kisha delete (confirm:true).
       // Body: { scope: 'demo'|'real'|'legacy'|'all', confirm?, expectCount? }. Trades zilizo wazi hazifutwi.
       if (req.method === 'POST' && (req.url === '/api/admin/fx/history/preview' || req.url === '/api/admin/fx/history/delete')) {
@@ -1636,7 +1674,9 @@ async function handlePairingRequest(req, res) {
       // economicCalendar.js yenyewe (feed haibadiliki mara kwa mara).
       if (req.method === 'GET' && req.url === '/api/admin/fx/calendar') {
         const calendar = await economicCalendar.getWeekView();
-        return sendJson(res, 200, { ok: true, ...calendar });
+        // obs = lini actual ilipatikana (newsObserver) ili ulinganishe na muda uliotangazwa; coverage = feed inatoa actual kweli?
+        const events = await newsObserver.attach(calendar.events || []);
+        return sendJson(res, 200, { ok: true, ...calendar, events, coverage: newsObserver.getCoverage() });
       }
 
       // AI predictions (calendar + technical signal kwa Groq) kwa jozi
