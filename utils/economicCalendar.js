@@ -33,6 +33,7 @@
  */
 
 const axios = require('axios');
+const actualsProvider = require('./actualsProvider');
 
 const FEED_URL = 'https://nfs.faireconomy.media/ff_calendar_thisweek.json';
 const TIMEOUT_MS = 10000;
@@ -81,7 +82,7 @@ function parseNumeric(v) {
   return Number.isNaN(n) ? null : n;
 }
 
-async function fetchCalendarRaw(maxAgeMs = CACHE_MS) {
+async function fetchFeedRaw(maxAgeMs = CACHE_MS) {
   const now = Date.now();
   // maxAgeMs ndogo (mfano News Trading wakati wa release) inalazimisha data mpya zaidi; rate-limit cooldown bado inaheshimiwa.
   if (cache.data && now - cache.at < maxAgeMs) return cache.data;
@@ -124,6 +125,30 @@ async function fetchCalendarRaw(maxAgeMs = CACHE_MS) {
     }
   })();
   return inflight;
+}
+
+
+/**
+ * Feed ya faireconomy HAITOI `actual` (ina forecast/previous tu). Kwa hiyo tunaunganisha actual kutoka
+ * actualsProvider (ForexFactory / NEWS_ACTUALS_URL). Feed kuu ikishindwa lakini actuals zipo, tunatumia
+ * actuals kama chanzo kikuu. Hakuna kati ya hizi kinachotupa error isipokuwa vyote viwili vimeshindwa.
+ */
+async function fetchCalendarRaw(maxAgeMs = CACHE_MS) {
+  // Actual ikipatikana kutoka chanzo cha pili, feed kuu haihitaji kugongwa mara nyingi (ina rate-limit kali).
+  const st = actualsProvider.getStatus();
+  const actualsHealthy = st.enabled && st.count > 0 && st.lastFetchAt && Date.now() - st.lastFetchAt < 10 * 60 * 1000;
+  const feedAge = actualsHealthy ? Math.max(maxAgeMs, CACHE_MS) : maxAgeMs;
+
+  const [feedRes, actuals] = await Promise.all([
+    fetchFeedRaw(feedAge).then((d) => ({ d }), (e) => ({ e })),
+    actualsProvider.getActuals(maxAgeMs),
+  ]);
+
+  if (feedRes.e) {
+    if (actuals && actuals.length) return actualsProvider.toBaseEvents(actuals);
+    throw feedRes.e;
+  }
+  return actuals && actuals.length ? actualsProvider.mergeActuals(feedRes.d, actuals) : feedRes.d;
 }
 
 /**
@@ -299,6 +324,8 @@ async function getWeekView(currencies = MAJOR_CURRENCIES, { maxAgeMs } = {}) {
         forecast: e.forecast ?? null,
         previous: e.previous ?? null,
         actual: e.actual ?? null,
+        actualSource: e.actualSource || null,
+        ffId: e.ffId || null,
         isPast: !Number.isNaN(t) && t < now,
       };
     })
@@ -313,6 +340,7 @@ module.exports = {
   getWeekView,
   isInverseIndicator,
   parseNumeric,
+  actualsProvider,
   MAJOR_CURRENCIES,
   NEWS_RISK_WINDOW_MIN,
   SURPRISE_WINDOW_MIN,
