@@ -1676,7 +1676,25 @@ async function handlePairingRequest(req, res) {
         const calendar = await economicCalendar.getWeekView();
         // obs = lini actual ilipatikana (newsObserver) ili ulinganishe na muda uliotangazwa; coverage = feed inatoa actual kweli?
         const events = await newsObserver.attach(calendar.events || []);
-        return sendJson(res, 200, { ok: true, ...calendar, events, coverage: newsObserver.getCoverage() });
+        return sendJson(res, 200, { ok: true, ...calendar, events, coverage: newsObserver.getCoverage(), actualsSource: economicCalendar.actualsProvider.getStatus() });
+      }
+
+      // Historia ya tukio moja (kama paneli ya "History" ya ForexFactory) — matoleo 6 ya mwisho ya tukio lenye
+      // jina/currency hilo, kutoka kwenye kumbukumbu ya bot (fx_calendar_obs: observed + imported).
+      if (req.method === 'GET' && req.url.split('?')[0] === '/api/admin/fx/calendar/history') {
+        const q = new URL(req.url, 'http://x').searchParams;
+        const currency = String(q.get('currency') || '').toUpperCase().slice(0, 3);
+        const title = String(q.get('title') || '').slice(0, 200);
+        const before = Number(q.get('before')) || Date.now();
+        if (!currency || !title) return sendJson(res, 400, { ok: false, error: 'currency na title vinahitajika.' });
+        await db.initSchema();
+        const r = await db.query(
+          `SELECT scheduledAt, actual, forecast, previous FROM fx_calendar_obs
+           WHERE currency = ? AND title = ? AND scheduledAt < ? AND actual IS NOT NULL AND actual <> ''
+           ORDER BY scheduledAt DESC LIMIT 6`,
+          [currency, title, before - 60000]
+        );
+        return sendJson(res, 200, { ok: true, history: (r.rows || []).map((x) => ({ date: Number(x.scheduledAt), actual: x.actual, forecast: x.forecast, previous: x.previous })) });
       }
 
       // AI predictions (calendar + technical signal kwa Groq) kwa jozi
