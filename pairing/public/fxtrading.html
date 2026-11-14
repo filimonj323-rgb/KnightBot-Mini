@@ -183,6 +183,21 @@
   .cal-time { flex-shrink: 0; text-align: right; font-size: 11px; color: var(--muted); white-space: nowrap; }
   .surprise-bullish { color: var(--accent); }
   .surprise-bearish { color: var(--red); }
+  /* Matukio yanayofunguka (tap): taarifa za msingi juu, maelezo ndani */
+  details.ev { border-bottom: 1px solid var(--border); }
+  details.ev:last-child { border-bottom: none; }
+  details.ev > summary { list-style: none; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; font-size: 12px; -webkit-tap-highlight-color: transparent; }
+  details.ev > summary::-webkit-details-marker { display: none; }
+  details.ev > summary::after { content: '▾'; color: var(--muted); flex-shrink: 0; margin-left: 2px; transition: transform .15s; }
+  details.ev[open] > summary::after { transform: rotate(180deg); }
+  details.ev.past > summary .cal-title { opacity: .85; }
+  .ev-chips { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 11px; margin-top: 3px; }
+  .ev-body { display: grid; grid-template-columns: max-content 1fr; gap: 5px 12px; padding: 2px 0 12px 19px; font-size: 12px; }
+  .ev-body .k { color: var(--muted); }
+  .ev-body .note { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
+  textarea { width: 100%; padding: 10px 11px; background: #071009; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: 12px/1.4 monospace; resize: vertical; }
+  .bt-table td, .bt-table th { white-space: nowrap; }
+  .bt-best { background: rgba(0, 255, 136, 0.07); }
   .cal-filters { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
   .cal-filters button { padding: 5px 10px; font-size: 11px; }
   .cal-filters button.active { background: var(--accent); color: #041008; border-color: var(--accent); }
@@ -301,7 +316,9 @@
     <div class="page-section" id="section-calendar">
       <div class="card">
         <div class="section-label">📅 Economic Calendar (Wiki Hii)</div>
+        <div id="calCoverage"></div>
         <div class="cal-filters" id="calFilters"></div>
+        <div class="muted" style="font-size:11px; margin-bottom:6px;">Gusa tukio kuona maelezo (actual, muda ilipopatikana, n.k.).</div>
         <div id="calendarBox" style="max-height:420px; overflow-y:auto;"><div class="empty">Inapakia...</div></div>
       </div>
     </div>
@@ -489,6 +506,7 @@
           <span class="ai-tag" id="newsMode"></span>
         </div>
         <div id="newsStatus"></div>
+        <div id="newsCoverage" style="margin-top:8px;"></div>
         <div class="grid2" style="margin-top:10px;">
           <button class="primary" id="newsToggle" onclick="newsToggle(this)">…</button>
           <button class="ghost" onclick="refreshNews()">🔄 Sasisha</button>
@@ -518,8 +536,14 @@
       </div>
 
       <div class="card">
-        <div class="section-label">⏳ Matukio Yanayokuja (High impact)</div>
+        <div class="section-label">⏳ Matukio Yanayokuja</div>
+        <div class="muted" style="font-size:11px; margin-bottom:6px;">Gusa tukio kuona maelezo.</div>
         <div id="newsUpcoming" style="max-height:340px; overflow-y:auto;"><div class="empty">Inapakia...</div></div>
+      </div>
+
+      <div class="card">
+        <div class="section-label">🕘 Yaliyopita (masaa 24): actual, muda ilipopatikana &amp; uamuzi wa bot</div>
+        <div id="newsRecent" style="max-height:420px; overflow-y:auto;"><div class="empty">Inapakia...</div></div>
       </div>
 
       <div class="card">
@@ -541,6 +565,40 @@
           <button class="danger" id="nClrGo" onclick="newsClrRun(this)" disabled>🗑️ Futa</button>
         </div>
         <div id="nClrBox"></div>
+      </div>
+
+      <div class="card" id="nbCard">
+        <div class="section-label">🧪 Backtest ya News Trading</div>
+        <div class="muted" style="font-size:11px; margin-bottom:8px;">Inaigiza mkakati huu kwenye matukio ya zamani (forecast + actual) kwa candles za dakika 1 za Deriv, kwa mipangilio ya sasa ya News Trading. Inalinganisha pia <b>kuingia kuchelewa</b> (delays) ili uone edge inapungua kiasi gani.</div>
+        <div id="nbData" class="muted" style="font-size:12px; margin-bottom:8px;"></div>
+        <details class="ev" style="border:none;">
+          <summary style="padding:4px 0;"><div class="cal-main"><div class="cal-title">📥 Ingiza data ya kihistoria (CSV / JSON)</div></div></summary>
+          <div style="padding:4px 0 10px;">
+            <div class="muted" style="font-size:11px; margin-bottom:6px;">Safu zinazohitajika: <b>date</b> (au date+time), <b>currency</b>, <b>event</b>, <b>actual</b>; pia impact, forecast, previous. Hadi mistari 5,000 kwa mara moja. Saa bila zone zinasomwa kama saa za mahali pa faili (weka tofauti ya UTC kwa dakika: EAT=180, New York=-300/-240).</div>
+            <textarea id="nbText" rows="5" placeholder="Date,Time,Currency,Event,Impact,Forecast,Previous,Actual&#10;2026-10-02,12:30pm,USD,Non-Farm Payrolls,High,180K,175K,250K"></textarea>
+            <div class="grid2" style="margin-top:8px;">
+              <div><label>Faili (CSV/JSON/TXT)</label><input type="file" id="nbFile" accept=".csv,.json,.txt,text/csv,application/json,text/plain" onchange="nbLoadFile(this)" /></div>
+              <div><label>Tofauti ya UTC ya saa za faili (dakika)</label><input type="number" id="nbUtc" value="0" step="30" /></div>
+            </div>
+            <div class="grid2" style="margin-top:8px;">
+              <button class="primary" onclick="nbImport(this)">📥 Ingiza</button>
+              <button class="danger" onclick="nbClearImport(this)">🧹 Futa data iliyoingizwa</button>
+            </div>
+            <div id="nbImportMsg" class="muted" style="font-size:12px; margin-top:8px;"></div>
+          </div>
+        </details>
+        <div class="grid3" style="margin-top:6px;">
+          <div><label>Siku nyuma</label><input type="number" id="nbDays" value="90" min="1" max="3650" step="1" /></div>
+          <div><label>Delays (sekunde)</label><input type="text" id="nbDelays" value="0,60,120,180,300" /></div>
+          <div><label>Matukio ya juu</label><input type="number" id="nbMax" value="400" min="1" max="1000" step="10" /></div>
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin:10px 0 12px; cursor:pointer; font-size:12px;"><input type="checkbox" id="nbGuards" style="width:auto; margin:0;" /> Tumia kinga za live (lag ya juu &amp; mwendo wa juu) — zima ili kulinganisha delays zote</label>
+        <div class="grid2">
+          <button class="primary" id="nbRun" onclick="nbRun(this)">▶️ Anza Backtest</button>
+          <button class="ghost" id="nbCancel" onclick="nbCancel(this)" disabled>⏹️ Sitisha</button>
+        </div>
+        <div id="nbProgress" class="muted" style="font-size:12px; margin-top:10px;"></div>
+        <div id="nbResult"></div>
       </div>
 
       <div class="card">
@@ -1052,32 +1110,14 @@
       return;
     }
 
-    document.getElementById('calendarBox').innerHTML = events.map((e) => {
-      const hasActual = e.actual !== null && e.actual !== undefined && e.actual !== '';
-      let numbers = '';
-      if (hasActual || e.forecast != null || e.previous != null) {
-        numbers = `<div class="cal-numbers">
-          ${hasActual ? `<span>Actual: <strong>${e.actual}</strong></span>` : ''}
-          ${e.forecast != null ? `<span>Forecast: ${e.forecast}</span>` : ''}
-          ${e.previous != null ? `<span class="muted">Previous: ${e.previous}</span>` : ''}
-        </div>`;
-      }
-      return `<div class="cal-row impact-${e.impact} ${e.isPast ? 'past' : ''}">
-        <span class="impact-dot"></span>
-        <div class="cal-main">
-          <div class="cal-title">${e.country} — ${e.title}</div>
-          <div class="cal-meta">${e.impact} impact</div>
-          ${numbers}
-        </div>
-        <div class="cal-time">${fmtEventTime(e.date)}${e.isPast ? '<br>imepita' : ''}</div>
-      </div>`;
-    }).join('');
+    renderEventList('calendarBox', events, `<div class="empty">📭 Hakuna matukio ya kuonyesha.</div>`);
   }
 
   async function refreshCalendar() {
     try {
       const data = await api('/api/admin/fx/calendar');
       calendarEvents = data.events || [];
+      renderCoverage('calCoverage', data.coverage);
       renderCalendar();
     } catch (e) {
       document.getElementById('calendarBox').innerHTML = `<div class="empty">❌ ${e.message}</div>`;
@@ -1640,6 +1680,97 @@
   // Trade ikifungwa (auto, mkono, SL/TP) — sasisha history + stats pamoja.
   function refreshAllStats() { refreshHistory(); refreshStats(); }
 
+  // ── Mistari ya matukio inayofunguka (tap) — inatumika Calendar tab na News tab ──────────────
+  function fmtStamp(ms, withSec) {
+    if (!Number.isFinite(ms)) return '—';
+    const o = { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Dar_es_Salaam' };
+    if (withSec) o.second = '2-digit';
+    return new Date(ms).toLocaleString('sw-TZ', o);
+  }
+  function parseNumClient(v) {
+    if (v == null) return null;
+    const m = String(v).replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : null;
+  }
+  function eventRowHtml(e, openSet) {
+    const cur = e.currency || e.country || '';
+    const t = new Date(e.date).getTime();
+    const mins = Math.round((t - Date.now()) / 60000);
+    const past = e.isPast != null ? !!e.isPast : mins < 0;
+    const hasA = e.actual !== null && e.actual !== undefined && String(e.actual).trim() !== '';
+    const hasF = e.forecast !== null && e.forecast !== undefined && String(e.forecast).trim() !== '';
+    const sig = e.signal || null;
+    const sigCls = sig === 'bullish' ? 'pl-pos' : sig === 'bearish' ? 'pl-neg' : '';
+
+    // Taarifa za msingi (zinaonekana bila kugusa)
+    const chips = [];
+    if (hasA) chips.push(`<span>A: <strong class="${sigCls}">${tgEsc(e.actual)}</strong></span>`);
+    else if (past) chips.push(`<span class="muted">A: —</span>`);
+    if (hasF) chips.push(`<span>F: ${tgEsc(e.forecast)}</span>`);
+    if (!hasA && e.previous != null && e.previous !== '') chips.push(`<span class="muted">P: ${tgEsc(e.previous)}</span>`);
+    if (hasA && e.obs && e.obs.seenAt != null && e.obs.lagSec != null) chips.push(`<span class="muted">⏱️ ${e.obs.exact ? '' : '≤ '}${fmtLagS(e.obs.lagSec)}</span>`);
+    if (e.trade) chips.push(`<span>📰 ${e.trade.direction === 'BUY' ? '🟢' : '🔴'} ${tgEsc(e.trade.pair)}${e.trade.profit != null ? ` <b class="${e.trade.profit >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(e.trade.profit)}</b>` : ' ⏳'}</span>`);
+
+    // Maelezo (yanafunguka)
+    const kv = [];
+    const add = (k, v) => kv.push(`<div class="k">${k}</div><div>${v}</div>`);
+    add('Impact', tgEsc(e.impact || '—'));
+    add('Muda uliotangazwa', fmtStamp(t, true) + ' (EAT)');
+    add('Previous', e.previous != null && e.previous !== '' ? tgEsc(e.previous) : '—');
+    add('Forecast', hasF ? tgEsc(e.forecast) : '—');
+    add('Actual', hasA ? `<strong class="${sigCls}">${tgEsc(e.actual)}</strong>${e.actualSource === 'db' ? ' <span class="muted">(kutoka database)</span>' : ''}` : (past ? '<span class="muted">haipo</span>' : '<span class="muted">bado</span>'));
+    let dev = e.deviationPct;
+    if (dev == null && hasA && hasF) {
+      const a = parseNumClient(e.actual), f = parseNumClient(e.forecast);
+      if (a != null && f != null) dev = Math.round((Math.abs(a - f) / Math.max(Math.abs(f), 0.1)) * 10000) / 100;
+    }
+    if (dev != null) {
+      const a = parseNumClient(e.actual), f = parseNumClient(e.forecast);
+      const dirTxt = a != null && f != null ? (a > f ? 'juu ya forecast' : a < f ? 'chini ya forecast' : 'sawa na forecast') : '';
+      add('Kupotoka', `${dev}% ${dirTxt}${sig ? ` → ${tgEsc(cur)} ${sig === 'bullish' ? '🟢 inaimarika' : sig === 'bearish' ? '🔴 inadhoofika' : '⚪ haitoshi'}` : ''}`);
+    }
+    // Actual ilipatikana lini (kulinganisha na muda uliotangazwa)
+    if (hasA) {
+      if (e.obs && e.obs.seenAt != null) {
+        add('Actual ilipatikana', `${fmtStamp(e.obs.seenAt, true)} — ${e.obs.exact ? '' : '≤ '}${fmtLagS(e.obs.lagSec)} baada ya tangazo${e.obs.exact ? '' : ' <span class="muted">(bot iliiona tayari ipo)</span>'}`);
+      } else if (e.obs) add('Actual ilipatikana', '<span class="muted">haijulikani (bot haikuwa inafuatilia wakati huo)</span>');
+      else add('Actual ilipatikana', '<span class="muted">haijarekodiwa</span>');
+    } else if (past) {
+      add('Actual ilipatikana', '<span class="muted">bado haijapatikana kwenye feed</span>');
+    }
+    if (e.pair && e.numeric) add('Mpango wa bot', `${tgEsc(cur)} ikiimarika: <b>${e.ifBeat} ${tgEsc(e.pair)}</b> · ikidhoofika: <b>${e.ifBeat === 'BUY' ? 'SELL' : 'BUY'} ${tgEsc(e.pair)}</b>`);
+    else if (e.pair && e.numeric === false) add('Mpango wa bot', '<span class="muted">hakuna forecast ya namba — itapuuzwa</span>');
+    if (e.outcome) add('Uamuzi wa bot', tgEsc(e.outcome.text || e.outcome.code));
+    if (e.trade) add('Trade', `${e.trade.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ${tgEsc(e.trade.pair)} — ${e.trade.profit != null ? `<b class="${e.trade.profit >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(e.trade.profit)}</b>` : 'bado wazi'}`);
+
+    const key = encodeURIComponent(`${cur}|${e.date}|${e.title}`);
+    return `<details class="ev impact-${tgEsc(e.impact)} ${past ? 'past' : ''}" data-k="${key}"${openSet && openSet.has(key) ? ' open' : ''}>
+      <summary>
+        <span class="impact-dot"></span>
+        <div class="cal-main"><div class="cal-title">${tgEsc(cur)} — ${tgEsc(e.title)}</div><div class="ev-chips">${chips.join('')}</div></div>
+        <div class="cal-time">${fmtEventTime(e.date)}<br>${past ? 'imepita' : fmtMin(mins)}</div>
+      </summary>
+      <div class="ev-body">${kv.join('')}</div>
+    </details>`;
+  }
+  // Inaweka orodha bila kupoteza mistari iliyofunguliwa wala nafasi ya scroll (orodha zinasasishwa kila sekunde 10-60).
+  function renderEventList(boxId, list, emptyHtml) {
+    const box = document.getElementById(boxId);
+    if (!box) return;
+    const openSet = new Set([...box.querySelectorAll('details.ev[open]')].map((x) => x.dataset.k));
+    const top = box.scrollTop;
+    box.innerHTML = list.length ? list.map((e) => eventRowHtml(e, openSet)).join('') : emptyHtml;
+    box.scrollTop = top;
+  }
+  function renderCoverage(id, c) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!c || !c.checkedAt || !c.released) { el.innerHTML = ''; return; }
+    el.innerHTML = c.lacksActual
+      ? `<div class="empty" style="text-align:left; padding:10px 12px; border:1px solid rgba(255,85,102,.4); border-radius:8px;">⚠️ <b>Feed haitoi actual.</b> Kati ya matukio ${c.released} ya High/Medium yaliyokwisha toka wiki hii, hakuna lenye actual. News Trading ya live haiwezi kufanya kazi kwa chanzo hiki — inahitaji chanzo kinachotoa actual. Backtest (kwa data ya kuingiza) bado inafanya kazi.</div>`
+      : `<div class="muted" style="font-size:11px;">✅ Actual zipo kwa ${c.withActual} kati ya ${c.released} ya matukio yaliyokwisha toka wiki hii.</div>`;
+  }
+
   // ── News Trading ──────────────────────────────────────────────────────
   let newsState = null;
   let newsFormLoaded = false;
@@ -1705,20 +1836,10 @@
         `<div class="muted" style="font-size:12px;">Siku 7: actual haikufika ndani ya dirisha: <b>${L.noActual}</b> · yaliyorukwa kwa kuchelewa: <b>${L.lateLag}</b> · kwa mwendo wa bei: <b>${L.lateMove}</b></div>`;
     }
 
-    // Matukio yanayokuja
-    document.getElementById('newsUpcoming').innerHTML = d.upcoming.length ? d.upcoming.map((e) => {
-      const nums = [e.actual != null && e.actual !== '' ? `Actual: <strong>${tgEsc(e.actual)}</strong>` : '',
-        e.forecast != null ? `Forecast: ${tgEsc(e.forecast)}` : '', e.previous != null ? `<span class="muted">Prev: ${tgEsc(e.previous)}</span>` : '',
-        e.lagSec != null ? `<span class="muted">⏱️ lag ${e.lagExact ? '' : '≤ '}${fmtLagS(e.lagSec)}</span>` : ''].filter(Boolean).join(' · ');
-      const plan = e.pair && e.numeric
-        ? `<div class="muted" style="font-size:11px;">Ikiimarika ${e.currency}: <b>${e.ifBeat} ${e.pair}</b> · ikidhoofika: <b>${e.ifBeat === 'BUY' ? 'SELL' : 'BUY'} ${e.pair}</b></div>`
-        : `<div class="muted" style="font-size:11px;">Hakuna forecast ya namba — bot itapuuza.</div>`;
-      return `<div class="cal-row impact-${e.impact} ${e.minutesFromNow < 0 ? 'past' : ''}">
-        <span class="impact-dot"></span>
-        <div class="cal-main"><div class="cal-title">${e.currency} — ${tgEsc(e.title)}</div>
-          <div class="cal-numbers">${nums || '<span class="muted">Data bado</span>'}</div>${plan}</div>
-        <div class="cal-time">${fmtEventTime(e.date)}<br>${fmtMin(e.minutesFromNow)}</div></div>`;
-    }).join('') : `<div class="empty">📭 Hakuna matukio ya High impact ya masaa 48 yajayo.</div>`;
+    // Matukio (yanayofunguka) + coverage ya actual
+    renderCoverage('newsCoverage', d.coverage);
+    renderEventList('newsUpcoming', d.upcoming || [], `<div class="empty">📭 Hakuna matukio ya masaa 48 yajayo.</div>`);
+    renderEventList('newsRecent', d.recent || [], `<div class="empty">📭 Hakuna matukio ya masaa 24 yaliyopita (au calendar haipatikani).</div>`);
 
     // Takwimu
     const s = d.summary;
@@ -1756,6 +1877,7 @@
       document.getElementById('newsStatus').innerHTML = `<div class="empty">❌ ${tgEsc(e.message)}</div>`;
     }
     refreshNewsHistory();
+    if (!nbInit) { nbInit = true; nbRefreshData(); nbPoll(); }
   }
 
   async function refreshNewsHistory() {
@@ -1844,6 +1966,155 @@
       newsClrInvalidate(); document.getElementById('nClrBox').innerHTML = '';
       refreshNews();
     } catch (e) { posToast('❌ ' + e.message, false); }
+  }
+
+  // ── Backtest ya News Trading ─────────────────────────────────────────
+  let nbInit = false;
+  let nbTimer = null;
+  let nbDataLoaded = false;
+  let nbLast = null;
+  const fmtDay = (ms) => (ms ? new Date(ms).toLocaleDateString('sw-TZ', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Africa/Dar_es_Salaam' }) : '—');
+
+  async function nbRefreshData() {
+    try {
+      const d = await api('/api/admin/fx/news/data');
+      nbDataLoaded = true;
+      const s = d.stats;
+      document.getElementById('nbData').innerHTML =
+        `📚 Data ya backtest (zenye forecast + actual): <b>${s.total}</b> — zilizorekodiwa na bot: ${s.observed.n}${s.observed.n ? ` (${fmtDay(s.observed.from)} – ${fmtDay(s.observed.to)})` : ''}, zilizoingizwa: ${s.import.n}${s.import.n ? ` (${fmtDay(s.import.from)} – ${fmtDay(s.import.to)})` : ''}.` +
+        (s.total < 30 ? `<div style="margin-top:4px;">⚠️ Data ni ndogo — ingiza historia ya miezi kadhaa kwa matokeo yenye maana.</div>` : '');
+    } catch (e) { document.getElementById('nbData').textContent = '❌ ' + e.message; }
+  }
+
+  function nbLoadFile(inp) {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    if (f.size > 3000000) { posToast('Faili ni kubwa mno (zaidi ya 3MB).', false); return; }
+    const rd = new FileReader();
+    rd.onload = () => { document.getElementById('nbText').value = String(rd.result || ''); posToast('Faili imesomwa — bonyeza "Ingiza".', true); };
+    rd.onerror = () => posToast('Imeshindwa kusoma faili.', false);
+    rd.readAsText(f);
+  }
+
+  async function nbImport(btn) {
+    const text = document.getElementById('nbText').value.trim();
+    const msg = document.getElementById('nbImportMsg');
+    if (!text) { posToast('Weka data au chagua faili kwanza.', false); return; }
+    btn.disabled = true;
+    try {
+      const r = await api('/api/admin/fx/news/data/import', { method: 'POST', body: JSON.stringify({ text, utcOffsetMin: Number(document.getElementById('nbUtc').value) || 0 }) });
+      const sk = r.skipped || {};
+      msg.innerHTML = `✅ Imeingizwa <b>${r.imported}</b> (${r.range ? fmtDay(r.range.from) + ' – ' + fmtDay(r.range.to) : '—'}). Zilizoachwa: tarehe mbaya ${sk.noDate || 0}, currency isiyotumika ${sk.badCurrency || 0}, bila jina ${sk.noTitle || 0}, bila actual ${sk.noActual || 0}.`;
+      posToast('✅ Data imeingizwa', true);
+      nbRefreshData();
+    } catch (e) { msg.innerHTML = '❌ ' + tgEsc(e.message); posToast('❌ ' + e.message, false); }
+    btn.disabled = false;
+  }
+
+  async function nbClearImport(btn) {
+    const ok = await askConfirm('Utafuta data yote ILIYOINGIZWA kwa mkono (data iliyorekodiwa na bot haifutwi).', 'Ndiyo, futa');
+    if (!ok) return;
+    btn.disabled = true;
+    try {
+      const r = await api('/api/admin/fx/news/data/clear', { method: 'POST', body: JSON.stringify({ confirm: true }) });
+      posToast('✅ Imefutwa ' + r.deleted, true);
+      nbRefreshData();
+    } catch (e) { posToast('❌ ' + e.message, false); }
+    btn.disabled = false;
+  }
+
+  async function nbRun(btn) {
+    if (!newsState) { posToast('Subiri mipangilio ipakie kwanza.', false); return; }
+    const c = newsState.config;
+    const guards = document.getElementById('nbGuards').checked;
+    const body = {
+      stake: c.stake, multiplier: c.multiplier, slPct: c.slPct, tpPct: c.tpPct, maxHoldMin: c.maxHoldMin,
+      minSurprisePct: c.minSurprisePct, includeMedium: c.includeMedium,
+      maxLagMin: guards ? c.maxLagMin : 30, maxMovePct: guards ? c.maxMovePct : 0,
+      daysBack: Number(document.getElementById('nbDays').value) || 90,
+      delays: document.getElementById('nbDelays').value,
+      maxGroups: Number(document.getElementById('nbMax').value) || 400,
+    };
+    btn.disabled = true;
+    try {
+      await api('/api/admin/fx/news/backtest/run', { method: 'POST', body: JSON.stringify(body) });
+      document.getElementById('nbResult').innerHTML = '';
+      nbPoll();
+    } catch (e) { posToast('❌ ' + e.message, false); btn.disabled = false; }
+  }
+
+  async function nbCancel(btn) {
+    btn.disabled = true;
+    try { await api('/api/admin/fx/news/backtest/cancel', { method: 'POST', body: '{}' }); } catch (e) { posToast('❌ ' + e.message, false); }
+  }
+
+  async function nbPoll() {
+    try {
+      const d = await api('/api/admin/fx/news/backtest/status');
+      nbRender(d.job);
+      const running = d.job && d.job.status === 'running';
+      if (running && !nbTimer) nbTimer = setInterval(nbPoll, 2000);
+      if (!running && nbTimer) { clearInterval(nbTimer); nbTimer = null; }
+    } catch (e) {
+      document.getElementById('nbProgress').textContent = '❌ ' + e.message;
+      if (nbTimer) { clearInterval(nbTimer); nbTimer = null; }
+    }
+  }
+
+  function nbRender(job) {
+    const run = document.getElementById('nbRun');
+    const can = document.getElementById('nbCancel');
+    const pr = document.getElementById('nbProgress');
+    if (!job) { pr.textContent = ''; run.disabled = false; can.disabled = true; return; }
+    const running = job.status === 'running';
+    run.disabled = running;
+    can.disabled = !running;
+    if (running) {
+      const g = job.progress || {};
+      pr.textContent = `⏳ ${g.phase === 'candles' ? 'Inaigiza matukio (inavuta candles)' : 'Inapakia matukio'}: ${g.done || 0}/${g.total || 0}`;
+      return;
+    }
+    if (job.status === 'error') { pr.innerHTML = '❌ ' + tgEsc(job.error || 'Hitilafu'); return; }
+    if (job.status === 'cancelled') { pr.textContent = '⏹️ Backtest imesitishwa.'; return; }
+    pr.textContent = job.id === 'saved' ? `📌 Matokeo ya mwisho yaliyohifadhiwa (${fmtStamp(job.finishedAt, false)})` : '✅ Imekamilika.';
+    if (job.result && (!nbLast || nbLast.createdAt !== job.result.createdAt)) { nbLast = job.result; nbRenderResult(job.result); }
+  }
+
+  function nbRenderResult(R) {
+    const p = R.params, ev = R.events;
+    const best = R.byDelay.reduce((b, x) => (x.n && (!b || x.netTotal > b.netTotal) ? x : b), null);
+    const rows = R.byDelay.map((x) => {
+      const sk = x.skipped || {};
+      const skTxt = [sk.late_lag ? `lag ${sk.late_lag}` : '', sk.late_move ? `mwendo ${sk.late_move}` : '', sk.no_candles ? `candles ${sk.no_candles}` : ''].filter(Boolean).join(', ');
+      return `<tr class="${best && x.delaySec === best.delaySec ? 'bt-best' : ''}"><td><b>${x.delaySec}s</b></td><td>${x.n}</td><td>${x.winRate}%</td>` +
+        `<td class="${x.netTotal >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(x.netTotal)}</td><td>${x.profitFactor == null ? '∞' : x.profitFactor}</td>` +
+        `<td>$${fmt(x.maxDrawdown)}</td><td>${moneySigned(x.avgNet)}</td><td class="muted">${skTxt || '—'}</td></tr>`;
+    }).join('');
+    const curRows = Object.entries(R.byCurrency || {}).sort((a, b) => b[1].netTotal - a[1].netTotal).map(([c, x]) =>
+      `<tr><td><b>${c}</b></td><td>${x.n}</td><td>${x.winRate}%</td><td class="${x.netTotal >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(x.netTotal)}</td></tr>`).join('');
+    const smallN = best && best.n < 30;
+    document.getElementById('nbResult').innerHTML =
+      `<div class="muted" style="font-size:11px; margin:10px 0 6px;">Kipindi ${fmtDay(p.fromMs)} – ${fmtDay(p.toMs)} · matukio ${ev.loaded} → makundi ${ev.groups} → yenye mwelekeo ${ev.signals} (hakuna mwelekeo ${ev.noEdge}, bila namba ${ev.noNumbers}) → yaliyoigizwa ${ev.simulated}${ev.noCandles ? ` · candles hazikupatikana ${ev.noCandles}` : ''} · stake $${p.stake} x${p.multiplier}, SL ${p.slPct}%, TP ${p.tpPct}%, funga dk ${p.maxHoldMin}</div>` +
+      `<div class="table-wrap"><table class="bt-table"><thead><tr><th>Kuingia baada ya</th><th>Trades</th><th>Win</th><th>Net</th><th>PF</th><th>Max DD</th><th>Wastani</th><th>Zilizorukwa</th></tr></thead><tbody>${rows}</tbody></table></div>` +
+      (smallN ? `<div class="empty" style="text-align:left; padding:8px 0;">⚠️ Sampuli ndogo (chini ya trades 30) — usitegemee matokeo haya.</div>` : '') +
+      `<div class="muted" style="font-size:11px; margin:6px 0;">Safu ya kijani = delay yenye Net bora. "Kuingia baada ya" = sekunde tangu release. PF = faida ÷ hasara. Net tayari ina gharama ya kuingia (makadirio).</div>` +
+      (curRows ? `<details class="ev" style="border:none;"><summary style="padding:4px 0;"><div class="cal-main"><div class="cal-title">📊 Kwa currency (delay ${R.baseDelaySec}s)</div></div></summary><div class="table-wrap"><table class="bt-table"><thead><tr><th>Currency</th><th>Trades</th><th>Win</th><th>Net</th></tr></thead><tbody>${curRows}</tbody></table></div></details>` : '') +
+      `<details class="ev" style="border:none;"><summary style="padding:4px 0;"><div class="cal-main"><div class="cal-title">🧾 Orodha ya trades (200 za mwisho)</div></div></summary>` +
+      `<div style="margin:6px 0;"><select id="nbTradeDelay" onchange="nbShowTrades()">${R.byDelay.map((x) => `<option value="${x.delaySec}">Delay ${x.delaySec}s</option>`).join('')}</select></div><div id="nbTrades"></div></details>` +
+      `<div class="muted" style="font-size:11px; margin-top:8px;">⚠️ Ni makadirio: candles za dakika 1 (SL na TP kwenye candle moja → SL inatangulia), bei ya OPEN kama entry, bila slippage/spread ya wakati wa habari. Si ahadi ya utendaji wa baadaye.</div>`;
+    nbShowTrades();
+  }
+
+  function nbShowTrades() {
+    const sel = document.getElementById('nbTradeDelay');
+    const box = document.getElementById('nbTrades');
+    if (!sel || !box || !nbLast) return;
+    const list = (nbLast.trades && nbLast.trades[sel.value]) || [];
+    box.innerHTML = list.length
+      ? `<div class="table-wrap" style="max-height:340px; overflow-y:auto;"><table class="bt-table"><thead><tr><th>Tarehe</th><th>Jozi</th><th>Upande</th><th>Tukio</th><th>Surprise</th><th>Mwendo</th><th>Toka</th><th>Net</th></tr></thead><tbody>` +
+        list.map((t) => `<tr><td>${fmtStamp(t.at, false)}</td><td>${tgEsc(t.pair)}</td><td>${t.direction === 'BUY' ? '🟢' : '🔴'}</td><td style="white-space:normal; min-width:140px;">${tgEsc(t.currency)}: ${tgEsc(t.titles)}</td><td>${t.surprisePct}%</td><td>${t.entryMovePct >= 0 ? '+' : ''}${t.entryMovePct}%</td><td>${t.exitType}</td><td class="${t.net >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(t.net)}</td></tr>`).join('') +
+        `</tbody></table></div>`
+      : `<div class="empty">Hakuna trades kwa delay hii.</div>`;
   }
 
   // ── Futa historia + takwimu / panga trades za zamani ─────────────────
