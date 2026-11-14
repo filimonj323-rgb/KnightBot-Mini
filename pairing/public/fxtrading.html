@@ -194,6 +194,11 @@
   .ev-chips { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 11px; margin-top: 3px; }
   .ev-body { display: grid; grid-template-columns: max-content 1fr; gap: 5px 12px; padding: 2px 0 12px 19px; font-size: 12px; }
   .ev-body .k { color: var(--muted); }
+  .ev-body .ev-hist { grid-column: 1 / -1; overflow-x: auto; }
+  .hist-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .hist-tbl th { text-align: left; color: var(--muted); font-weight: 600; padding: 3px 8px 3px 0; }
+  .hist-tbl td { padding: 3px 8px 3px 0; border-top: 1px solid var(--border); }
+  .ev-body .note a { color: var(--accent, #4da3ff); }
   .ev-body .note { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
   textarea { width: 100%; padding: 10px 11px; background: #071009; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: 12px/1.4 monospace; resize: vertical; }
   .bt-table td, .bt-table th { white-space: nowrap; }
@@ -1692,6 +1697,34 @@
     const m = String(v).replace(/,/g, '').match(/-?\d+(\.\d+)?/);
     return m ? Number(m[0]) : null;
   }
+  // History ya tukio (matoleo 6 ya mwisho) — inapakiwa mara moja ukigusa tukio, kisha inakaa kwenye cache
+  // (orodha zinajichora upya kila sekunde 10-60, kwa hiyo tunairudisha kutoka cache bila kupakia tena).
+  const histCache = new Map();
+  function histHtml(key) {
+    const h = histCache.get(key);
+    if (h === undefined) return '<span class="muted">History inapakiwa…</span>';
+    if (!h.length) return '<span class="muted">History: bado hakuna kumbukumbu ya matoleo ya nyuma ya tukio hili.</span>';
+    const rows = h.map((r) => {
+      const a = parseNumClient(r.actual), f = parseNumClient(r.forecast);
+      const cls = a != null && f != null ? (a > f ? 'pl-pos' : a < f ? 'pl-neg' : '') : '';
+      return `<tr><td>${fmtStamp(r.date).split(',')[0]}</td><td class="${cls}"><b>${tgEsc(r.actual)}</b></td><td>${tgEsc(r.forecast ?? '—')}</td><td>${tgEsc(r.previous ?? '—')}</td></tr>`;
+    }).join('');
+    return `<table class="hist-tbl"><thead><tr><th>History</th><th>Actual</th><th>Forecast</th><th>Previous</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  document.addEventListener('toggle', async (ev) => {
+    const d = ev.target;
+    if (!d || !d.matches || !d.matches('details.ev') || !d.open) return;
+    const box = d.querySelector('.ev-hist');
+    if (!box) return;
+    const key = box.dataset.h;
+    if (histCache.has(key)) { box.innerHTML = histHtml(key); return; }
+    try {
+      const q = new URLSearchParams({ currency: box.dataset.cur, title: box.dataset.title, before: box.dataset.t });
+      const r = await api('/api/admin/fx/calendar/history?' + q.toString());
+      histCache.set(key, r.history || []);
+    } catch (_) { histCache.set(key, []); }
+    box.innerHTML = histHtml(key);
+  }, true);
   function eventRowHtml(e, openSet) {
     const cur = e.currency || e.country || '';
     const t = new Date(e.date).getTime();
@@ -1744,6 +1777,15 @@
     if (e.trade) add('Trade', `${e.trade.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ${tgEsc(e.trade.pair)} — ${e.trade.profit != null ? `<b class="${e.trade.profit >= 0 ? 'pl-pos' : 'pl-neg'}">${moneySigned(e.trade.profit)}</b>` : 'bado wazi'}`);
 
     const key = encodeURIComponent(`${cur}|${e.date}|${e.title}`);
+    // ── Paneli kama ya ForexFactory: Usual Effect + History + kiungo ──
+    const inverse = /unemployment|jobless|claims|inventories|default rate|bankruptc/i.test(e.title || '');
+    const effect = inverse
+      ? `'Actual' chini ya 'Forecast' ni nzuri kwa ${tgEsc(cur)}`
+      : `'Actual' juu ya 'Forecast' ni nzuri kwa ${tgEsc(cur)}`;
+    const ffLink = e.ffId ? `<a href="https://www.forexfactory.com/calendar#detail=${encodeURIComponent(e.ffId)}" target="_blank" rel="noopener">🔗 Fungua kwenye ForexFactory</a>` : '';
+    kv.push(`<div class="note"><b>Usual Effect:</b> ${effect}.</div>`);
+    kv.push(`<div class="ev-hist" data-h="${key}" data-cur="${tgEsc(cur)}" data-title="${tgEsc(e.title)}" data-t="${t}">${histHtml(key)}</div>`);
+    if (ffLink) kv.push(`<div class="note">${ffLink}</div>`);
     return `<details class="ev impact-${tgEsc(e.impact)} ${past ? 'past' : ''}" data-k="${key}"${openSet && openSet.has(key) ? ' open' : ''}>
       <summary>
         <span class="impact-dot"></span>
