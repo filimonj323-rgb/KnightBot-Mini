@@ -431,8 +431,9 @@ async function dbMarkTradeClosed(contractId, { closedAt, sellPrice, profit }) {
   try {
     await fxTradesDb.initSchema();
     await fxTradesDb.query(
-      `UPDATE fx_auto_trades SET closedAt = ?, sellPrice = COALESCE(?, sellPrice), profit = COALESCE(?, profit) WHERE contractId = ?`,
-      [closedAt, Number.isFinite(sellPrice) ? sellPrice : null, Number.isFinite(profit) ? profit : null, contractId]
+      `UPDATE fx_auto_trades SET closedAt = ?, sellPrice = COALESCE(?, sellPrice), profit = COALESCE(?, profit),
+         accountMode = COALESCE(accountMode, ?) WHERE contractId = ?`,
+      [closedAt, Number.isFinite(sellPrice) ? sellPrice : null, Number.isFinite(profit) ? profit : null, getAccountMode() || null, contractId]
     );
   } catch (err) {
     console.error('[autoTrader] DB: imeshindwa kusasisha trade iliyofungwa:', err.message);
@@ -507,7 +508,22 @@ async function reconcileHistoryFromDeriv(force = false) {
       const row = byId.get(id);
       if (row) {
         if (row.ownerPhone) continue; // trade ya mteja — si ya owner
-        if (row.closedAt === null || row.closedAt === undefined) continue; // poller itaifunga na kutuma notification
+        if (row.closedAt === null || row.closedAt === undefined) {
+          // Poller huifunga (na kutuma notification) TU ikiwa iko kwenye ufuatiliaji (RAM). Ikiwa DB inasema "wazi"
+          // lakini Deriv imeshaiuza na bot haiifuatilii (mf. baada ya redeploy/kubadili akaunti) — ingebaki "wazi"
+          // milele na isionekane kwenye History/Stats. Ifunge hapa kimya (bila notification) kwa data ya Deriv.
+          if (!openAutoTrades.has(id)) {
+            await fxTradesDb.query(
+              'UPDATE fx_auto_trades SET closedAt = ?, sellPrice = ?, profit = ?, accountMode = COALESCE(accountMode, ?) WHERE contractId = ? AND closedAt IS NULL',
+              [(Number(t.sell_time) || 0) * 1000 || Date.now(), sell, pl, mode0, id]
+            );
+            console.log(`[autoTrader] 🧾 Historia: trade ${id} ilikuwa "wazi" kwenye DB lakini Deriv imeiuza — imerekodiwa (faida $${pl}).`);
+          }
+          continue;
+        }
+        // Trade iliyofungwa lakini accountMode ni NULL → ilichujwa nje ya History/Stats. profit_table hii ni ya
+        // akaunti ya sasa, kwa hiyo trade hii ni ya akaunti hii.
+        await fxTradesDb.query('UPDATE fx_auto_trades SET accountMode = ? WHERE contractId = ? AND accountMode IS NULL', [mode0, id]);
         if (row.profit === null || row.profit === undefined) {
           await fxTradesDb.query('UPDATE fx_auto_trades SET sellPrice = ?, profit = ? WHERE contractId = ?', [sell, pl, id]);
         }
