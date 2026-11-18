@@ -786,7 +786,8 @@
     if (!a.enabled) {
       document.getElementById('autoTraderBox').innerHTML = `
         <span class="badge off">OFF</span>
-        <div class="muted" style="margin-top:10px;">AUTO_TRADE_ENABLED si "true" kwenye env.</div>
+        <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleAuto(true)">Washa Auto-Trade</button>
+        <div class="muted" style="margin-top:10px;">Bot haifungui trades mpya. Trades zilizo wazi bado zinafuatiliwa na kurekodiwa.</div>
       `;
       return;
     }
@@ -810,12 +811,13 @@
 
     document.getElementById('autoTraderBox').innerHTML = `
       <span class="badge on">ON</span>
+      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleAuto(false)">Zima Auto-Trade</button>
       <span class="muted" style="margin-left:10px;">
         Data: ${dataSourceLabel() || '—'} · Ukaguzi: kila dakika ${Math.round(a.checkIntervalMs / 60000)} · Threshold: ≥${a.strengthThreshold}% ·
         Stake: $${a.stake} · Multiplier: x${a.multiplier} · SL/TP: ATR×${a.slAtrMult}/ATR×${a.tpAtrMult}
       </span>
       <div class="muted" style="margin-top:6px; font-size:11px;">
-        Trades wazi: ${(a.openTrades || []).length}/${a.maxConcurrentTrades} ·
+        Trades wazi: ${(a.openTrades || []).length}/${a.maxConcurrentTrades}${a.accountMode === 'real' ? ` (REAL: kikomo ${a.realMaxOpen})` : ''} ·
         Hasara mfululizo (juu): ${a.maxConsecutiveLosses} · Hasara ya siku (juu): $${a.maxDailyLossUsd} ·
         Jozi zote zinakaguliwa kila mzunguko; trade zinafunguliwa kwa strength kubwa kwanza.
       </div>
@@ -829,6 +831,17 @@
       </button>
       <div class="muted" style="margin-top:8px; font-size:11px;">Ukaguzi wa mwisho: ${timeAgo(a.lastCycleAt)}</div>
     `;
+  }
+
+  async function toggleAuto(enabled) {
+    if (!enabled && !confirm('Kuzima auto-trade? Trades zilizo wazi zitaendelea kufuatiliwa; hakuna trade mpya itafunguliwa.')) return;
+    if (enabled && !confirm('Kuwasha auto-trade? Bot itaanza kufungua trades mpya kwenye akaunti ya sasa.')) return;
+    try {
+      await api('/api/admin/fx/auto-enabled', { method: 'POST', body: JSON.stringify({ enabled }) });
+      refresh();
+    } catch (e) {
+      alert('❌ ' + e.message);
+    }
   }
 
   async function toggleTrailing(enabled) {
@@ -1749,9 +1762,9 @@
     const add = (k, v) => kv.push(`<div class="k">${k}</div><div>${v}</div>`);
     add('Impact', tgEsc(e.impact || '—'));
     add('Muda uliotangazwa', fmtStamp(t, true) + ' (EAT)');
-    add('Previous', e.previous != null && e.previous !== '' ? tgEsc(e.previous) : '—');
-    add('Forecast', hasF ? tgEsc(e.forecast) : '—');
-    add('Actual', hasA ? `<strong class="${sigCls}">${tgEsc(e.actual)}</strong>${e.actualSource === 'db' ? ' <span class="muted">(kutoka database)</span>' : ''}` : (past ? '<span class="muted">haipo</span>' : '<span class="muted">bado</span>'));
+    add('Previous', e.previous != null && e.previous !== '' ? tgEsc(e.previous) + (e.previousSource ? ` <span class="muted">(${tgEsc(e.previousSource)})</span>` : '') : '—');
+    add('Forecast', hasF ? tgEsc(e.forecast) + (e.forecastSource ? ` <span class="muted">(${tgEsc(e.forecastSource)})</span>` : '') : '—');
+    add('Actual', hasA ? `<strong class="${sigCls}">${tgEsc(e.actual)}</strong>${e.actualSource ? ` <span class="muted">(${e.actualSource === 'db' ? 'kutoka database' : tgEsc(e.actualSource)})</span>` : ''}` : (past ? '<span class="muted">haipo</span>' : '<span class="muted">bado</span>'));
     let dev = e.deviationPct;
     if (dev == null && hasA && hasF) {
       const a = parseNumClient(e.actual), f = parseNumClient(e.forecast);
