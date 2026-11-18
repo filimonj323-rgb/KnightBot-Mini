@@ -25,7 +25,7 @@
  *   AUTO_TRADE_ENABLED              — "true" kuwasha (default: "false" = imezimwa)
  *   AUTO_TRADE_CHECK_INTERVAL_MS    — muda kati ya ukaguzi wa signal (default: saa 1)
  *   AUTO_TRADE_POLL_MS              — muda kati ya ukaguzi wa trade zilizofungwa (default: dakika 5)
- *   AUTO_TRADE_STRENGTH_THRESHOLD   — asilimia ya chini ya signal (default: 67)
+ *   AUTO_TRADE_STRENGTH_THRESHOLD   — asilimia ya chini ya signal (default: 100)
  *   AUTO_TRADE_STAKE_USD            — stake ya kila auto-trade (default: 5)
  *   AUTO_TRADE_MULTIPLIER           — moja ya 100/200/300/500/800 (default: 100)
  *   AUTO_TRADE_SL_ATR_MULT          — SL = mara ngapi za ATR(14) (default: 1)
@@ -123,7 +123,8 @@ const REAL_MAX_OPEN = (() => {
 })();
 const CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 * 60 * 1000); // saa 1
 const POLL_CLOSED_MS = Number(process.env.AUTO_TRADE_POLL_MS || 5 * 60 * 1000); // dakika 5
-const STRENGTH_THRESHOLD = Number(process.env.AUTO_TRADE_STRENGTH_THRESHOLD || 67);
+// Default 100: auto-trader inafungua trade TU signal ikiwa na strength ya 100%. (Env var bado inaweza kubadilisha.)
+const STRENGTH_THRESHOLD = Number(process.env.AUTO_TRADE_STRENGTH_THRESHOLD || 100);
 
 // `let` badala ya `const` — inaweza kubadilishwa "live" wakati bot inaendelea
 // kukimbia kupitia .fxautostake <kiasi>, bila kuhitaji ku-restart au
