@@ -867,6 +867,10 @@ async function _startBot() {
         // News Trading (economic calendar) — default IMEZIMWA, inawashwa kwenye dashboard (tab ya News Trade).
         require('./utils/newsTrader').start({ sock, notifyJid: ownerJid })
           .catch((err) => console.error('❌ Imeshindwa kuanzisha news-trader:', err.message));
+        // Profit lock ya trades za mkono (80% ya TP → lock) — inafanya kazi bila kujali AUTO_TRADE_ENABLED.
+        require('./utils/manualProfitLock').start({
+          notify: (text) => sock.sendMessage(ownerJid, { text }).catch((e) => console.error('manualProfitLock notify:', e.message)),
+        });
       } catch (err) {
         console.error('❌ Imeshindwa kuanzisha auto-trader:', err.message);
       }
