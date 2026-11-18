@@ -1208,6 +1208,14 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, ...result });
       }
 
+      // Washa/zima auto-trade (kufungua trades MPYA tu — zilizo wazi haziguswi).
+      if (req.method === 'POST' && req.url === '/api/admin/fx/auto-enabled') {
+        const body = await readJsonBody(req);
+        const result = await autoTrader.setAutoEnabled(!!body.enabled);
+        notifyOwnerWA(`🔘 *AUTO-TRADE ${result.autoEnabled ? '🟢 IMEWASHWA' : '🔴 IMEZIMWA'} (Dashboard)*\n\n${result.autoEnabled ? 'Bot itaanza kufungua trades mpya.' : 'Bot haitafungua trades mpya. Trades zilizo wazi zinaendelea kufuatiliwa na kufungwa kwa SL/TP.'}`);
+        return sendJson(res, 200, { ok: true, ...result });
+      }
+
       // Fungua trade mpya kwa mkono kutoka dashboard (sawa na .fxbuy/.fxsell).
       if (req.method === 'POST' && req.url === '/api/admin/fx/open') {
         const body = await readJsonBody(req);
