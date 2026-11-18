@@ -111,6 +111,16 @@ const signalTargets = require('./signalTargets');
 const newsTrader = require('./newsTrader');
 
 const ENABLED = String(process.env.AUTO_TRADE_ENABLED || 'false').toLowerCase() === 'true';
+// Swichi ya LIVE (dashboard): inaamua kama bot ifungue trades MPYA. Thamani ya mwanzo = AUTO_TRADE_ENABLED; ikibadilishwa
+// kwenye dashboard inahifadhiwa kwenye DB (fx_auto_settings) na inashinda env. Kuzima HAKUGUSI trades zilizo wazi:
+// ufuatiliaji, kurekodi trades zilizofungwa, trailing na profit lock vinaendelea.
+let AUTO_ON = ENABLED;
+const AUTO_ON_KEY = 'autoTradeOn';
+// Kikomo cha trades wazi kwa akaunti ya REAL (zote kwenye Deriv: auto + mkono + News). Auto-trader haifungui mpya ikifika.
+const REAL_MAX_OPEN = (() => {
+  const v = parseInt(process.env.AUTO_TRADE_REAL_MAX_OPEN || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 3;
+})();
 const CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 * 60 * 1000); // saa 1
 const POLL_CLOSED_MS = Number(process.env.AUTO_TRADE_POLL_MS || 5 * 60 * 1000); // dakika 5
 const STRENGTH_THRESHOLD = Number(process.env.AUTO_TRADE_STRENGTH_THRESHOLD || 67);
@@ -811,6 +821,39 @@ async function loadTrailingOverrideFromDb() {
   }
 }
 
+async function setAutoEnabled(on) {
+  AUTO_ON = !!on;
+  try {
+    await fxTradesDb.initSchema();
+    await fxTradesDb.query(
+      `INSERT INTO fx_auto_settings (settingKey, settingValue, updatedAt) VALUES (?, ?, ?)
+       ON CONFLICT(settingKey) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = excluded.updatedAt`,
+      [AUTO_ON_KEY, AUTO_ON ? '1' : '0', Date.now()]
+    );
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kuhifadhi swichi ya auto-trade kwenye DB (inafanya kazi hadi restart):', err.message);
+  }
+  console.log(`[autoTrader] 🔘 Auto-trade imewekwa: ${AUTO_ON ? 'ON' : 'OFF'} (dashboard).`);
+  return { ok: true, autoEnabled: AUTO_ON };
+}
+
+async function loadAutoOnFromDb() {
+  try {
+    await fxTradesDb.initSchema();
+    const r = await fxTradesDb.query('SELECT settingValue FROM fx_auto_settings WHERE settingKey = ?', [AUTO_ON_KEY]);
+    const row = (r.rows || [])[0];
+    if (row) AUTO_ON = row.settingValue === '1';
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kusoma swichi ya auto-trade kutoka DB (inatumia env):', err.message);
+  }
+}
+
+// Kikomo cha REAL: idadi ya trades wazi (hesabu kubwa kati ya Deriv live na RAM) imefika REAL_MAX_OPEN?
+function realLimitReached(liveCount) {
+  if (getAccountMode() !== 'real') return false;
+  return Math.max(Number(liveCount) || 0, openAutoTrades.size) >= REAL_MAX_OPEN;
+}
+
 /**
  * Inaitwa kila POLL_CLOSED_MS (dakika chache), pamoja na pollClosedTrades()
  * — kwa kila trade iliyo WAZI TAYARI yenye slUsd inayojulikana (yaani
@@ -1169,6 +1212,7 @@ async function evaluatePairInner(pairInfo) {
 
   // Zuia trades wazi nyingi mno kwa wakati mmoja (exposure kubwa).
   if (openAutoTrades.size >= MAX_CONCURRENT_TRADES) return null;
+  if (realLimitReached(0)) return null; // REAL: kikomo cha trades wazi (RAM)
 
   // Zuia kufungua trade nyingine kwa jozi ile ile wakati moja tayari iko wazi.
   const alreadyOpen = [...openAutoTrades.values()].some((t) => t.code === code);
@@ -1316,6 +1360,10 @@ async function executeCandidate(c) {
     let openForExposure;
     try {
       const live = await getOpenPositions();
+      if (realLimitReached(live.length)) {
+        console.log(`[autoTrader] ${code}: skip — REAL: trades wazi ${live.length}/${REAL_MAX_OPEN} (kikomo cha akaunti ya REAL).`);
+        return;
+      }
       openForExposure = live.map((p) => ({
         code: String(p.symbol || '').replace(/^frx/i, '').toUpperCase(),
         direction: /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL',
@@ -1413,6 +1461,7 @@ let cycleRunning = false;
 let cycleStartedAt = 0;
 
 async function runCycle() {
+  if (!AUTO_ON) return; // imezimwa kwenye dashboard — usifungue trades mpya
   // Zuia mizunguko miwili kuingiliana (ingeweza kupanga/kufungua mara mbili).
   // Mzunguko uliokwama kwa muda mrefu hauzuii mpya (ulinzi dhidi ya hang).
   const maxHoldMs = Math.max(CHECK_INTERVAL_MS * 2, 10 * 60 * 1000);
@@ -1645,8 +1694,9 @@ let starting = false; // guard dhidi ya kuanza mara mbili wakati restore ya DB (
  */
 function start({ sock, notifyJid }) {
   if (!ENABLED) {
-    console.log('[autoTrader] AUTO_TRADE_ENABLED si "true" — auto-trading imezimwa.');
-    return;
+    // Usirudi mapema: ufuatiliaji wa trades zilizo wazi (kurekodi zilizofungwa, trailing, profit lock) lazima ufanye kazi
+    // hata auto-trade ikiwa OFF. Kufungua trades mpya kunadhibitiwa na swichi (AUTO_ON) — inaweza kuwashwa kwenye dashboard.
+    console.log('[autoTrader] AUTO_TRADE_ENABLED si "true" — kufungua trades mpya kumezimwa (washa kwenye dashboard); ufuatiliaji unaendelea.');
   }
   if (cycleInterval || starting) return; // tayari imeanzishwa (mfano baada ya reconnect)
 
@@ -1676,6 +1726,7 @@ function start({ sock, notifyJid }) {
   (async () => {
     await loadStakeOverrideFromDb();
     await loadTrailingOverrideFromDb();
+    await loadAutoOnFromDb();
     await restoreOpenTradesFromDb();
     await pollClosedTrades();
     await adoptAllLivePositions();
@@ -1728,7 +1779,10 @@ onAccountSwitched(async (newMode, prevMode) => {
 
 function getStatus() {
   return {
-    enabled: ENABLED,
+    enabled: AUTO_ON,
+    envEnabled: ENABLED,
+    realMaxOpen: REAL_MAX_OPEN,
+    accountMode: getAccountMode(),
     running: cycleInterval !== null,
     startedAt,
     lastCycleAt,
@@ -1876,6 +1930,7 @@ module.exports = {
   getStatus,
   setStakeUsd,
   setTrailingEnabled,
+  setAutoEnabled,
   placeManualTrade,
   getWinRateStats,
   getTradeHistory,
