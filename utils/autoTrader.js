@@ -260,6 +260,14 @@ const PAIRS = [
   { code: 'USDCHF', symbol: 'USD/CHF' },
   { code: 'USDCAD', symbol: 'USD/CAD' },
   { code: 'NZDUSD', symbol: 'NZD/USD' },
+  // Crosses za ziada (hazina USD) — zinaongeza chaguo za pairs zisizogongana na zile
+  // zilizo wazi, correlation guard inapozuia trade ya wazo lilelile.
+  { code: 'AUDCAD', symbol: 'AUD/CAD' },
+  { code: 'CADJPY', symbol: 'CAD/JPY' },
+  { code: 'NZDJPY', symbol: 'NZD/JPY' },
+  { code: 'GBPCHF', symbol: 'GBP/CHF' },
+  { code: 'EURCAD', symbol: 'EUR/CAD' },
+  { code: 'EURAUD', symbol: 'EUR/AUD' },
 ];
 
 // ── Circuit breakers — hulinda dhidi ya hasara za mfululizo/kubwa mno ──
