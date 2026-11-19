@@ -40,6 +40,7 @@ const {
   CCY_PRIMARY_SESSION,
 } = require('./forexSignal');
 const { computeAllIndicatorSeries, MIN_CANDLES_RECOMMENDED } = require('./indicators');
+const { detectCandlePattern } = require('./candlePatterns');
 const { getStatus, computeAtrBasedRisk } = require('./autoTrader');
 
 const BASE_OUTPUTSIZE_DEFAULT = 1500; // ~62 siku za candles za 1h
@@ -123,6 +124,8 @@ async function runBacktest(opts) {
   const gateOpts = {};
   if (opts.htfGate === false) gateOpts.htfGate = false;
   if (opts.dailyGate === false) gateOpts.dailyGate = false;
+  const patternsOn = opts.patterns ?? require('./forexSignal').CANDLE_PATTERNS; // opts.patterns=false kulinganisha bila patterns
+  gateOpts.patterns = patternsOn;
   const useDaily = opts.dailyGate !== false && require('./forexSignal').DAILY_GATE;
 
   const [candles1h, candlesHtf, candlesDaily] = await Promise.all([
@@ -216,6 +219,11 @@ async function runBacktest(opts) {
         bbUpper: series1h.bbUpper[i],
         bbLower: series1h.bbLower[i],
         stochK: series1h.stochK[i],
+        pattern: patternsOn
+          ? detectCandlePattern(candles1h, i, {
+              atr: series1h.atr[i], rsi: series1h.rsi[i], bbLower: series1h.bbLower[i], bbUpper: series1h.bbUpper[i],
+            })
+          : null,
         htfInterval: HTF_INTERVAL,
         htfTrend,
         dailyRequested: useDaily,
@@ -292,6 +300,7 @@ async function runBacktest(opts) {
     strengthThreshold,
     htfGate: opts.htfGate !== false && require('./forexSignal').HTF_GATE,
     dailyGate: useDaily,
+    patterns: !!patternsOn,
     totalTrades: trades.length,
     wins: wins.length,
     losses: losses.length,

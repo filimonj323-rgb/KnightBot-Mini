@@ -61,6 +61,7 @@
 const axios = require('axios');
 const { getCalendarContext, computeCalendarVote } = require('./economicCalendar');
 const { computeAllIndicators, MIN_CANDLES_RECOMMENDED } = require('./indicators');
+const { detectCandlePattern } = require('./candlePatterns');
 
 const API_KEY = process.env.TWELVE_DATA_API_KEY || null;
 const BASE_URL = 'https://api.twelvedata.com';
@@ -83,6 +84,8 @@ const HTF_INTERVAL = process.env.FOREX_HTF_INTERVAL || '4h';
 const envOn = (name) => String(process.env[name] ?? 'true').toLowerCase() !== 'false';
 const HTF_GATE = envOn('FOREX_HTF_GATE');
 const DAILY_GATE = envOn('FOREX_DAILY_GATE');
+// Candle patterns (hammer/engulfing/stars) kama kura ya ziada. Zima kwa FOREX_CANDLE_PATTERNS=off.
+const CANDLE_PATTERNS = String(process.env.FOREX_CANDLE_PATTERNS || 'on').toLowerCase() !== 'off';
 const DAILY_INTERVAL = process.env.FOREX_DAILY_INTERVAL || '1day';
 
 // ── Chanzo cha candles ─────────────────────────────────────────────────
@@ -392,6 +395,8 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL, opts 
 
   const ind = computeAllIndicators(candles);
   const htfInd = computeAllIndicators(htfCandles);
+  // Candle ya mwisho kwenye feed inaendelea (haijafungwa) — pattern inasomwa kutoka ile ya kabla yake.
+  const pattern = CANDLE_PATTERNS ? detectCandlePattern(candles, candles.length - 2, ind) : null;
 
   // Daily (hiari — autoTrader pekee). Ikishindwa, dailyTrend = null na
   // computeSignal() inazuia trade (fail-closed) badala ya kuendelea kimya.
@@ -428,6 +433,7 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL, opts 
     bbLower: ind.bbLower,
     stochK: ind.stochK,
     stochD: ind.stochD,
+    pattern,
     htfInterval: HTF_INTERVAL,
     htfEma9: htf9,
     htfEma21: htf21,
@@ -537,6 +543,17 @@ function computeSignal(s, opts = {}) {
     }
   }
 
+  // Candle pattern (hammer/engulfing/morning-evening star) — kura ya ZIADA, inapigwa TU
+  // pattern ikitambuliwa (na ikiwa na muktadha: mwenendo uliotangulia + eneo muhimu).
+  // Bila pattern hakuna kura, kwa hiyo strength HAIBADILIKI. Pattern ikikubaliana na
+  // mwelekeo inauthibitisha; ikipingana inapunguza strength (kwa threshold 100% inazuia trade).
+  const patternsOn = opts.patterns ?? CANDLE_PATTERNS;
+  if (patternsOn && s.pattern && (s.pattern.direction === 'BUY' || s.pattern.direction === 'SELL')) {
+    if (s.pattern.direction === 'BUY') bullish += 1;
+    else bearish += 1;
+    notes.push(`Candle pattern: ${s.pattern.name} (${s.pattern.direction === 'BUY' ? 'ishara ya kupanda' : 'ishara ya kushuka'})`);
+  }
+
   // Economic calendar — "surprise" vote (kutoka matukio ya hivi karibuni
   // yenye "actual" dhidi ya "forecast") kwa mojawapo ya currency za jozi.
   // Ni kura ya ZIADA (si "gate") — uzito sawa na vigezo vingine vya
@@ -639,6 +656,7 @@ module.exports = {
   DAILY_INTERVAL,
   HTF_GATE,
   DAILY_GATE,
+  CANDLE_PATTERNS,
   DATA_SOURCE,
   fetchTwelveCandles, // Twelve Data moja kwa moja (kwa .fxcheck)
   // ── Kwa ajili ya utils/backtest.js pekee ──────────────────────────────
