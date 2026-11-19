@@ -372,6 +372,12 @@
               <option value="USDCHF">USD/CHF</option>
               <option value="USDCAD">USD/CAD</option>
               <option value="NZDUSD">NZD/USD</option>
+              <option value="AUDCAD">AUD/CAD</option>
+              <option value="CADJPY">CAD/JPY</option>
+              <option value="NZDJPY">NZD/JPY</option>
+              <option value="GBPCHF">GBP/CHF</option>
+              <option value="EURCAD">EUR/CAD</option>
+              <option value="EURAUD">EUR/AUD</option>
             </select>
           </div>
           <div>
@@ -442,6 +448,12 @@
               <option value="USDCHF">USD/CHF</option>
               <option value="USDCAD">USD/CAD</option>
               <option value="NZDUSD">NZD/USD</option>
+              <option value="AUDCAD">AUD/CAD</option>
+              <option value="CADJPY">CAD/JPY</option>
+              <option value="NZDJPY">NZD/JPY</option>
+              <option value="GBPCHF">GBP/CHF</option>
+              <option value="EURCAD">EUR/CAD</option>
+              <option value="EURAUD">EUR/AUD</option>
             </select>
           </div>
           <div>
@@ -632,7 +644,7 @@
 
   let ADMIN_TOKEN = sessionStorage.getItem('adminToken') || '';
   let pollTimer = null;
-  const FX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'NZDUSD'];
+  const FX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'EURGBP', 'EURJPY', 'GBPJPY', 'AUDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'NZDUSD', 'AUDCAD', 'CADJPY', 'NZDJPY', 'GBPCHF', 'EURCAD', 'EURAUD'];
   const signalState = {}; // code -> { direction, strength, notes, checkedAt, loading, error }
   let slowPollTimer = null;
   let calendarEvents = [];
