@@ -1873,10 +1873,70 @@ async function adoptAllLivePositions() {
 // Njia moja salama: inazuia trade ya pili kwa jozi ambayo bado ina trade wazi (kwa kuangalia Deriv
 // moja kwa moja), inazuia kubonyeza mara mbili, na inaandikisha trade kwenye ufuatiliaji + database
 // ili ipone redeploy na auto-trader isiifungue upya.
+// ── Ulinzi wa correlation: zuia trade ya mkono yenye wazo lilelile ───────────
+// BUY AAABBB = A imara (+A), B dhaifu (-B). SELL AAABBB = A dhaifu (-A), B imara (+B).
+// Trade mpya inagongana na iliyo wazi ikiwa zinashiriki currency MOJA upande ULEULE
+// (mfano SELL EURJPY + SELL EURUSD = zote "EUR dhaifu").
+const corrError = (msg, conflicts) => Object.assign(new Error(msg), { code: 'CORRELATED_OPEN', conflicts });
+
+function pairExposure(code, dir) {
+  const c = String(code || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (c.length !== 6) return null;
+  const a = c.slice(0, 3);
+  const b = c.slice(3);
+  return dir === 'SELL' ? { [a]: -1, [b]: 1 } : { [a]: 1, [b]: -1 };
+}
+
+function positionDirection(p) {
+  const t = String(p?.contract_type || '').toUpperCase();
+  if (t.includes('DOWN')) return 'SELL';
+  if (t.includes('UP')) return 'BUY';
+  return null;
+}
+
+function findCorrelatedOpen(code, dir, live) {
+  const mine = pairExposure(code, dir);
+  if (!mine) return [];
+  const out = [];
+  for (const p of live || []) {
+    const pCode = String(p.symbol || '').replace(/^frx/i, '').toUpperCase();
+    const pDir = positionDirection(p);
+    const theirs = pDir ? pairExposure(pCode, pDir) : null;
+    if (!theirs) continue;
+    const shared = Object.keys(mine).filter((cur) => theirs[cur] && theirs[cur] === mine[cur]);
+    if (shared.length) {
+      out.push({
+        pair: pCode,
+        direction: pDir,
+        contractId: p.contract_id,
+        shared: shared.map((cur) => `${cur} ${mine[cur] < 0 ? 'dhaifu' : 'imara'}`),
+      });
+    }
+  }
+  return out;
+}
+
+function correlatedMessage(code, dir, conflicts) {
+  return (
+    `${dir} ${code} imezuiwa: inaongeza hatari kwenye wazo lilelile la trade zilizo wazi:\n` +
+    conflicts.map((c) => `• ${c.direction} ${c.pair} (${c.shared.join(', ')})`).join('\n') +
+    `\nFunga trade hizo kwanza au chagua pair isiyohusiana.`
+  );
+}
+
+// Kwa dashboard: angalia KABLA ya kufungua (haifungui kitu).
+async function checkCorrelatedExposure(pair, direction) {
+  const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
+  const dir = direction === 'SELL' ? 'SELL' : 'BUY';
+  const live = await getOpenPositions();
+  const conflicts = findCorrelatedOpen(code, dir, live);
+  return { pair: code, direction: dir, conflicts, message: conflicts.length ? correlatedMessage(code, dir, conflicts) : '' };
+}
+
 const manualLock = { busy: false, recent: new Map() };
 const dupError = (msg) => Object.assign(new Error(msg), { code: 'DUPLICATE_OPEN' });
 
-async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier, allowDuplicate = false }) {
+async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier, allowDuplicate = false, allowCorrelated = false }) {
   const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
   if (!code) throw new Error('Jozi (pair) inahitajika.');
   const dir = direction === 'SELL' ? 'SELL' : 'BUY';
@@ -1899,6 +1959,8 @@ async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, 
       if (live.some((p) => p.symbol === derivSymbol)) {
         throw dupError(`${code} tayari ina trade WAZI kwenye Deriv — haifunguliwi nyingine hadi ifungwe.`);
       }
+      const conflicts = findCorrelatedOpen(code, dir, live);
+      if (conflicts.length && !allowCorrelated) throw corrError(correlatedMessage(code, dir, conflicts), conflicts);
     }
     manualLock.recent.set(key, Date.now());
     const result = await placeMultiplier({ pair: code, direction: dir, stake, stopLoss, takeProfit, multiplier });
@@ -1933,6 +1995,7 @@ module.exports = {
   setTrailingEnabled,
   setAutoEnabled,
   placeManualTrade,
+  checkCorrelatedExposure,
   getWinRateStats,
   getTradeHistory,
   getTradeSummary,
