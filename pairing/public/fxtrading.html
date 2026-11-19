@@ -242,6 +242,15 @@
   .acct-form label { display: block; font-size: 11px; color: var(--muted); margin: 10px 0 3px; }
   .acct-form input { width: 100%; box-sizing: border-box; }
   .acct-err { color: var(--red); font-size: 12px; min-height: 16px; margin-top: 8px; }
+  /* Swichi kubwa ya Auto-Trade kwenye header (inaonekana tab zote) */
+  .auto-switch { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 22px; border: 1px solid var(--border); background: transparent; cursor: pointer; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .auto-switch .track { position: relative; width: 38px; height: 20px; border-radius: 12px; background: rgba(255,85,102,0.35); transition: background .2s; flex: none; }
+  .auto-switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .2s; }
+  .auto-switch.on { color: var(--accent); border-color: var(--accent); }
+  .auto-switch.on .track { background: var(--accent); }
+  .auto-switch.on .track::after { left: 20px; }
+  .auto-switch.off { color: var(--red); border-color: var(--red); }
+  .auto-switch:disabled { opacity: .6; cursor: wait; }
   @media (max-width: 560px) { .live-bar { padding: 8px 12px; } .topbar { padding: 10px 12px; } }
 </style>
 </head>
@@ -264,7 +273,8 @@
       <span class="dot"></span>
       <strong>FX TRADING · Deriv Multipliers</strong>
     </div>
-    <div style="display:flex; gap:8px;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+      <button class="auto-switch" id="autoSwitch" onclick="toggleAuto(!autoEnabledNow)" title="Washa / Zima Auto-Trader"><span class="track"></span><span id="autoSwitchLbl">Auto …</span></button>
       <button class="ghost acct-btn" id="acctBtn" onclick="openAcctModal()" title="Badili akaunti Demo/Real">…</button>
       <button class="ghost" onclick="location.href='admin.html'">← Ops Console</button>
       <button class="ghost" onclick="logout()">Toka</button>
@@ -659,6 +669,25 @@
     });
   }
 
+  // Onyo lenye uthibitisho: inarudisha true ikiwa mtumiaji amethibitisha kuendelea.
+  function showWarning(title, lines, okLabel) {
+    return new Promise((resolve) => {
+      const back = document.createElement('div');
+      back.className = 'modal-back';
+      back.innerHTML = '<div class="modal-box"><p style="font-weight:700;"></p><p class="wl" style="white-space:pre-line;"></p><div class="grid2"><button class="ghost" data-r="0">Ghairi</button><button class="danger" data-r="1"></button></div></div>';
+      back.querySelector('p').textContent = title;
+      back.querySelector('.wl').textContent = lines;
+      back.querySelector('[data-r="1"]').textContent = okLabel || 'Fungua hata hivyo';
+      back.addEventListener('click', (e) => {
+        const r = e.target.getAttribute && e.target.getAttribute('data-r');
+        if (r === null && e.target !== back) return;
+        back.remove();
+        resolve(r === '1');
+      });
+      document.body.appendChild(back);
+    });
+  }
+
   async function api(path, opts = {}) {
     const res = await fetch(API_BASE + path, {
       ...opts,
@@ -781,8 +810,27 @@
     if (bt) bt.textContent = fxInfo.source === 'deriv' ? 'Deriv' : fxInfo.source === 'twelve' ? 'Twelve Data' : 'chanzo cha data';
   }
 
+  let autoEnabledNow = false;
+  function updateAutoSwitch(enabled) {
+    autoEnabledNow = !!enabled;
+    const b = document.getElementById('autoSwitch');
+    if (!b) return;
+    b.classList.toggle('on', autoEnabledNow);
+    b.classList.toggle('off', !autoEnabledNow);
+    document.getElementById('autoSwitchLbl').textContent = autoEnabledNow ? 'Auto-Trade ON' : 'Auto-Trade OFF';
+  }
+
   function renderAutoTrader(a) {
     updateFxInfo(a);
+    updateAutoSwitch(a.enabled);
+    if (!a.enabled) {
+      document.getElementById('autoTraderBox').innerHTML = `
+        <span class="badge off">OFF</span>
+        <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleAuto(true)">Washa Auto-Trade</button>
+        <div class="muted" style="margin-top:10px;">Bot haifungui trades mpya. Trades zilizo wazi bado zinafuatiliwa na kurekodiwa.</div>
+      `;
+      return;
+    }
     const signalsHtml = (a.signals || []).map((s) => {
       if (s.error) return `<div class="signal-row"><span>${s.code}</span><span class="muted">❌ ${s.error}</span></div>`;
       if (!s.checkedAt) return `<div class="signal-row"><span>${s.code}</span><span class="muted">bado hujaangaliwa</span></div>`;
@@ -794,16 +842,6 @@
         <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}${blocked}${s.gated ? ` <span class="muted" title="1h ilisema ${s.rawDirection}, timeframe kubwa inapinga">⛔ gate ${s.gated === 'DAILY' ? '1d' : '4h'}</span>` : ''}</span>
       </div>`;
     }).join('');
-    if (!a.enabled) {
-      document.getElementById('autoTraderBox').innerHTML = `
-        <span class="badge off">OFF</span>
-        <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleAuto(true)">Washa Auto-Trade</button>
-        <div class="muted" style="margin-top:10px;">Bot haifungui trades mpya. Trades zilizo wazi bado zinafuatiliwa na kurekodiwa.</div>
-        <div class="muted" style="margin-top:6px; font-size:11px;">Threshold: ≥${a.strengthThreshold}%</div>
-        <div style="margin-top:12px;">${signalsHtml}</div>
-      `;
-      return;
-    }
 
     const exposure = a.currencyExposure || {};
     const exposureEntries = Object.entries(exposure).filter(([, v]) => v !== 0);
@@ -838,11 +876,16 @@
   async function toggleAuto(enabled) {
     if (!enabled && !confirm('Kuzima auto-trade? Trades zilizo wazi zitaendelea kufuatiliwa; hakuna trade mpya itafunguliwa.')) return;
     if (enabled && !confirm('Kuwasha auto-trade? Bot itaanza kufungua trades mpya kwenye akaunti ya sasa.')) return;
+    const sw = document.getElementById('autoSwitch');
+    if (sw) sw.disabled = true;
     try {
       await api('/api/admin/fx/auto-enabled', { method: 'POST', body: JSON.stringify({ enabled }) });
-      refresh();
+      updateAutoSwitch(enabled);
+      await refresh();
     } catch (e) {
       alert('❌ ' + e.message);
+    } finally {
+      if (sw) sw.disabled = false;
     }
   }
 
@@ -1416,6 +1459,19 @@
         stopLoss: Number(document.getElementById('fSL').value),
         takeProfit: Number(document.getElementById('fTP').value),
       };
+      // Ulinzi wa correlation: angalia KABLA ya kufungua. Ikigongana, onyesha onyo na usifungue.
+      try {
+        const chk = await api('/api/admin/fx/open-check', { method: 'POST', body: JSON.stringify({ pair: body.pair, direction: body.direction }) });
+        if (chk.conflicts && chk.conflicts.length) {
+          const go = await showWarning('⚠️ ONYO: Wazo lilelile na trades zilizo wazi', chk.message + '\n\nUna uhakika unataka kufungua trade hii hata hivyo?', 'Ndiyo, fungua hata hivyo');
+          if (!go) {
+            toast.className = 'toast error';
+            toast.textContent = '⛔ ' + body.direction + ' ' + chk.pair + ' haikufunguliwa (umeghairi).';
+            return;
+          }
+          body.allowCorrelated = true;
+        }
+      } catch (_) { /* ukaguzi ukishindwa, server bado inazuia wakati wa kufungua */ }
       const data = await api('/api/admin/fx/open', { method: 'POST', body: JSON.stringify(body) });
       toast.className = 'toast success';
       toast.textContent = `✅ Trade imefunguliwa — Contract ID: ${data.result.contract_id}`;
