@@ -1750,6 +1750,7 @@ async function handlePairingRequest(req, res) {
             stake: body.stake ? Number(body.stake) : undefined,
             multiplier: body.multiplier ? Number(body.multiplier) : undefined,
             strengthThreshold: body.strengthThreshold ? Number(body.strengthThreshold) : undefined,
+            patterns: typeof body.patterns === 'boolean' ? body.patterns : undefined,
           });
           return sendJson(res, 200, { ok: true, result });
         } catch (err) {
