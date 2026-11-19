@@ -465,6 +465,14 @@
             <input id="btThreshold" type="number" placeholder="default" min="1" max="100" step="1" />
           </div>
         </div>
+        <div style="margin-bottom:12px;">
+          <label>Candle patterns (hammer, engulfing, stars) — linganisha</label>
+          <select id="btPatterns">
+            <option value="">Kama bot ilivyo (default)</option>
+            <option value="on">Washa (ON)</option>
+            <option value="off">Zima (OFF)</option>
+          </select>
+        </div>
         <div class="grid2">
           <div>
             <label>Stake ($) — hiari</label>
@@ -1517,7 +1525,7 @@
         <div class="bt-stat"><div class="n">${r.maxConsecutiveLosses}</div><div class="l">Hasara Mfululizo</div></div>
       </div>
       <div class="muted" style="font-size:11px; margin-bottom:10px;">
-        📅 ${r.from} → ${r.to} (candles ${r.bars}) · Stake $${r.stake} · Multiplier x${r.multiplier} · Kikomo ≥${r.strengthThreshold}%
+        📅 ${r.from} → ${r.to} (candles ${r.bars}) · Stake $${r.stake} · Multiplier x${r.multiplier} · Kikomo ≥${r.strengthThreshold}% · Patterns: ${r.patterns ? 'ON' : 'OFF'}
         ${r.stillOpenAtEnd ? '<br>ℹ️ Trade 1 ilibaki "wazi" mwishoni mwa data (haijahesabiwa hapo juu).' : ''}
       </div>
     `;
@@ -1572,6 +1580,9 @@
       };
       const threshold = document.getElementById('btThreshold').value;
       if (threshold) body.strengthThreshold = Number(threshold);
+      const pat = document.getElementById('btPatterns').value;
+      if (pat === 'on') body.patterns = true;
+      else if (pat === 'off') body.patterns = false;
       const stake = document.getElementById('btStake').value;
       if (stake) body.stake = Number(stake);
       const multiplier = document.getElementById('btMultiplier').value;
