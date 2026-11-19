@@ -120,6 +120,12 @@ const FX_SYMBOL_MAP = {
   USDCHF: 'USD/CHF',
   USDCAD: 'USD/CAD',
   NZDUSD: 'NZD/USD',
+  AUDCAD: 'AUD/CAD',
+  CADJPY: 'CAD/JPY',
+  NZDJPY: 'NZD/JPY',
+  GBPCHF: 'GBP/CHF',
+  EURCAD: 'EUR/CAD',
+  EURAUD: 'EUR/AUD',
 };
 
 // Bot kuu (WhatsApp namba ya owner, config.js) — hii ndiyo inayotumika
