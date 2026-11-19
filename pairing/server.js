@@ -1217,6 +1217,15 @@ async function handlePairingRequest(req, res) {
       }
 
       // Fungua trade mpya kwa mkono kutoka dashboard (sawa na .fxbuy/.fxsell).
+      // Angalia correlation KABLA ya kufungua (haifungui trade) — dashboard inaonyesha onyo.
+      if (req.method === 'POST' && req.url === '/api/admin/fx/open-check') {
+        const body = await readJsonBody(req);
+        const pair = String(body.pair || '').toUpperCase().replace(/[^A-Z]/g, '');
+        if (!pair) return sendJson(res, 400, { ok: false, error: 'Jozi (pair) inahitajika.' });
+        const check = await autoTrader.checkCorrelatedExposure(pair, body.direction === 'SELL' ? 'SELL' : 'BUY');
+        return sendJson(res, 200, { ok: true, ...check });
+      }
+
       if (req.method === 'POST' && req.url === '/api/admin/fx/open') {
         const body = await readJsonBody(req);
         const pair = String(body.pair || '').toUpperCase().replace(/[^A-Z]/g, '');
@@ -1233,9 +1242,11 @@ async function handlePairingRequest(req, res) {
             stopLoss: Number(body.stopLoss),
             takeProfit: Number(body.takeProfit),
             multiplier: body.multiplier ? Number(body.multiplier) : undefined,
+            allowCorrelated: body.allowCorrelated === true, // dashboard tu, baada ya kuthibitisha onyo
           });
         } catch (err) {
           if (err.code === 'DUPLICATE_OPEN') return sendJson(res, 409, { ok: false, duplicate: true, error: err.message });
+          if (err.code === 'CORRELATED_OPEN') return sendJson(res, 409, { ok: false, correlated: true, conflicts: err.conflicts, error: err.message });
           throw err;
         }
 
@@ -1247,6 +1258,7 @@ async function handlePairingRequest(req, res) {
             `Multiplier: x${body.multiplier || 100}\n` +
             `Bei ya ununuzi: $${result.buy_price}\n` +
             `🆔 Contract ID: ${result.contract_id}\n\n` +
+            (body.allowCorrelated === true ? `⚠️ Onyo la correlation lilithibitishwa kupuuzwa.\n` : '') +
             `⚠️ Trade hii ilifunguliwa KWA MKONO kupitia admin dashboard.`
         );
 
