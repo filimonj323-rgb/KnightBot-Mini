@@ -364,6 +364,7 @@ let ownerJid = null;
 let waSock = null;
 let startedAt = null;
 let lastCycleAt = null;
+let watchdogGraceFrom = 0;
 let lastWatchdogAlertAt = null; // epuka kutuma DM ya watchdog kila baada ya POLL_CLOSED_MS wakati tatizo bado lipo
 
 // contract_id -> { code, symbol, direction, stake, buyPrice, openedAt }
@@ -833,6 +834,7 @@ async function loadTrailingOverrideFromDb() {
 
 async function setAutoEnabled(on) {
   AUTO_ON = !!on;
+  if (AUTO_ON) watchdogGraceFrom = Date.now(); // ilizimwa kwa muda — usiite "imekwama" kabla ya cycle ya kwanza baada ya kuwashwa
   try {
     await fxTradesDb.initSchema();
     await fxTradesDb.query(
@@ -1567,7 +1569,10 @@ async function runCycle() {
 // POLL_CLOSED_MS wakati tatizo bado halijatatuliwa), na tunarudisha "kimya"
 // mara runCycle inapofanikiwa tena.
 function checkWatchdog() {
-  const reference = lastCycleAt || startedAt;
+  // Auto-trade ikizimwa kwenye dashboard, runCycle inarudi mapema kwa makusudi (haisasishi lastCycleAt) —
+  // hiyo si hitilafu, kwa hiyo watchdog isitume onyo la uongo.
+  if (!AUTO_ON) return;
+  const reference = Math.max(lastCycleAt || 0, watchdogGraceFrom || 0) || startedAt;
   if (!reference) return;
 
   const staleFor = Date.now() - reference;
