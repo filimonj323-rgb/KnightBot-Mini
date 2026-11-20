@@ -24,7 +24,7 @@
  * Env vars (zote hiari isipokuwa AUTO_TRADE_ENABLED):
  *   AUTO_TRADE_ENABLED              — "true" kuwasha (default: "false" = imezimwa)
  *   AUTO_TRADE_CHECK_INTERVAL_MS    — muda kati ya ukaguzi wa signal (default: saa 1)
- *   AUTO_TRADE_POLL_MS              — muda kati ya ukaguzi wa trade zilizofungwa (default: dakika 5)
+ *   AUTO_TRADE_POLL_MS              — muda kati ya ukaguzi wa trade zilizofungwa (default: dakika 1)
  *   AUTO_TRADE_STRENGTH_THRESHOLD   — asilimia ya chini ya signal (default: 100)
  *   AUTO_TRADE_STAKE_USD            — stake ya kila auto-trade (default: 5)
  *   AUTO_TRADE_MULTIPLIER           — moja ya 100/200/300/500/800 (default: 100)
@@ -122,7 +122,7 @@ const REAL_MAX_OPEN = (() => {
   return Number.isFinite(v) && v > 0 ? v : 3;
 })();
 const CHECK_INTERVAL_MS = Number(process.env.AUTO_TRADE_CHECK_INTERVAL_MS || 60 * 60 * 1000); // saa 1
-const POLL_CLOSED_MS = Number(process.env.AUTO_TRADE_POLL_MS || 5 * 60 * 1000); // dakika 5
+const POLL_CLOSED_MS = Number(process.env.AUTO_TRADE_POLL_MS || 60 * 1000); // dakika 1 (arifa ya SL/TP isichelewe)
 // Default 100: auto-trader inafungua trade TU signal ikiwa na strength ya 100%. (Env var bado inaweza kubadilisha.)
 const STRENGTH_THRESHOLD = Number(process.env.AUTO_TRADE_STRENGTH_THRESHOLD || 100);
 
@@ -1110,12 +1110,44 @@ function fmt(n, d = 2) {
   return Number(n).toFixed(d);
 }
 
+// Arifa zilizoshindwa kutumwa (mfano WhatsApp imekatika kwa muda) zinahifadhiwa na kutumwa
+// socket mpya ikipatikana — hivyo arifa za SL/TP hazipotei.
+const pendingNotifs = [];
+const NOTIFY_TIMEOUT_MS = 15000;
+
+// Socket ya SASA ya WhatsApp: global.currentSock husasishwa kila bot inapounganishwa upya (ndiyo
+// inayotumiwa na arifa za dashboard zinazofika). `waSock` ni nakala iliyochukuliwa wakati wa start()
+// na inaweza kuwa chakavu — hivyo socket ya sasa inapewa kipaumbele.
+const liveSock = () => global.currentSock || waSock;
+
+function sendWithTimeout(text) {
+  return Promise.race([
+    liveSock().sendMessage(ownerJid, { text }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ya kutuma')), NOTIFY_TIMEOUT_MS)),
+  ]);
+}
+
 async function notify(text) {
-  if (!waSock || !ownerJid) return;
+  if (!ownerJid) return;
   try {
-    await waSock.sendMessage(ownerJid, { text });
+    if (!liveSock()) throw new Error('WhatsApp haijaunganishwa');
+    await sendWithTimeout(text);
   } catch (err) {
-    console.error('[autoTrader] Imeshindwa kutuma notification:', err.message);
+    console.error('[autoTrader] Imeshindwa kutuma notification (itajaribiwa tena socket ikirudi):', err.message);
+    pendingNotifs.push(text);
+    if (pendingNotifs.length > 20) pendingNotifs.shift();
+  }
+}
+
+async function flushPendingNotifs() {
+  while (pendingNotifs.length && liveSock() && ownerJid) {
+    const text = pendingNotifs.shift();
+    try {
+      await sendWithTimeout(`🕘 (arifa iliyochelewa)\n${text}`);
+    } catch (_) {
+      pendingNotifs.unshift(text);
+      break;
+    }
   }
 }
 
@@ -1459,7 +1491,8 @@ async function executeCandidate(c) {
     ).catch(() => {});
   } catch (err) {
     console.error(`[autoTrader] Imeshindwa kufungua trade ${code}:`, err.message);
-    await notify(`❌ Bot imeshindwa kufungua auto-trade ya ${code}: ${err.message}`);
+    // Ulinzi wa jozi moja umezuia (si hitilafu halisi) — usitume ❌ kwa WhatsApp.
+    if (err.code !== 'DUPLICATE_OPEN') await notify(`❌ Bot imeshindwa kufungua auto-trade ya ${code}: ${err.message}`);
   }
   } finally {
     inFlightPairs.delete(code);
@@ -1707,7 +1740,14 @@ function start({ sock, notifyJid }) {
     // hata auto-trade ikiwa OFF. Kufungua trades mpya kunadhibitiwa na swichi (AUTO_ON) — inaweza kuwashwa kwenye dashboard.
     console.log('[autoTrader] AUTO_TRADE_ENABLED si "true" — kufungua trades mpya kumezimwa (washa kwenye dashboard); ufuatiliaji unaendelea.');
   }
-  if (cycleInterval || starting) return; // tayari imeanzishwa (mfano baada ya reconnect)
+  // Sasisha socket/owner DAIMA, hata ikiwa tayari imeanzishwa: WhatsApp ikiunganishwa upya `sock` ni kitu
+  // KIPYA. Kikibaki cha zamani, arifa zote (SL/TP zilizofungwa n.k.) zinashindwa kimya.
+  if (sock) waSock = sock;
+  if (notifyJid) ownerJid = notifyJid;
+  if (cycleInterval || starting) {
+    setTimeout(() => flushPendingNotifs().catch(() => {}), 2000);
+    return; // tayari imeanzishwa (mfano baada ya reconnect)
+  }
 
   waSock = sock;
   ownerJid = notifyJid;
@@ -1937,6 +1977,14 @@ async function checkCorrelatedExposure(pair, direction) {
   const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
   const dir = direction === 'SELL' ? 'SELL' : 'BUY';
   const live = await getOpenPositions();
+  const same = live.filter((p) => p.symbol === toDerivSymbol(code));
+  if (same.length) {
+    const dirs = same.map((p) => positionDirection(p) || '?').join(', ');
+    return {
+      pair: code, direction: dir, conflicts: [], samePair: true,
+      message: `${code} tayari ina trade WAZI (${dirs}) — haiwezi kufunguliwa nyingine (hata kwa mwelekeo tofauti) hadi ifungwe.`,
+    };
+  }
   const conflicts = findCorrelatedOpen(code, dir, live);
   return { pair: code, direction: dir, conflicts, message: conflicts.length ? correlatedMessage(code, dir, conflicts) : '' };
 }
