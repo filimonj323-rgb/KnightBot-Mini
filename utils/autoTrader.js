@@ -100,6 +100,7 @@ const {
   getAccountMode,
   getAccountState,
   onAccountSwitched,
+  getRecentOpens,
 } = require('./derivTrader');
 // Turso (libSQL) — tayari inatumika na pairing/server.js kwa users/payments;
 // hapa tunatumia kuhifadhi openAutoTrades ili isipotee kila redeploy/restart
@@ -1972,11 +1973,18 @@ function correlatedMessage(code, dir, conflicts) {
   );
 }
 
+// Trades wazi za Deriv + zile zilizofunguliwa sekunde chache zilizopita (portfolio inaweza kuchelewa).
+async function getLiveWithRecent() {
+  const live = await getOpenPositions();
+  const seen = new Set(live.map((p) => p.symbol));
+  return live.concat(getRecentOpens().filter((r) => !seen.has(r.symbol)));
+}
+
 // Kwa dashboard: angalia KABLA ya kufungua (haifungui kitu).
 async function checkCorrelatedExposure(pair, direction) {
   const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
   const dir = direction === 'SELL' ? 'SELL' : 'BUY';
-  const live = await getOpenPositions();
+  const live = await getLiveWithRecent();
   const same = live.filter((p) => p.symbol === toDerivSymbol(code));
   if (same.length) {
     const dirs = same.map((p) => positionDirection(p) || '?').join(', ');
@@ -2007,7 +2015,7 @@ async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, 
     if (!allowDuplicate) {
       let live;
       try {
-        live = await getOpenPositions();
+        live = await getLiveWithRecent();
       } catch (err) {
         throw new Error(`Imeshindwa kuthibitisha trades wazi za Deriv (${err.message}) — jaribu tena.`);
       }

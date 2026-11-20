@@ -459,7 +459,65 @@ function toDerivSymbol(pair) {
 // Utekelezaji wa trade — proposal kwanza, kisha buy (mfumo mpya hauruhusu
 // tena "buy:1, parameters:{...}" moja kwa moja bila proposal).
 // ─────────────────────────────────────────────
-async function placeMultiplier({ pair, direction, stake, stopLoss, takeProfit, multiplier }) {
+// ─────────────────────────────────────────────
+// Ulinzi wa jozi MOJA tu kwa wakati mmoja — unatumika na njia ZOTE za kufungua trade
+// (auto-trader, News Trading, mkono/.buy/.sell). Unazuia pair kufunguliwa mara mbili,
+// hata kwa mwelekeo TOFAUTI (BUY + SELL kwenye pair ileile).
+//  1. pairOpening: reservation ya papo hapo (synchronous) — inazuia race kati ya njia mbili
+//     zinazoangalia kwa wakati mmoja kabla yoyote haijanunua.
+//  2. recentOpened: kumbukumbu ya sekunde 20 baada ya buy — portfolio ya Deriv inaweza kuchelewa
+//     kuonyesha contract mpya, na hapo ukaguzi wa live ungepita kimakosa.
+//  3. Ukaguzi wa live wa portfolio (fail-closed: bila uthibitisho wa Deriv, usifungue).
+// ─────────────────────────────────────────────
+const pairOpening = new Set();
+const recentOpened = new Map();
+const PAIR_RECENT_MS = 20000;
+const pairBlocked = (msg) => Object.assign(new Error(msg), { code: 'DUPLICATE_OPEN' });
+
+// Trades zilizofunguliwa sekunde chache zilizopita (portfolio ya Deriv inaweza kuchelewa kuzionyesha) —
+// zinatumika na ukaguzi wa correlation ili trade ya pili isipite wakati ya kwanza haijaonekana bado.
+function getRecentOpens(maxAgeMs = PAIR_RECENT_MS) {
+  const now = Date.now();
+  const out = [];
+  for (const [symbol, v] of recentOpened) {
+    if (now - v.ts < maxAgeMs) out.push({ symbol, contract_type: v.direction === 'SELL' ? 'MULTDOWN' : 'MULTUP', recent: true });
+  }
+  return out;
+}
+
+async function placeMultiplier(args) {
+  const sym = toDerivSymbol(args.pair);
+  const guarded = !args.allowDuplicate;
+  if (guarded) {
+    if (pairOpening.has(sym)) throw pairBlocked(`${args.pair} inafunguliwa sasa hivi na njia nyingine — imezuiwa kuzuia marudio.`);
+    if (Date.now() - (recentOpened.get(sym)?.ts || 0) < PAIR_RECENT_MS) {
+      throw pairBlocked(`${args.pair} imefunguliwa sekunde chache zilizopita — hairuhusiwi kufunguliwa tena (hata mwelekeo tofauti).`);
+    }
+    pairOpening.add(sym); // synchronous: hakuna await kati ya has() na add()
+  }
+  try {
+    if (guarded) {
+      let live;
+      try {
+        live = await getOpenPositions();
+      } catch (err) {
+        throw new Error(`Imeshindwa kuthibitisha trades wazi za Deriv (${err.message}) — sifungui trade mpya kuzuia marudio.`);
+      }
+      const existing = live.find((p) => p.symbol === sym);
+      if (existing) {
+        const d = /down/i.test(existing.contract_type || '') ? 'SELL' : 'BUY';
+        throw pairBlocked(`${args.pair} tayari ina trade WAZI (${d}) — haifunguliwi nyingine (hata kwa mwelekeo tofauti) hadi ifungwe.`);
+      }
+    }
+    const result = await placeMultiplierCore(args);
+    recentOpened.set(sym, { ts: Date.now(), direction: args.direction === 'SELL' ? 'SELL' : 'BUY' });
+    return result;
+  } finally {
+    if (guarded) pairOpening.delete(sym);
+  }
+}
+
+async function placeMultiplierCore({ pair, direction, stake, stopLoss, takeProfit, multiplier }) {
   if (switching) throw new Error('Akaunti inabadilishwa sasa hivi — jaribu tena baada ya sekunde chache.');
   await resolveAccountId(); // inajaza accountMode (demo/real)
   let amt = Math.min(Number(stake), MAX_STAKE_USD);
@@ -847,6 +905,7 @@ async function getBalance() {
 
 module.exports = {
   placeMultiplier,
+  getRecentOpens,
   ALLOWED_MULTIPLIERS,
   MIN_STAKE_USD,
   getOpenPositions,
