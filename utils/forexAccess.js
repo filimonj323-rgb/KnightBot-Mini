@@ -31,7 +31,7 @@ const SIGNAL_ONLY = new Set([
 const ACCOUNT_OWN = new Set(['fxbuy', 'fxsell', 'positions', 'panic', 'fxclose']);
 const ACCOUNT_BOUND = new Set([
   // Deriv (forex): auto-trade + takwimu za owner (hatua (d)) — bado zimefungwa kwa pairing bots
-  'fxautostake', 'fxtrailing', 'fxautostatus', 'autostats', 'fxcheck', 'fxbacktest',
+  'fxautostake', 'fxtrailing', 'fxsession', 'fxnewsalert', 'fxautostatus', 'autostats', 'fxcheck', 'fxbacktest',
   // Pocket Option: orders, auto-trade, historia, balance, signals (zinatumia bridge/akaunti ya owner)
   'pobuy', 'posell', 'poresult', 'pobalance', 'poauto', 'podelete', 'postats', 'posignal',
 ]);

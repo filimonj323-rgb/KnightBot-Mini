@@ -40,6 +40,7 @@ const {
   closeContractWithPnL,
   getAccountMode,
   getAccountState,
+  onAccountSwitched,
   getCandles,
   ALLOWED_MULTIPLIERS,
   MIN_STAKE_USD,
@@ -98,10 +99,58 @@ function pushDecision(level, text, extra = {}) {
 }
 
 async function notify(text) {
-  if (!waSock || !ownerJid) return;
-  try { await waSock.sendMessage(ownerJid, { text }); }
+  // Socket ya SASA (global.currentSock husasishwa kila WhatsApp inapounganishwa upya) ina kipaumbele juu ya nakala ya zamani.
+  const sock = global.currentSock || waSock;
+  if (!sock || !ownerJid) return;
+  try { await sock.sendMessage(ownerJid, { text }); }
   catch (err) { console.error('[newsTrader] Imeshindwa kutuma notification:', err.message); }
 }
+
+// ── Arifa za hali ya News Trading: kuwashwa/kuzimwa, ruhusa ya REAL, kubadili akaunti ──────────────
+const modeLabel = (m) => (m === 'real' ? '🔴 REAL (pesa halisi)' : m === 'demo' ? '🟢 DEMO' : '❔ haijulikani bado');
+
+/** Sentensi moja: News Trading ITAFANYA trade kwenye akaunti hii au la, na kwa nini. */
+function tradeStatusLine(c, mode) {
+  if (!c.enabled) return '⏹️ Haifanyi trade (News Trading imezimwa).';
+  if (mode === 'real' && !c.allowReal) return '⛔ HAITAFANYA trade: akaunti ni REAL na "Ruhusu REAL" imezimwa.';
+  if (mode === 'real') return '🚨 ITAFANYA trade kwa PESA HALISI habari kubwa zikitoka.';
+  return '✅ Itafanya trade (DEMO) habari kubwa zikitoka.';
+}
+
+function configSummary(c) {
+  return `Stake $${r2(c.stake)} • x${c.multiplier} • SL ${c.slPct}% • TP ${c.tpPct}% • funga kwa muda dk ${c.maxHoldMin}\n` +
+    `Kikomo: trades wazi ${c.maxOpen} • hasara ya siku $${c.maxDailyLossUsd} • surprise ya chini ${c.minSurprisePct}%\n` +
+    `Habari: High${c.includeMedium ? ' + Medium' : ''} impact • Ruhusa ya REAL: ${c.allowReal ? '*IMEWASHWA*' : 'imezimwa'}`;
+}
+
+async function announceConfigChange(prev, next) {
+  const mode = getAccountMode() || null;
+  if (prev.enabled !== next.enabled) {
+    let openN = 0;
+    try { openN = mode ? await openCount(mode) : 0; } catch (_) { /* si lazima */ }
+    await notify(next.enabled
+      ? `▶️ *NEWS TRADING IMEWASHWA*\n\nAkaunti ya sasa: ${modeLabel(mode)}\n${configSummary(next)}\n\n${tradeStatusLine(next, mode)}`
+      : `⏹️ *NEWS TRADING IMEZIMWA*\n\nHakuna trade mpya za habari zitakazofunguliwa.\n` +
+        (openN ? `📂 Trades ${openN} za habari bado wazi — zinaendelea kufuatiliwa hadi zifungwe (SL/TP/muda).` : 'Hakuna trade ya habari iliyo wazi.'));
+  }
+  if (prev.allowReal !== next.allowReal) {
+    await notify(next.allowReal
+      ? `🚨 *RUHUSA YA REAL IMEWASHWA (News Trading)*\n\nNews Trading sasa INARUHUSIWA kufungua trades kwa *pesa halisi* (REAL).\n` +
+        `Akaunti ya sasa: ${modeLabel(mode)}\nNews Trading: ${next.enabled ? '*IMEWASHWA*' : 'imezimwa'}\n\n${tradeStatusLine(next, mode)}\n\n⚠️ Habari zina spread na slippage kubwa — hatari ya hasara ni kubwa.`
+      : `🔒 *RUHUSA YA REAL IMEZIMWA (News Trading)*\n\nNews Trading haitafungua tena trade kwenye akaunti ya REAL.\nAkaunti ya sasa: ${modeLabel(mode)}\n\n${tradeStatusLine(next, mode)}`);
+  }
+}
+
+// Akaunti ikibadilika (demo ↔ real) — iambie owner News Trading itafanya nini kwenye akaunti mpya. Haisubiri (isizuie kubadili).
+onAccountSwitched(async (newMode, prevMode) => {
+  try {
+    if (!cfgLoaded) await loadConfig();
+    notify(
+      `🔄 *NEWS TRADING — AKAUNTI IMEBADILIKA*\n\n${modeLabel(prevMode)} → ${modeLabel(newMode)}\n` +
+        `News Trading: ${cfg.enabled ? '*IMEWASHWA*' : 'imezimwa'} • Ruhusa ya REAL: ${cfg.allowReal ? '*IMEWASHWA*' : 'imezimwa'}\n\n${tradeStatusLine(cfg, newMode)}`
+    ).catch(() => {});
+  } catch (err) { console.error('[newsTrader] arifa ya kubadili akaunti imeshindwa:', err.message); }
+});
 
 // ── Config (inahifadhiwa kama JSON kwenye fx_auto_settings, key "news_config") ─────────────────
 function num(v, name, min, max, int = false) {
@@ -159,9 +208,11 @@ async function setConfig(patch = {}) {
      ON CONFLICT(settingKey) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = excluded.updatedAt`,
     ['news_config', JSON.stringify(next), now]
   );
-  const wasEnabled = cfg.enabled;
+  const prev = { enabled: cfg.enabled, allowReal: cfg.allowReal };
   cfg = next;
-  if (wasEnabled !== next.enabled) pushDecision('info', next.enabled ? '▶️ News Trading IMEWASHWA' : '⏹️ News Trading IMEZIMWA');
+  if (prev.enabled !== next.enabled) pushDecision('info', next.enabled ? '▶️ News Trading IMEWASHWA' : '⏹️ News Trading IMEZIMWA');
+  if (prev.allowReal !== next.allowReal) pushDecision('info', next.allowReal ? '🚨 Ruhusa ya REAL IMEWASHWA' : '🔒 Ruhusa ya REAL IMEZIMWA');
+  try { await announceConfigChange(prev, next); } catch (err) { console.error('[newsTrader] arifa ya mabadiliko imeshindwa:', err.message); }
   return cfg;
 }
 
@@ -510,6 +561,15 @@ async function start({ sock, notifyJid } = {}) {
   timer = setInterval(() => { tick().catch((e) => console.error('[newsTrader] tick:', e.message)); }, TICK_MS);
   if (timer.unref) timer.unref();
   starting = false;
+  // Bot imeanza (redeploy/restart) na News Trading iko tayari kutrade PESA HALISI — mjulishe owner mara moja kwa kila kuanza.
+  setTimeout(async () => {
+    try {
+      const mode = await resolveMode();
+      if (cfg.enabled && mode === 'real' && cfg.allowReal) {
+        await notify(`🚨 *NEWS TRADING IKO TAYARI KUTRADE REAL*\n\nBot imeanza: News Trading *IMEWASHWA* kwenye akaunti ya ${modeLabel(mode)} na ruhusa ya REAL imewashwa.\n${configSummary(cfg)}`);
+      }
+    } catch (_) { /* si lazima */ }
+  }, 20000).unref?.();
 }
 
 function stop() { if (timer) clearInterval(timer); timer = null; }
