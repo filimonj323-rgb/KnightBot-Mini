@@ -871,6 +871,23 @@ async function _startBot() {
         require('./utils/manualProfitLock').start({
           notify: (text) => sock.sendMessage(ownerJid, { text }).catch((e) => console.error('manualProfitLock notify:', e.message)),
         });
+        // Arifa za sessions za soko (Sydney/Tokyo/London/New York) + soko kufungwa/kufunguliwa (weekend), na pairs za kutrade.
+        // Inatumia socket YA SASA (global.currentSock) ili ifanye kazi baada ya reconnect; start() ni salama kuitwa tena.
+        require('./utils/marketSessions').start({
+          notify: async (text) => {
+            const s = global.currentSock || sock;
+            await s.sendMessage(ownerJid, { text });
+            return true;
+          },
+        }).catch((e) => console.error('❌ Imeshindwa kuanzisha marketSessions:', e.message));
+        // Arifa za habari kubwa (High impact): kabla ya habari + actual ikitoka (mwelekeo, pairs zilizoathirika, ipi ya kutrade).
+        require('./utils/newsAlerts').start({
+          notify: async (text) => {
+            const s = global.currentSock || sock;
+            await s.sendMessage(ownerJid, { text });
+            return true;
+          },
+        }).catch((e) => console.error('❌ Imeshindwa kuanzisha newsAlerts:', e.message));
       } catch (err) {
         console.error('❌ Imeshindwa kuanzisha auto-trader:', err.message);
       }
