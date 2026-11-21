@@ -946,6 +946,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
     });
   } catch (e) { console.error(`[pairing:${phoneNumber}] diag listener error:`, e.message); }
 
+  require('../lib/statusHelper').installStatusAck(sock, `pairing:${phoneNumber}`);
+
   // ── Auto View/React Status (per customer) ───────────────────────────────
   // Listener YAKE MWENYEWE (si ndani ya listener kuu ya commands) kwa sababu:
   //  1. Listener kuu inasoma `m.messages[0]` PEKEE — status zikija kwa kundi
@@ -976,8 +978,8 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
         const posterNum = String(posterJid).split('@')[0];
         try {
           if (auto.autoViewStatus) {
-            await sock.readMessages([msg.key]);
-            console.log(`[pairing:${phoneNumber}] 👁️ status +${posterNum} imeonekana`);
+            const via = await require('../lib/statusHelper').viewStatus(sock, msg.key);
+            console.log(`[pairing:${phoneNumber}] 👁️ status +${posterNum} imeonekana (${via})`);
           }
           viewedStatusCache.set(statusId, true);
         } catch (e) {
