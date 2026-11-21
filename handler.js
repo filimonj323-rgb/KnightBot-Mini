@@ -2201,6 +2201,7 @@ const getAutoStatusCfg = () => {
 };
 
 function setupAutoStatusViewer(sock) {
+  require('./lib/statusHelper').installStatusAck(sock, 'main');
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
 
@@ -2235,8 +2236,8 @@ function setupAutoStatusViewer(sock) {
 
         // ✅ INSTANT VIEW
         if (cfg.view) {
-          await sock.readMessages([msg.key]);
-          console.log(`👁️ [status] +${posterNum} imeonekana`);
+          const via = await require('./lib/statusHelper').viewStatus(sock, msg.key);
+          console.log(`👁️ [status] +${posterNum} imeonekana (${via})`);
         }
 
         if (cfg.react) {
