@@ -84,7 +84,9 @@ const {
   deleteSession: deleteDbSession,
   loadCreds: loadDbCreds,
   listSessionIds: listDbSessionIds,
+  resetSignalSessions,
 } = require('../session-db');
+const { createDecryptWatch, isUndecryptable } = require('../lib/decryptWatch');
 
 /** Turso session_id kwa namba fulani ya mteja — namespaced ili isigongane na session ya bot kuu. */
 function pairingSessionId(phoneNumber) {
@@ -671,9 +673,30 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   if (state.creds.registered) record.awaitingFirstLink = false;
   const version = await require('../lib/waVersion').getWaVersion();
 
+  // Logger ya Baileys: zamani 'silent' kabisa kwa hiyo "Bad MAC" / "No session found" / "failed to decrypt" HAZIKUONEKANA popote
+  // (bot "connected" lakini kimya). Sasa makosa yanayohusu decrypt yanaandikwa (si zaidi ya mara moja kwa dakika 2 kwa kila mteja).
+  let lastDecryptLogAt = 0;
+  const baileysLogger = require('pino')({ level: 'error' }, {
+    write(line) {
+      try {
+        const o = JSON.parse(line);
+        const txt = `${o.msg || ''} ${(o.err && (o.err.message || o.err.type)) || ''} ${o.error || ''}`;
+        if (/decrypt|bad mac|no session|no matching sessions|session ?error|prekey|invalid.*(key|signature)/i.test(txt) && Date.now() - lastDecryptLogAt > 120000) {
+          lastDecryptLogAt = Date.now();
+          console.warn(`[pairing:${phoneNumber}] 🔐 tatizo la decrypt (Baileys): ${txt.trim().slice(0, 200)}`);
+        }
+      } catch (_) { /* si JSON — puuza */ }
+    },
+  });
+  const decryptWatch = createDecryptWatch({
+    minFails: Number(process.env.PAIRING_HEAL_MIN_FAILS || 8),
+    cooldownMs: Number(process.env.PAIRING_HEAL_COOLDOWN_HOURS || 6) * 3600000,
+  });
+  const AUTOHEAL = String(process.env.PAIRING_AUTOHEAL ?? 'true').toLowerCase() !== 'false';
+
   const sock = makeWASocket({
     version,
-    logger: require('pino')({ level: 'silent' }),
+    logger: baileysLogger,
     printQRInTerminal: false,
     browser: ['Ubuntu', 'Chrome', '20.0.04'],
     auth: state,
@@ -1005,9 +1028,32 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
   // anything else (see handleExpiredMessage() above). This gate is the
   // actual enforcement point for the whole trial/billing system, so it
   // MUST stay the very first thing in this listener.
-  sock.ev.on('messages.upsert', async (m) => {
-    const msg = m.messages?.[0];
-    if (!msg?.message) return;
+  const processUpsertMessage = async (m, msg) => {
+    if (!msg?.message) {
+      // Ujumbe wa kawaida (notify) umefika lakini haukufunguka (decrypt) — zamani ulipotea kimya. Hesabu, na ikiwa
+      // unajirudia bila hata ujumbe mmoja uliosomeka, futa funguo za session za Signal (creds zinabaki) na uunganishe upya.
+      if (m.type === 'notify' && isUndecryptable(msg) && !msg.key?.fromMe) {
+        decryptWatch.fail();
+        record.decryptFails = (record.decryptFails || 0) + 1;
+        if (AUTOHEAL && decryptWatch.shouldHeal()) {
+          decryptWatch.healed();
+          const c = decryptWatch.counts();
+          console.warn(`[pairing:${phoneNumber}] 🩹 ujumbe mwingi hauwezi kufunguliwa (decrypt) bila hata mmoja kusomeka — natengeneza upya session za Signal (creds zinabaki, hakuna ku-link upya)...`);
+          try {
+            const r = await resetSignalSessions(pairingSessionId(phoneNumber));
+            console.warn(`[pairing:${phoneNumber}] 🩹 funguo za session zimefutwa (DB=${r.deletedDb}, RAM=${r.deletedCache}) — naunganisha upya.`);
+            record.lastHealAt = Date.now();
+            record.healCount = (record.healCount || 0) + 1;
+            try { sock.end(new Error('auto-heal: signal sessions reset')); } catch (_) { /* tayari imefungwa */ }
+          } catch (e) {
+            console.error(`[pairing:${phoneNumber}] 🩹 uponyaji umeshindwa:`, e.message);
+          }
+        }
+      }
+      return;
+    }
+    if (m.type === 'notify' && !msg.key?.fromMe) decryptWatch.ok();
+    record.lastMessageAt = Date.now();
 
     // Chanzo cha akiba cha jina: pushName ya ujumbe wake mwenyewe (tumia tu
     // kama bado hatuna jina kutoka vyanzo vya uhakika hapo juu).
@@ -1132,6 +1178,13 @@ async function connectInstance(phoneNumber, sessionFolder, record, isReconnect) 
       }
     } catch (e) {
       // Silently handle — sawa na tabia ya index.js kwa block hii
+    }
+  };
+
+  // Ujumbe WOTE wa batch (zamani ulisomwa wa kwanza tu — baada ya reconnect/offline sync, commands nyingine zote zilipotea kimya).
+  sock.ev.on('messages.upsert', (m) => {
+    for (const msg of m.messages || []) {
+      processUpsertMessage(m, msg).catch((e) => console.error(`[pairing:${phoneNumber}] upsert error:`, e.message));
     }
   });
 
