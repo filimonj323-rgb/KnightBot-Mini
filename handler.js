@@ -2201,7 +2201,7 @@ const getAutoStatusCfg = () => {
 };
 
 function setupAutoStatusViewer(sock) {
-  require('./lib/statusHelper').installStatusAck(sock, 'main');
+  try { require('./lib/statusHelper').installStatusAck(sock, 'main'); } catch (e) { console.error('statusHelper haipo:', e.message); }
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
 
@@ -2236,7 +2236,8 @@ function setupAutoStatusViewer(sock) {
 
         // ✅ INSTANT VIEW
         if (cfg.view) {
-          const via = await require('./lib/statusHelper').viewStatus(sock, msg.key);
+          let via = 'readMessages';
+          try { via = await require('./lib/statusHelper').viewStatus(sock, msg.key); } catch (e) { if (e.code === 'MODULE_NOT_FOUND') await sock.readMessages([msg.key]); else throw e; }
           console.log(`👁️ [status] +${posterNum} imeonekana (${via})`);
         }
 

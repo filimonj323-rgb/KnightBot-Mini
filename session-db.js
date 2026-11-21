@@ -54,7 +54,10 @@ const KEYS_STATS_WARN_THRESHOLD = 8000; // idadi ya "keys" zinazosababisha onyo
 // moja kwenye DB (angalia keyStore.set() chini). Hii hapa ni SAFETY NET ya
 // ziada tu: prekeys za muda (aina zenye "pre-key" jina lake) ambazo hazija-
 // guswa kwa muda mrefu SANA (default siku 30) zinafutwa taratibu.
-const PRUNE_ENABLED = process.env.SESSION_PRUNE_ENABLED !== 'false';
+// Prekey pruning IMEZIMWA kwa default: prekey ambayo bado imechapishwa kwa seva ya WhatsApp
+// ikifutwa hapa, mtumaji akiitumia (hasa status za LID) tunapata "Invalid PreKey ID" na
+// ujumbe/status haufunguki. Washa tu kwa SESSION_PRUNE_ENABLED=true kama una sababu.
+const PRUNE_ENABLED = process.env.SESSION_PRUNE_ENABLED === 'true';
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000; // saa 6
 const PRUNE_PREKEY_MAX_AGE_MS = parseInt(process.env.SESSION_PRUNE_PREKEY_DAYS || '30', 10) * 24 * 60 * 60 * 1000;
 
