@@ -708,7 +708,13 @@ function createThrottledKeyWriter(sessionId) {
     await doFlush();
   }
 
-  return { markKeySet, markKeyDelete, flushImmediate };
+  /** Ondoa kwenye foleni ya kuandika funguo zote zinazolingana na `re` (inatumika na resetSignalSessions). */
+  function discardPending(re) {
+    for (const k of [...pendingUpserts.keys()]) if (re.test(k)) pendingUpserts.delete(k);
+    for (const k of [...pendingDeletes]) if (re.test(k)) pendingDeletes.delete(k);
+  }
+
+  return { markKeySet, markKeyDelete, flushImmediate, discardPending };
 }
 
 function createThrottledCredsWriter(sessionId, getSnapshot) {
@@ -995,8 +1001,41 @@ async function useTursoAuthState(sessionId) {
   return { state: { creds, keys }, saveCreds, dispose };
 }
 
+// Funguo za Signal za mazungumzo (si creds, si pre-keys, si app-state). Kuzifuta kunamlazimisha kila mtu/group
+// kuanzisha upya session na bot (retry receipt) — dawa ya "connected lakini haijibu" (Bad MAC / No session).
+const SIGNAL_SESSION_KEY_RE = /^(session|sender-key|sender-key-memory)--/;
+
+/**
+ * Futa funguo za Signal "session"/"sender-key" za sessionId hii (DB + cache ya RAM + foleni ya kuandika).
+ * Creds (akaunti iliyolinkiwa) HAZIGUSWI — bot inabaki linked, hakuna ku-pair upya.
+ * @returns {Promise<{deletedDb:number, deletedCache:number}>}
+ */
+async function resetSignalSessions(sessionId) {
+  const entry = sessionRuntimeCache.get(sessionId);
+  if (entry) {
+    entry.keyWriter.discardPending(SIGNAL_SESSION_KEY_RE);
+    await entry.keyWriter.flushImmediate().catch(() => {}); // maandishi mengine yaliyosalia yamalizike kwanza
+    entry.keyWriter.discardPending(SIGNAL_SESSION_KEY_RE);
+  }
+  const res = await retryOperation(async () => {
+    const client = getSessionClient(sessionId);
+    return client.execute({
+      sql: `DELETE FROM wa_session_keys WHERE session_id = ? AND (key_id LIKE 'session--%' OR key_id LIKE 'sender-key--%' OR key_id LIKE 'sender-key-memory--%')`,
+      args: [sessionId],
+    });
+  }, `resetSignalSessions(${sessionId})`);
+  let deletedCache = 0;
+  if (entry) {
+    for (const k of [...entry.keysCache.keys()]) {
+      if (SIGNAL_SESSION_KEY_RE.test(k)) { entry.keysCache.delete(k); deletedCache++; }
+    }
+  }
+  return { deletedDb: Number(res.rowsAffected || 0), deletedCache };
+}
+
 module.exports = {
   initializeDatabase,
+  resetSignalSessions,
   useTursoAuthState,
   deleteSession,
   deleteAllSessions,
