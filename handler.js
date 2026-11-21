@@ -2205,6 +2205,13 @@ function setupAutoStatusViewer(sock) {
     if (type !== 'notify') return;
 
     for (const msg of messages) {
+      if (msg?.key?.remoteJid === 'status@broadcast' && !msg.key.fromMe) {
+        // DIAGNOSTIC: status inafika? imefunguka (decrypt)? — 50 za kwanza tu
+        global.__statusSeen = (global.__statusSeen || 0) + 1;
+        if (global.__statusSeen <= 50) {
+          console.log(`📥 [status] imefika | from=${msg.key.participant || '-'} alt=${msg.key.participantAlt || '-'} | content=${msg.message ? Object.keys(msg.message)[0] : 'HAKUNA (decrypt imeshindwa? stub=' + msg.messageStubType + ' ' + (msg.messageStubParameters || []).join(',') + ')'}`);
+        }
+      }
       if (!msg.message) continue;
       if (msg.key.remoteJid !== 'status@broadcast') continue;
       if (msg.key.fromMe) continue;
@@ -2229,6 +2236,7 @@ function setupAutoStatusViewer(sock) {
         // ✅ INSTANT VIEW
         if (cfg.view) {
           await sock.readMessages([msg.key]);
+          console.log(`👁️ [status] +${posterNum} imeonekana`);
         }
 
         if (cfg.react) {
@@ -2265,7 +2273,7 @@ function setupAutoStatusViewer(sock) {
                   key: msg.key
                 }
               }, {
-                statusJidList: [deliverJid, sock.user.id]
+                statusJidList: [deliverJid, String(sock.user?.id || '').replace(/:\d+@/, '@')].filter(Boolean)
               });
               if (resolved) {
                 console.log(`✅ Status +${posterNum} → ${cfg.view ? 'viewed ✅' : ''} reacted ${reaction} (delay ${Math.round(delayMs / 1000)}s, deliverJid: ${deliverJid})`);
