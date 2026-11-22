@@ -1000,19 +1000,39 @@ async function buildTradeEstimate({ code, direction, stake, multiplier, slUsd, t
   return { est, text: tradeEstimate.formatEstimate(est), ctx: c };
 }
 
+/**
+ * Ikiwa mtumiaji ameweka SL/TP kwa PIPS, zibadilishe kuwa dola kwa fomula ya Deriv Multipliers kwa kutumia
+ * bei ya sasa (entry). SL haiwezi kuzidi stake (hasara ya juu ya Multipliers). Bila pips, inarudisha dola ulizoweka.
+ */
+async function resolveManualLimits({ code, stake, multiplier, stopLoss, takeProfit, slPips, tpPips }) {
+  const sp = Number(slPips); const tpp = Number(tpPips);
+  if (!(sp > 0) && !(tpp > 0)) return { stopLoss: Number(stopLoss), takeProfit: Number(takeProfit), pipsMode: false, ctx: null };
+  const ctx = await getSrContext(code);
+  const entry = Number(ctx?.price);
+  if (!(entry > 0)) throw new Error('Bei ya sasa ya ' + code + ' haikupatikana — haiwezi kubadilisha pips kuwa dola. Jaribu tena.');
+  const st = Number(stake) || STAKE_USD; const mu = Number(multiplier) || MULTIPLIER;
+  let sl = sp > 0 ? tradeEstimate.pipsToUsd({ code, pips: sp, entry, stake: st, multiplier: mu }) : Number(stopLoss);
+  const tp = tpp > 0 ? tradeEstimate.pipsToUsd({ code, pips: tpp, entry, stake: st, multiplier: mu }) : Number(takeProfit);
+  let slCapped = false;
+  if (sl > st) { sl = st; slCapped = true; }
+  if (!(sl > 0) || !(tp > 0)) throw new Error('SL/TP kwa pips ni ndogo/kubwa mno kwa stake hii — rekebisha pips.');
+  return { stopLoss: sl, takeProfit: tp, pipsMode: true, slCapped, entry, ctx };
+}
+
 /** Onyesho KABLA ya kufungua trade ya mkono (dashboard): faida/hasara zinazotarajiwa + S/R. Haifungui kitu. */
-async function previewManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier }) {
+async function previewManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier, slPips, tpPips }) {
   const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
   if (!code) throw new Error('Jozi (pair) inahitajika.');
   const dir = direction === 'SELL' ? 'SELL' : 'BUY';
+  const lim = await resolveManualLimits({ code, stake, multiplier, stopLoss, takeProfit, slPips, tpPips });
   const { est, text, ctx } = await buildTradeEstimate({
     code, direction: dir, stake: Number(stake) || STAKE_USD, multiplier: Number(multiplier) || MULTIPLIER,
-    slUsd: Number(stopLoss), tpUsd: Number(takeProfit),
+    slUsd: lim.stopLoss, tpUsd: lim.takeProfit, ctx: lim.ctx,
   });
   const sr = ctx && ctx.price > 0
     ? tradeEstimate.describeSr({ code, direction: dir, price: ctx.price, atr: ctx.atr, zones: ctx.zones, minRoomAtr: SR_MIN_ROOM_ATR })
     : null;
-  return { ok: true, estimate: est, text, srVerdict: sr ? sr.verdict : null, srOk: sr ? sr.ok : null };
+  return { ok: true, estimate: est, text, srVerdict: sr ? sr.verdict : null, srOk: sr ? sr.ok : null, pipsMode: lim.pipsMode, slCapped: !!lim.slCapped, slUsd: lim.stopLoss, tpUsd: lim.takeProfit };
 }
 
 // Ombi moja la positions za live linashirikiwa na trailing + onyo la SL (kila moja ingeomba contract_details upya kila dakika).
@@ -2297,7 +2317,7 @@ async function checkCorrelatedExposure(pair, direction) {
 const manualLock = { busy: false, recent: new Map() };
 const dupError = (msg) => Object.assign(new Error(msg), { code: 'DUPLICATE_OPEN' });
 
-async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier, allowDuplicate = false, allowCorrelated = false }) {
+async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier, slPips, tpPips, allowDuplicate = false, allowCorrelated = false }) {
   const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
   if (!code) throw new Error('Jozi (pair) inahitajika.');
   const dir = direction === 'SELL' ? 'SELL' : 'BUY';
@@ -2323,6 +2343,9 @@ async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, 
       const conflicts = findCorrelatedOpen(code, dir, live);
       if (conflicts.length && !allowCorrelated) throw corrError(correlatedMessage(code, dir, conflicts), conflicts);
     }
+    // Pips zikitolewa, zibadilishe kuwa dola (kwa bei ya sasa) kabla ya kutuma Deriv.
+    const lim = await resolveManualLimits({ code, stake, multiplier, stopLoss, takeProfit, slPips, tpPips });
+    stopLoss = lim.stopLoss; takeProfit = lim.takeProfit;
     manualLock.recent.set(key, Date.now());
     const result = await placeMultiplier({ pair: code, direction: dir, stake, stopLoss, takeProfit, multiplier });
 

@@ -17,6 +17,23 @@ const decimals = (code) => (pipSize(code) === 0.01 ? 3 : 5);
 const f2 = (n) => Number(n).toFixed(2);
 const pipsBetween = (code, a, b) => Math.abs(toPips(code, a - b));
 
+/**
+ * Pips → dola (Deriv Multipliers): $ = stake × multiplier × (pips × pipSize ÷ bei ya entry).
+ * Inarudisha null kama data haitoshi.
+ */
+function pipsToUsd({ code, pips, entry, stake, multiplier }) {
+  const p = Number(pips); const e = Number(entry); const n = Number(stake) * Number(multiplier);
+  if (!(p > 0) || !(e > 0) || !(n > 0)) return null;
+  return Number(((n * p * pipSize(code)) / e).toFixed(2));
+}
+
+/** Dola → pips (kinyume cha pipsToUsd). */
+function usdToPips({ code, usd, entry, stake, multiplier }) {
+  const u = Number(usd); const e = Number(entry); const n = Number(stake) * Number(multiplier);
+  if (!(u > 0) || !(e > 0) || !(n > 0)) return null;
+  return Number((((u / n) * e) / pipSize(code)).toFixed(1));
+}
+
 /** Nguvu ya zone kwa maneno: touches nyingi / timeframe kubwa = imara zaidi. */
 function zoneStrength(z) {
   const t = Number(z.touches) || 0;
@@ -81,8 +98,12 @@ function estimateTrade(o) {
   const code = String(o.code || '').toUpperCase();
   const buy = o.direction !== 'SELL';
   const stake = Number(o.stake); const mult = Number(o.multiplier);
-  const sl = Number(o.slUsd); const tp = Number(o.tpUsd);
+  let sl = Number(o.slUsd); let tp = Number(o.tpUsd);
   const notional = stake * mult;
+  // Hali ya PIPS: ikiwa slPips/tpPips zimetolewa, dola zinatokana na pips (si kinyume chake).
+  const slPipsIn = Number(o.slPips); const tpPipsIn = Number(o.tpPips);
+  if (slPipsIn > 0) sl = pipsToUsd({ code, pips: slPipsIn, entry: o.entry, stake, multiplier: mult }) ?? sl;
+  if (tpPipsIn > 0) tp = pipsToUsd({ code, pips: tpPipsIn, entry: o.entry, stake, multiplier: mult }) ?? tp;
   const est = {
     code, direction: buy ? 'BUY' : 'SELL', stake, multiplier: mult, notional: notional > 0 ? notional : null,
     maxLoss: Number.isFinite(sl) && sl > 0 ? sl : null,
@@ -164,4 +185,4 @@ function formatEstimate(est, { title = '📐 *Makadirio kulingana na entry*' } =
   return L.join('\n');
 }
 
-module.exports = { zoneStrength, describeSr, estimateTrade, formatEstimate };
+module.exports = { zoneStrength, describeSr, estimateTrade, formatEstimate, pipsToUsd, usdToPips };
