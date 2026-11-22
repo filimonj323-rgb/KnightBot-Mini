@@ -88,6 +88,7 @@
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL, DAILY_INTERVAL, HTF_GATE, DAILY_GATE, getTrends, DATA_SOURCE } = require('./forexSignal');
 const { checkRoom, toPips } = require('./supportResistance');
 const srAlerts = require('./srAlerts');
+const tradeEstimate = require('./tradeEstimate');
 const {
   placeMultiplier,
   getOpenPositions,
@@ -964,6 +965,56 @@ function realLimitReached(liveCount) {
  * songa Stop Loss kwenye Deriv — KAMWE kuipeleka nyuma (ratchet moja tu
  * kuelekea usalama/faida zaidi).
  */
+/**
+ * S/R + bei ya sasa ya jozi kwa makadirio ya trade. Jaribu data MPYA (cache ya forexSignal ni dakika 3), na ukishindwa
+ * tumia zones za mzunguko wa mwisho. Inarudisha null kama hakuna chochote.
+ */
+async function getSrContext(code) {
+  try {
+    const snap = await fetchForexSnapshot(`${code.slice(0, 3)}/${code.slice(3)}`, DEFAULT_INTERVAL);
+    return { zones: snap.srZones || [], price: snap.price, atr: snap.atr };
+  } catch (_) {
+    return lastSrZones.get(code) || null;
+  }
+}
+
+/**
+ * Makadirio ya faida/hasara kulingana na entry — inatumika KABLA ya kufungua (bila contractId; entry = bei ya sasa)
+ * na BAADA ya kufungua (entry halisi kutoka Deriv ikipatikana). Haitupi error kamwe kwa mwito wa arifa.
+ */
+async function buildTradeEstimate({ code, direction, stake, multiplier, slUsd, tpUsd, contractId = null, commission = null, ctx = null }) {
+  const c = ctx || (await getSrContext(code));
+  let entry = null;
+  if (contractId) {
+    try {
+      const d = await getContractDetails(contractId);
+      const e = Number(d?.entry_spot ?? d?.entry_tick);
+      if (e > 0) entry = e;
+    } catch (_) { /* tumia bei ya sasa */ }
+  }
+  if (!entry && c?.price > 0) entry = Number(c.price);
+  const est = tradeEstimate.estimateTrade({
+    code, direction, entry, stake, multiplier, slUsd, tpUsd, commission,
+    atr: c?.atr, zones: c?.zones || [],
+  });
+  return { est, text: tradeEstimate.formatEstimate(est), ctx: c };
+}
+
+/** Onyesho KABLA ya kufungua trade ya mkono (dashboard): faida/hasara zinazotarajiwa + S/R. Haifungui kitu. */
+async function previewManualTrade({ pair, direction, stake, stopLoss, takeProfit, multiplier }) {
+  const code = String(pair || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (!code) throw new Error('Jozi (pair) inahitajika.');
+  const dir = direction === 'SELL' ? 'SELL' : 'BUY';
+  const { est, text, ctx } = await buildTradeEstimate({
+    code, direction: dir, stake: Number(stake) || STAKE_USD, multiplier: Number(multiplier) || MULTIPLIER,
+    slUsd: Number(stopLoss), tpUsd: Number(takeProfit),
+  });
+  const sr = ctx && ctx.price > 0
+    ? tradeEstimate.describeSr({ code, direction: dir, price: ctx.price, atr: ctx.atr, zones: ctx.zones, minRoomAtr: SR_MIN_ROOM_ATR })
+    : null;
+  return { ok: true, estimate: est, text, srVerdict: sr ? sr.verdict : null, srOk: sr ? sr.ok : null };
+}
+
 // Ombi moja la positions za live linashirikiwa na trailing + onyo la SL (kila moja ingeomba contract_details upya kila dakika).
 let liveCache = { at: 0, data: null };
 let livePending = null;
@@ -1586,7 +1637,7 @@ async function evaluatePairInner(pairInfo) {
 // kwa sababu trades zilizofunguliwa mapema KWENYE MZUNGUKO HUU zinabadilisha
 // nafasi (max concurrent) na exposure ya currency.
 async function executeCandidate(c) {
-  const { code, symbol, sig, slUsd, tpUsd, riskSource } = c;
+  const { code, symbol, sig, slUsd, tpUsd, riskSource, snapshot: candSnap } = c;
   if (inFlightPairs.has(code)) return;
   inFlightPairs.add(code);
   try {
@@ -1671,6 +1722,23 @@ async function executeCandidate(c) {
       signalStrength: sig.strength,
     });
 
+    // Makadirio ya faida/hasara kulingana na entry + S/R (haizuii arifa kama yakishindwa).
+    let estText = '';
+    let srVerdict = '';
+    try {
+      const ctx = candSnap ? { zones: candSnap.srZones || [], price: candSnap.price, atr: candSnap.atr } : null;
+      const { text } = await buildTradeEstimate({
+        code, direction: sig.direction, stake: STAKE_USD, multiplier: MULTIPLIER,
+        slUsd: slFinal, tpUsd: tpFinal, contractId: result.contract_id, commission: result.commission, ctx,
+      });
+      estText = `${text}\n\n`;
+      if (ctx && ctx.price > 0) {
+        srVerdict = tradeEstimate.describeSr({ code, direction: sig.direction, price: ctx.price, atr: ctx.atr, zones: ctx.zones, minRoomAtr: SR_MIN_ROOM_ATR }).verdict;
+      }
+    } catch (err) {
+      console.error(`[autoTrader] Makadirio ya ${code} yameshindwa:`, err.message);
+    }
+
     await notify(
       `🤖 *AUTO-TRADE IMEFUNGULIWA*\n\n` +
         `Jozi: *${code}*\n` +
@@ -1682,6 +1750,8 @@ async function executeCandidate(c) {
         `Msingi wa SL/TP: ${riskSource}\n` +
         `Bei ya ununuzi: $${fmt(result.buy_price)}\n` +
         `🆔 Contract ID: ${result.contract_id}\n\n` +
+        estText +
+        (srVerdict ? `🧱 *S/R:* ${srVerdict}\n\n` : '') +
         (sig.notes.length ? `🧠 Sababu:\n${sig.notes.map((n) => `   • ${n}`).join('\n')}\n\n` : '') +
         `⚠️ Trade hii ilifunguliwa KIOTOMATIKO kutokana na signal. Hii SI ushauri wa kifedha.`
     );
@@ -1692,6 +1762,7 @@ async function executeCandidate(c) {
       `📡 *SIGNAL — ${code}* (Deriv)\n\n` +
         `${sig.direction === 'BUY' ? '🟢 BUY ⬆️' : '🔴 SELL ⬇️'}\n` +
         `💪 Nguvu: ${sig.strength}%\n` +
+        (srVerdict ? `\n🧱 *S/R:* ${srVerdict}\n` : '') +
         (sig.notes.length ? `\n🧠 Sababu:\n${sig.notes.slice(0, 3).map((n) => `• ${n}`).join('\n')}\n` : '') +
         `\n⚠️ Hii SI ushauri wa kifedha. Trade kwa hatari yako mwenyewe.`
     ).catch(() => {});
@@ -2262,6 +2333,18 @@ async function placeManualTrade({ pair, direction, stake, stopLoss, takeProfit, 
     } catch (err) {
       console.error('[autoTrader] Imeshindwa kuandikisha trade ya mkono (trade yenyewe imefunguliwa):', err.message);
     }
+    try {
+      const { text } = await buildTradeEstimate({
+        code, direction: dir, stake: Number(stake) || Number(result.buy_price) || 0,
+        multiplier: Number(multiplier) || MULTIPLIER,
+        slUsd: Number.isFinite(result.stop_loss) ? result.stop_loss : Number(stopLoss),
+        tpUsd: Number.isFinite(result.take_profit) ? result.take_profit : Number(takeProfit),
+        contractId: result.contract_id, commission: result.commission,
+      });
+      result.estimateText = text; // dashboard/commands wanaiongeza kwenye arifa
+    } catch (err) {
+      console.error('[autoTrader] Makadirio ya trade ya mkono yameshindwa:', err.message);
+    }
     return result;
   } finally {
     manualLock.busy = false;
@@ -2278,6 +2361,7 @@ module.exports = {
   setSrAlerts,
   setAutoEnabled,
   placeManualTrade,
+  previewManualTrade,
   checkCorrelatedExposure,
   getWinRateStats,
   getTradeHistory,
