@@ -17,7 +17,7 @@ module.exports = {
     if (!args[0]) {
       return extra.reply(
         `🔔 Arifa za S/R & SL: *${s.srAlerts ? 'ON ✅' : 'OFF ⛔'}*\n` +
-          `   • Matukio ya S/R: kuzuia/kuachia, kukaribia zone, kuvunjwa kwa zone\n` +
+          `   • Matukio ya S/R (kukaribia zone, kuvunjwa kwa zone): kwa jozi zenye trade WAZI tu\n` +
           `   • Trade ikifika ${s.slWarnPct}% ya SL ⚠️ na ${s.slDangerPct}% 🚨\n\n` +
           `Kubadilisha: *.fxsralerts on* au *.fxsralerts off*`
       );
