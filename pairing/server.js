@@ -84,6 +84,7 @@ const autoTrader = require('../utils/autoTrader');
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = require('../utils/forexSignal');
 const { runBacktest } = require('../utils/backtest');
 const srLib = require('../utils/supportResistance');
+const tradeEstimateLib = require('../utils/tradeEstimate');
 const economicCalendar = require('../utils/economicCalendar');
 const newsTrader = require('../utils/newsTrader');
 const newsObserver = require('../utils/newsObserver');
@@ -115,7 +116,7 @@ function buildSrPayload(code, snapshot, direction) {
   const price = snapshot.price;
   const minRoomAtr = autoTrader.getStatus().srMinRoomAtr;
   const pips = (d) => Number(Math.abs(srLib.toPips(code, d)).toFixed(1));
-  const mk = (z) => ({ price: z.price, pips: pips(z.price - price), touches: z.touches, tf: z.tf });
+  const mk = (z) => ({ price: z.price, pips: pips(z.price - price), touches: z.touches, tf: z.tf, ...tradeEstimateLib.zoneStrength(z) });
   const sorted = [...zones].sort((a, b) => a.price - b.price);
   const above = sorted.filter((z) => z.low > price).slice(0, 3).map(mk);
   const below = sorted.filter((z) => z.high < price).slice(-3).reverse().map(mk);
@@ -129,7 +130,8 @@ function buildSrPayload(code, snapshot, direction) {
       roomPips: r.roomPrice == null ? null : pips(r.roomPrice),
     };
   }
-  return { room, above, below, atrPips: Number(srLib.toPips(code, snapshot.atr).toFixed(1)), minRoomAtr, filterOn: autoTrader.getStatus().srFilter };
+  const explain = tradeEstimateLib.describeSr({ code, direction, price, atr: snapshot.atr, zones, minRoomAtr });
+  return { room, verdict: explain.verdict, above, below, atrPips: Number(srLib.toPips(code, snapshot.atr).toFixed(1)), minRoomAtr, filterOn: autoTrader.getStatus().srFilter };
 }
 
 const FX_SYMBOL_MAP = {
@@ -1266,6 +1268,20 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, ...check });
       }
 
+      // Onyesho la faida/hasara KABLA ya kufungua trade ya mkono (haifungui kitu).
+      if (req.method === 'POST' && req.url === '/api/admin/fx/open-preview') {
+        const body = await readJsonBody(req);
+        try {
+          return sendJson(res, 200, await autoTrader.previewManualTrade({
+            pair: body.pair, direction: body.direction === 'SELL' ? 'SELL' : 'BUY',
+            stake: Number(body.stake), stopLoss: Number(body.stopLoss), takeProfit: Number(body.takeProfit),
+            multiplier: body.multiplier ? Number(body.multiplier) : undefined,
+          }));
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: err.message });
+        }
+      }
+
       if (req.method === 'POST' && req.url === '/api/admin/fx/open') {
         const body = await readJsonBody(req);
         const pair = String(body.pair || '').toUpperCase().replace(/[^A-Z]/g, '');
@@ -1298,6 +1314,7 @@ async function handlePairingRequest(req, res) {
             `Multiplier: x${body.multiplier || 100}\n` +
             `Bei ya ununuzi: $${result.buy_price}\n` +
             `🆔 Contract ID: ${result.contract_id}\n\n` +
+            (result.estimateText ? `${result.estimateText}\n\n` : '') +
             (body.allowCorrelated === true ? `⚠️ Onyo la correlation lilithibitishwa kupuuzwa.\n` : '') +
             `⚠️ Trade hii ilifunguliwa KWA MKONO kupitia admin dashboard.`
         );
