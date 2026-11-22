@@ -447,7 +447,7 @@
             </select>
           </div>
           <div>
-            <label>Bars (candles 1h)</label>
+            <label>Bars (candles za timeframe)</label>
             <input id="btBars" type="number" value="1500" min="200" max="5000" step="100" />
           </div>
           <div>
@@ -462,6 +462,28 @@
             <option value="on">Washa (ON)</option>
             <option value="off">Zima (OFF)</option>
           </select>
+        </div>
+        <div class="grid3" style="margin-bottom:12px;">
+          <div>
+            <label>Timeframe ya signal</label>
+            <select id="btInterval">
+              <option value="">1h (kama live)</option>
+              <option value="30min">30min</option>
+              <option value="15min">15min</option>
+              <option value="5min">5min</option>
+            </select>
+          </div>
+          <div>
+            <label>Kichujio cha S/R</label>
+            <select id="btSr">
+              <option value="">Zima (OFF) — rekodi tu</option>
+              <option value="on">Washa (ON) — zuia entry karibu na S/R</option>
+            </select>
+          </div>
+          <div>
+            <label>Candles za kupima pips baada ya entry</label>
+            <input id="btHorizon" type="number" value="24" min="4" max="200" step="4" />
+          </div>
         </div>
         <div class="grid2">
           <div>
@@ -833,7 +855,7 @@
       const blocked = s.correlationBlocked ? ' <span class="muted" title="Correlation guard imezuia trade mpya">🔗 blocked</span>' : '';
       return `<div class="signal-row">
         <span>${s.code}</span>
-        <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}${blocked}${s.gated ? ` <span class="muted" title="1h ilisema ${s.rawDirection}, timeframe kubwa inapinga">⛔ gate ${s.gated === 'DAILY' ? '1d' : '4h'}</span>` : ''}</span>
+        <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}${blocked}${s.gated ? ` <span class="muted" title="1h ilisema ${s.rawDirection}, timeframe kubwa inapinga">⛔ gate ${s.gated === 'DAILY' ? '1d' : '4h'}</span>` : ''}${s.sr && !s.sr.ok ? ` <span class="muted" title="${s.sr.direction === 'BUY' ? 'Resistance' : 'Support'} iko karibu: ${s.sr.roomPips} pips (${s.sr.roomAtr}×ATR)${a.srFilter ? ' — trade imezuiwa' : ' — kichujio cha S/R kimezimwa, trade haizuiwi'}">🧱 S/R ${s.sr.roomPips}p</span>` : ''}</span>
       </div>`;
     }).join('');
     if (!a.enabled) {
@@ -864,6 +886,7 @@
         Trades wazi: ${(a.openTrades || []).length}/${a.maxConcurrentTrades}${a.accountMode === 'real' ? ` (REAL: kikomo ${a.realMaxOpen})` : ''} ·
         Hasara mfululizo (juu): ${a.maxConsecutiveLosses} · Hasara ya siku (juu): $${a.maxDailyLossUsd} ·
         Jozi zote zinakaguliwa kila mzunguko; trade zinafunguliwa kwa strength kubwa kwanza.
+        <br>🧱 Kichujio cha S/R: <b>${a.srFilter ? 'ON' : 'OFF'}</b> (inazuia entry ikiwa S/R iko chini ya ${a.srMinRoomAtr}×ATR mbele — badilisha kwa env AUTO_TRADE_SR_FILTER).
       </div>
       <div style="margin-top:12px;">${signalsHtml}</div>
       <div class="section-label" style="margin-top:12px; margin-bottom:6px;">Currency Exposure (correlation guard, kikomo ±${a.maxCurrencyExposure})</div>
@@ -951,6 +974,20 @@
         body += `<div class="sg-row"><span class="sg-k">Signal</span><span>${directionBadge(s.direction)}${rawNote}</span></div>`;
         body += `<div class="sg-row"><span class="sg-k">Strength</span><span>${s.strength}%</span></div>`;
         if (t) body += `<div class="sg-row"><span class="sg-k">1h · 4h · 1d</span><span>1h ${tfArrow(t.h1)} · 4h ${tfArrow(t.h4)} · 1d ${tfArrow(t.d1)}${gate}</span></div>`;
+        const sr = s.sr;
+        if (sr) {
+          const rm = sr.room;
+          if (rm) {
+            const lvl = rm.level != null ? `${rm.direction === 'BUY' ? 'resistance' : 'support'} ${Number(rm.level).toFixed(rm.level > 20 ? 3 : 5)} (${rm.roomPips}p · ${rm.roomAtr}×ATR${rm.tf ? ' · ' + rm.tf : ''})` : 'hakuna S/R mbele';
+            body += `<div class="sg-row"><span class="sg-k">S/R mbele</span><span class="${rm.ok ? '' : 'dir-sell'}">${rm.ok ? '✅' : '🧱'} ${lvl}</span></div>`;
+          }
+          const fmtLv = (arr) => (arr || []).map((z) => `${Number(z.price).toFixed(z.price > 20 ? 3 : 5)} <span class="muted">(${z.pips}p ×${z.touches} ${z.tf})</span>`).join('<br>') || '<span class="muted">—</span>';
+          if (sr.above || sr.below) {
+            body += `<div class="sg-row"><span class="sg-k">Resistance 🔴</span><span>${fmtLv(sr.above)}</span></div>`;
+            body += `<div class="sg-row"><span class="sg-k">Support 🟢</span><span>${fmtLv(sr.below)}</span></div>`;
+            if (sr.atrPips != null) body += `<div class="sg-row"><span class="sg-k">ATR(1h)</span><span>${sr.atrPips} pips</span></div>`;
+          }
+        }
         body += `<div class="sg-row"><span class="sg-k">Ilipoangaliwa</span><span class="muted">${timeAgo(s.checkedAt)}</span></div>`;
         const notes = (s.notes || []).map((n) => `<li>${String(n).replace(/</g, '&lt;')}</li>`).join('');
         if (notes) body += `<ul class="sg-notes">${notes}</ul>`;
@@ -991,7 +1028,7 @@
         signalState[code] = {
           direction: data.direction, strength: data.strength, notes: data.notes,
           rawDirection: data.rawDirection, rawStrength: data.rawStrength,
-          gated: data.gated, trends: data.trends, checkedAt: data.checkedAt, loading: false,
+          gated: data.gated, trends: data.trends, sr: data.sr, checkedAt: data.checkedAt, loading: false,
         };
       } catch (e) {
         // Weka hitilafu tu kama hakuna signal ya zamani ya kuonyesha.
@@ -1013,7 +1050,7 @@
       signalState[code] = {
         direction: data.direction, strength: data.strength, notes: data.notes,
         rawDirection: data.rawDirection, rawStrength: data.rawStrength,
-        gated: data.gated, trends: data.trends,
+        gated: data.gated, trends: data.trends, sr: data.sr,
         checkedAt: data.checkedAt, loading: false,
       };
     } catch (e) {
@@ -1390,6 +1427,8 @@
             direction: s.direction, strength: s.strength, notes: s.notes,
             rawDirection: s.rawDirection, rawStrength: s.rawStrength,
             gated: s.gated, trends: s.trends,
+            // S/R ya overview ni "room" tu; zones (above/below) zinabaki kutoka /fx/signal.
+            sr: s.sr ? { ...((signalState[s.code] || {}).sr || {}), room: s.sr } : (signalState[s.code] || {}).sr,
             checkedAt: s.checkedAt, error: s.error, loading: false,
           };
         }
@@ -1510,11 +1549,12 @@
         <div class="bt-stat"><div class="n">${r.maxConsecutiveLosses}</div><div class="l">Hasara Mfululizo</div></div>
       </div>
       <div class="muted" style="font-size:11px; margin-bottom:10px;">
-        📅 ${r.from} → ${r.to} (candles ${r.bars}) · Stake $${r.stake} · Multiplier x${r.multiplier} · Kikomo ≥${r.strengthThreshold}% · Patterns: ${r.patterns ? 'ON' : 'OFF'}
+        📅 ${r.from} → ${r.to} (candles ${r.bars}) · Stake $${r.stake} · Multiplier x${r.multiplier} · Kikomo ≥${r.strengthThreshold}% · Patterns: ${r.patterns ? 'ON' : 'OFF'} · TF: ${r.interval} (HTF ${r.htfInterval}) · S/R filter: ${r.sr && r.sr.filter ? `ON (zimezuiwa ${r.sr.blocked})` : 'OFF'}
         ${r.stillOpenAtEnd ? '<br>ℹ️ Trade 1 ilibaki "wazi" mwishoni mwa data (haijahesabiwa hapo juu).' : ''}
       </div>
     `;
 
+    const excursionHtml = renderExcursion(r);
     const lastTrades = r.trades.slice(-30).reverse();
     const rows = lastTrades.map((t) => {
       const dirClass = t.direction === 'BUY' ? 'dir-buy' : 'dir-sell';
@@ -1547,7 +1587,44 @@
       </div>
     `;
 
-    document.getElementById('btResultsBox').innerHTML = stats + table + warning;
+    document.getElementById('btResultsBox').innerHTML = stats + excursionHtml + table + warning;
+  }
+
+  // 📏 Bei ilisogea pips ngapi baada ya entry (MFE/MAE + first-touch + S/R karibu vs njia wazi)
+  function renderExcursion(r) {
+    const ex = r.excursion;
+    if (!ex || !ex.n) return '';
+    const th = Object.entries(ex.byThreshold).map(([t, v]) => {
+      const edge = v.winFirstPct - v.lossFirstPct;
+      const cls = edge > 15 ? 'pl-pos' : edge < 0 ? 'pl-neg' : '';
+      return `<tr><td>+${t} / −${t} pips</td><td class="${cls}">${v.winFirstPct}%</td><td>${v.lossFirstPct}%</td><td>${v.reachedPct}%</td><td>${v.medianBars ? '~' + v.medianBars : '—'}</td></tr>`;
+    }).join('');
+    const cmp = (label, e) => e && e.n
+      ? `<tr><td>${label}</td><td>${e.n}</td><td class="pl-pos">${e.mfe.median}</td><td class="pl-neg">${e.mae.median}</td></tr>`
+      : '';
+    const near = cmp(`🧱 S/R karibu (&lt;${r.sr.minRoomAtr}×ATR)`, r.excursionNearSr);
+    const open = cmp('🛣️ Njia wazi', r.excursionOpenRoad);
+    return `
+      <div class="section-label">📏 Bei ilisogea kiasi gani baada ya entry (candles ${r.horizon} za ${r.interval} · entries ${ex.n})</div>
+      <div class="stats" style="margin-bottom:12px;">
+        <div class="bt-stat"><div class="n">${r.avgSlPips}p</div><div class="l">SL ya wastani</div></div>
+        <div class="bt-stat"><div class="n">${r.avgTpPips}p</div><div class="l">TP ya wastani</div></div>
+        <div class="bt-stat"><div class="n pl-pos">${ex.mfe.median}p</div><div class="l">Faida (MFE) median</div></div>
+        <div class="bt-stat"><div class="n pl-neg">${ex.mae.median}p</div><div class="l">Kinyume (MAE) median</div></div>
+        <div class="bt-stat"><div class="n">${ex.mfe.p75}p</div><div class="l">MFE robo ya juu</div></div>
+        <div class="bt-stat"><div class="n">${ex.mae.p75}p</div><div class="l">MAE robo ya juu</div></div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Lengo / Hatari</th><th>Faida kwanza</th><th>Hasara kwanza</th><th>Ilifika +X</th><th>Candles hadi +X</th></tr></thead>
+        <tbody>${th}</tbody>
+      </table></div>
+      ${near || open ? `<div class="table-wrap" style="margin-top:10px;"><table>
+        <thead><tr><th>Aina ya entry</th><th>Entries</th><th>MFE median (p)</th><th>MAE median (p)</th></tr></thead>
+        <tbody>${near}${open}</tbody></table></div>` : ''}
+      <div class="muted" style="font-size:11px; margin:8px 0 14px;">
+        Linganisha "Faida kwanza" na "Hasara kwanza": ikiwa ya kwanza ni kubwa wazi kwa lengo dogo, entry fupi ina nafasi.
+        Spread ya Deriv inakula sehemu ya lengo dogo (5–10 pips) na backtest haihesabu spread.
+      </div>`;
   }
 
   async function runBacktestUI() {
@@ -1568,6 +1645,11 @@
       const pat = document.getElementById('btPatterns').value;
       if (pat === 'on') body.patterns = true;
       else if (pat === 'off') body.patterns = false;
+      const iv = document.getElementById('btInterval').value;
+      if (iv) body.interval = iv;
+      if (document.getElementById('btSr').value === 'on') body.sr = true;
+      const hz = document.getElementById('btHorizon').value;
+      if (hz) body.horizon = Number(hz);
       const stake = document.getElementById('btStake').value;
       if (stake) body.stake = Number(stake);
       const multiplier = document.getElementById('btMultiplier').value;
