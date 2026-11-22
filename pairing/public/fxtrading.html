@@ -394,13 +394,20 @@
             <input id="fStake" type="number" value="5" min="1" step="0.5" />
           </div>
           <div>
-            <label>Stop Loss ($)</label>
+            <label id="fSLLabel">Stop Loss ($)</label>
             <input id="fSL" type="number" value="3" min="0.1" step="0.1" />
           </div>
           <div>
-            <label>Take Profit ($)</label>
+            <label id="fTPLabel">Take Profit ($)</label>
             <input id="fTP" type="number" value="6" min="0.1" step="0.1" />
           </div>
+        </div>
+        <div style="margin:8px 0 0;">
+          <label>SL / TP ziwekwe kwa</label>
+          <select id="fUnit">
+            <option value="usd">Dola ($) — makadirio yanaonyesha pips</option>
+            <option value="pips">Pips — makadirio yanaonyesha faida/hasara ($)</option>
+          </select>
         </div>
         <div id="openPreview" class="muted" style="margin:10px 0; font-size:12px; line-height:1.5; white-space:pre-wrap;">Jaza pair, stake, SL na TP — faida/hasara zinazotarajiwa zitaonekana hapa kabla ya kufungua.</div>
         <button class="primary" onclick="openTrade()" id="openBtn">Fungua Trade</button>
@@ -1511,9 +1518,16 @@
       direction: document.getElementById('fDirection').value,
       multiplier: Number(document.getElementById('fMultiplier').value),
       stake: Number(document.getElementById('fStake').value),
-      stopLoss: Number(document.getElementById('fSL').value),
-      takeProfit: Number(document.getElementById('fTP').value),
+      ...(isPipsMode()
+        ? { slPips: Number(document.getElementById('fSL').value), tpPips: Number(document.getElementById('fTP').value), stopLoss: 0, takeProfit: 0 }
+        : { stopLoss: Number(document.getElementById('fSL').value), takeProfit: Number(document.getElementById('fTP').value) }),
     };
+  }
+  function isPipsMode() { const u = document.getElementById('fUnit'); return !!u && u.value === 'pips'; }
+  function applyUnitLabels() {
+    const pips = isPipsMode();
+    document.getElementById('fSLLabel').textContent = pips ? 'Stop Loss (pips)' : 'Stop Loss ($)';
+    document.getElementById('fTPLabel').textContent = pips ? 'Take Profit (pips)' : 'Take Profit ($)';
   }
   function previewText(p) {
     const e = p.estimate || {};
@@ -1521,6 +1535,7 @@
     L.push(`${e.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ${e.code} · stake $${e.stake} · x${e.multiplier}`);
     if (e.target != null) L.push(`🎯 Faida ukigonga TP: +$${e.target.toFixed(2)}${e.profitPctOfStake != null ? ' (' + e.profitPctOfStake + '% ya stake)' : ''}${e.tpPips != null ? ' · ≈ ' + e.tpPips + ' pips' : ''}`);
     if (e.maxLoss != null) L.push(`🛑 Hasara ukigonga SL: -$${e.maxLoss.toFixed(2)}${e.lossPctOfStake != null ? ' (' + e.lossPctOfStake + '% ya stake)' : ''}${e.slPips != null ? ' · ≈ ' + e.slPips + ' pips' : ''}`);
+    if (p.slCapped) L.push('⚠️ SL ya pips ilizidi stake — imepunguzwa hadi stake ($' + Number(p.slUsd).toFixed(2) + ') (hasara ya juu ya Multipliers).');
     if (e.rr != null) L.push(`⚖️ Risk:Reward = 1 : ${e.rr}${e.rr < 1 ? ' ⚠️ faida lengwa ndogo kuliko hatari' : ''}`);
     if (e.srTp) L.push(e.srTp.blocked ? `🚧 ${e.direction === 'BUY' ? 'Resistance' : 'Support'} iko KABLA ya TP (pips ${e.srTp.pips}, ${e.srTp.label} ${e.srTp.stars}) — bei inaweza kugeuka kabla ya kufika TP` : `✅ Hakuna ${e.direction === 'BUY' ? 'resistance' : 'support'} kati ya entry na TP`);
     if (e.srSl) L.push(e.srSl.protected ? `🛡️ ${e.direction === 'BUY' ? 'Support' : 'Resistance'} iko kabla ya SL (${e.srSl.label} ${e.srSl.stars})` : `ℹ️ Hakuna ${e.direction === 'BUY' ? 'support' : 'resistance'} kabla ya SL — SL ndiyo ulinzi pekee`);
@@ -1532,7 +1547,8 @@
     const box = document.getElementById('openPreview');
     if (!box) return null;
     const body = readOpenForm();
-    if (!(body.stake > 0) || !(body.stopLoss > 0) || !(body.takeProfit > 0)) {
+    const slV = isPipsMode() ? body.slPips : body.stopLoss; const tpV = isPipsMode() ? body.tpPips : body.takeProfit;
+    if (!(body.stake > 0) || !(slV > 0) || !(tpV > 0)) {
       box.textContent = 'Jaza stake, SL na TP (zaidi ya 0) kuona faida/hasara zinazotarajiwa.';
       return null;
     }
@@ -1552,9 +1568,16 @@
     clearTimeout(previewTimer);
     previewTimer = setTimeout(fetchOpenPreview, 700);
   }
-  ['fPair', 'fDirection', 'fMultiplier', 'fStake', 'fSL', 'fTP'].forEach((id) => {
+  ['fPair', 'fDirection', 'fMultiplier', 'fStake', 'fSL', 'fTP', 'fUnit'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) { el.addEventListener('input', schedulePreview); el.addEventListener('change', schedulePreview); }
+  });
+  const unitSel = document.getElementById('fUnit');
+  if (unitSel) unitSel.addEventListener('change', () => {
+    // Weka thamani za msingi zinazolingana na kipimo kipya (pips: SL 10 / TP 20; dola: SL 3 / TP 6)
+    document.getElementById('fSL').value = isPipsMode() ? 10 : 3;
+    document.getElementById('fTP').value = isPipsMode() ? 20 : 6;
+    applyUnitLabels();
   });
   schedulePreview();
 
@@ -1565,19 +1588,12 @@
     toast.textContent = '';
     btn.disabled = true;
     try {
-      const body = {
-        pair: document.getElementById('fPair').value,
-        direction: document.getElementById('fDirection').value,
-        multiplier: Number(document.getElementById('fMultiplier').value),
-        stake: Number(document.getElementById('fStake').value),
-        stopLoss: Number(document.getElementById('fSL').value),
-        takeProfit: Number(document.getElementById('fTP').value),
-      };
+      const body = readOpenForm();
       // Thibitisha kwa kuona faida/hasara zinazotarajiwa KABLA ya kufungua.
       const pv = await fetchOpenPreview();
       const goTrade = await showWarning(
         `Thibitisha ${body.direction} ${body.pair}`,
-        pv ? previewText(pv) : `Stake $${body.stake} · SL $${body.stopLoss} · TP $${body.takeProfit} · x${body.multiplier}\n(Makadirio ya bei hayakupatikana.)`,
+        pv ? previewText(pv) : (body.slPips ? `Stake $${body.stake} · SL ${body.slPips} pips · TP ${body.tpPips} pips · x${body.multiplier}` : `Stake $${body.stake} · SL $${body.stopLoss} · TP $${body.takeProfit} · x${body.multiplier}`) + '\n(Makadirio ya bei hayakupatikana.)',
         'Ndiyo, fungua trade'
       );
       if (!goTrade) {
