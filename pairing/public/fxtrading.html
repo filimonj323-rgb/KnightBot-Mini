@@ -402,6 +402,7 @@
             <input id="fTP" type="number" value="6" min="0.1" step="0.1" />
           </div>
         </div>
+        <div id="openPreview" class="muted" style="margin:10px 0; font-size:12px; line-height:1.5; white-space:pre-wrap;">Jaza pair, stake, SL na TP — faida/hasara zinazotarajiwa zitaonekana hapa kabla ya kufungua.</div>
         <button class="primary" onclick="openTrade()" id="openBtn">Fungua Trade</button>
         <div class="toast" id="openToast"></div>
       </div>
@@ -858,12 +859,25 @@
         <span class="${dirClass}">${s.direction} (${s.strength}%) ${ok ? '✅' : ''}${blocked}${s.gated ? ` <span class="muted" title="1h ilisema ${s.rawDirection}, timeframe kubwa inapinga">⛔ gate ${s.gated === 'DAILY' ? '1d' : '4h'}</span>` : ''}${s.sr && !s.sr.ok ? ` <span class="muted" title="${s.sr.direction === 'BUY' ? 'Resistance' : 'Support'} iko karibu: ${s.sr.roomPips} pips (${s.sr.roomAtr}×ATR)${a.srFilter ? ' — trade imezuiwa' : ' — kichujio cha S/R kimezimwa, trade haizuiwi'}">🧱 S/R ${s.sr.roomPips}p</span>` : ''}</span>
       </div>`;
     }).join('');
+    // Swichi hizi zinaonekana DAIMA (hata Auto-Trade ikiwa OFF) — S/R filter, arifa za S/R+SL, trailing.
+    const settingsHtml = `
+      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🧱 Kichujio cha S/R (inazuia entry S/R ikiwa chini ya ${a.srMinRoomAtr}×ATR mbele)</div>
+      <span class="badge ${a.srFilter ? 'on' : 'off'}">${a.srFilter ? 'ON' : 'OFF'}</span>
+      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleSetting('sr-filter', ${!a.srFilter})">${a.srFilter ? 'Zima' : 'Washa'}</button>
+      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🔔 Arifa za S/R & onyo la SL (${a.slWarnPct}% ⚠️ / ${a.slDangerPct}% 🚨 ya SL)</div>
+      <span class="badge ${a.srAlerts ? 'on' : 'off'}">${a.srAlerts ? 'ON' : 'OFF'}</span>
+      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleSetting('sr-alerts', ${!a.srAlerts})">${a.srAlerts ? 'Zima' : 'Washa'}</button>
+      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🪤 Trailing Stop (breakeven @R${a.trailBreakevenTriggerR}, profit-lock @R${a.trailProfitlockTriggerR})</div>
+      <span class="badge ${a.trailingEnabled ? 'on' : 'off'}">${a.trailingEnabled ? 'ON' : 'OFF'}</span>
+      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleTrailing(${!a.trailingEnabled})">${a.trailingEnabled ? 'Zima' : 'Washa'}</button>
+    `;
     if (!a.enabled) {
       document.getElementById('autoTraderBox').innerHTML = `
         <span class="badge off">OFF</span>
         <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleAuto(true)">Washa Auto-Trade</button>
         <div class="muted" style="margin-top:10px;">Bot haifungui trades mpya. Trades zilizo wazi bado zinafuatiliwa na kurekodiwa.</div>
         <div class="muted" style="margin-top:6px; font-size:11px;">Threshold: ≥${a.strengthThreshold}%</div>
+        ${settingsHtml}
         <div style="margin-top:12px;">${signalsHtml}</div>
       `;
       return;
@@ -887,20 +901,10 @@
         Hasara mfululizo (juu): ${a.maxConsecutiveLosses} · Hasara ya siku (juu): $${a.maxDailyLossUsd} ·
         Jozi zote zinakaguliwa kila mzunguko; trade zinafunguliwa kwa strength kubwa kwanza.
       </div>
-      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🧱 Kichujio cha S/R (inazuia entry S/R ikiwa chini ya ${a.srMinRoomAtr}×ATR mbele)</div>
-      <span class="badge ${a.srFilter ? 'on' : 'off'}">${a.srFilter ? 'ON' : 'OFF'}</span>
-      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleSetting('sr-filter', ${!a.srFilter})">${a.srFilter ? 'Zima' : 'Washa'}</button>
-      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🔔 Arifa za S/R & onyo la SL (${a.slWarnPct}% ⚠️ / ${a.slDangerPct}% 🚨 ya SL)</div>
-      <span class="badge ${a.srAlerts ? 'on' : 'off'}">${a.srAlerts ? 'ON' : 'OFF'}</span>
-      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleSetting('sr-alerts', ${!a.srAlerts})">${a.srAlerts ? 'Zima' : 'Washa'}</button>
+      ${settingsHtml}
       <div style="margin-top:12px;">${signalsHtml}</div>
       <div class="section-label" style="margin-top:12px; margin-bottom:6px;">Currency Exposure (correlation guard, kikomo ±${a.maxCurrencyExposure})</div>
       <div style="font-size:11px;">${exposureHtml}</div>
-      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🪤 Trailing Stop (breakeven @R${a.trailBreakevenTriggerR}, profit-lock @R${a.trailProfitlockTriggerR})</div>
-      <span class="badge ${a.trailingEnabled ? 'on' : 'off'}">${a.trailingEnabled ? 'ON' : 'OFF'}</span>
-      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleTrailing(${!a.trailingEnabled})">
-        ${a.trailingEnabled ? 'Zima' : 'Washa'}
-      </button>
       <div class="muted" style="margin-top:8px; font-size:11px;">Ukaguzi wa mwisho: ${timeAgo(a.lastCycleAt)}</div>
     `;
   }
@@ -995,11 +999,13 @@
             const lvl = rm.level != null ? `${rm.direction === 'BUY' ? 'resistance' : 'support'} ${Number(rm.level).toFixed(rm.level > 20 ? 3 : 5)} (${rm.roomPips}p · ${rm.roomAtr}×ATR${rm.tf ? ' · ' + rm.tf : ''})` : 'hakuna S/R mbele';
             body += `<div class="sg-row"><span class="sg-k">S/R mbele</span><span class="${rm.ok ? '' : 'dir-sell'}">${rm.ok ? '✅' : '🧱'} ${lvl}</span></div>`;
           }
-          const fmtLv = (arr) => (arr || []).map((z) => `${Number(z.price).toFixed(z.price > 20 ? 3 : 5)} <span class="muted">(${z.pips}p ×${z.touches} ${z.tf})</span>`).join('<br>') || '<span class="muted">—</span>';
+          const fmtLv = (arr) => (arr || []).map((z) => `${Number(z.price).toFixed(z.price > 20 ? 3 : 5)} <span class="muted">(pips ${z.pips} · ${z.label || ''} ${z.stars || ''} · ${z.tf})</span>`).join('<br>') || '<span class="muted">—</span>';
           if (sr.above || sr.below) {
             body += `<div class="sg-row"><span class="sg-k">Resistance 🔴</span><span>${fmtLv(sr.above)}</span></div>`;
             body += `<div class="sg-row"><span class="sg-k">Support 🟢</span><span>${fmtLv(sr.below)}</span></div>`;
             if (sr.atrPips != null) body += `<div class="sg-row"><span class="sg-k">ATR(1h)</span><span>${sr.atrPips} pips</span></div>`;
+            if (sr.verdict) body += `<div class="sg-row"><span class="sg-k">👉 Maana</span><span>${String(sr.verdict).replace(/</g, '&lt;')}</span></div>`;
+            body += `<div class="muted" style="font-size:11px; margin:4px 0;">Resistance = ukuta wa juu (bei hukwama/hugeuka chini). Support = sakafu (bei hushikiliwa/hugeuka juu). ★ = nguvu ya zone.</div>`;
           }
         }
         body += `<div class="sg-row"><span class="sg-k">Ilipoangaliwa</span><span class="muted">${timeAgo(s.checkedAt)}</span></div>`;
@@ -1496,6 +1502,62 @@
     }
   }
 
+  // ── Onyesho la faida/hasara KABLA ya kufungua trade ya mkono ──
+  let previewTimer = null;
+  let previewSeq = 0;
+  function readOpenForm() {
+    return {
+      pair: document.getElementById('fPair').value,
+      direction: document.getElementById('fDirection').value,
+      multiplier: Number(document.getElementById('fMultiplier').value),
+      stake: Number(document.getElementById('fStake').value),
+      stopLoss: Number(document.getElementById('fSL').value),
+      takeProfit: Number(document.getElementById('fTP').value),
+    };
+  }
+  function previewText(p) {
+    const e = p.estimate || {};
+    const L = [];
+    L.push(`${e.direction === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ${e.code} · stake $${e.stake} · x${e.multiplier}`);
+    if (e.target != null) L.push(`🎯 Faida ukigonga TP: +$${e.target.toFixed(2)}${e.profitPctOfStake != null ? ' (' + e.profitPctOfStake + '% ya stake)' : ''}${e.tpPips != null ? ' · ≈ ' + e.tpPips + ' pips' : ''}`);
+    if (e.maxLoss != null) L.push(`🛑 Hasara ukigonga SL: -$${e.maxLoss.toFixed(2)}${e.lossPctOfStake != null ? ' (' + e.lossPctOfStake + '% ya stake)' : ''}${e.slPips != null ? ' · ≈ ' + e.slPips + ' pips' : ''}`);
+    if (e.rr != null) L.push(`⚖️ Risk:Reward = 1 : ${e.rr}${e.rr < 1 ? ' ⚠️ faida lengwa ndogo kuliko hatari' : ''}`);
+    if (e.srTp) L.push(e.srTp.blocked ? `🚧 ${e.direction === 'BUY' ? 'Resistance' : 'Support'} iko KABLA ya TP (pips ${e.srTp.pips}, ${e.srTp.label} ${e.srTp.stars}) — bei inaweza kugeuka kabla ya kufika TP` : `✅ Hakuna ${e.direction === 'BUY' ? 'resistance' : 'support'} kati ya entry na TP`);
+    if (e.srSl) L.push(e.srSl.protected ? `🛡️ ${e.direction === 'BUY' ? 'Support' : 'Resistance'} iko kabla ya SL (${e.srSl.label} ${e.srSl.stars})` : `ℹ️ Hakuna ${e.direction === 'BUY' ? 'support' : 'resistance'} kabla ya SL — SL ndiyo ulinzi pekee`);
+    if (p.srVerdict) L.push(`🧱 S/R: ${p.srVerdict}`);
+    L.push('Makadirio tu (hayajumuishi spread/slippage).');
+    return L.join('\n');
+  }
+  async function fetchOpenPreview() {
+    const box = document.getElementById('openPreview');
+    if (!box) return null;
+    const body = readOpenForm();
+    if (!(body.stake > 0) || !(body.stopLoss > 0) || !(body.takeProfit > 0)) {
+      box.textContent = 'Jaza stake, SL na TP (zaidi ya 0) kuona faida/hasara zinazotarajiwa.';
+      return null;
+    }
+    const seq = ++previewSeq;
+    box.textContent = '⏳ Inakadiria faida/hasara...';
+    try {
+      const p = await api('/api/admin/fx/open-preview', { method: 'POST', body: JSON.stringify(body) });
+      if (seq !== previewSeq) return null; // ombi jipya limeshaanza
+      box.textContent = previewText(p);
+      return p;
+    } catch (e) {
+      if (seq === previewSeq) box.textContent = '⚠️ Makadirio hayajapatikana: ' + e.message;
+      return null;
+    }
+  }
+  function schedulePreview() {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(fetchOpenPreview, 700);
+  }
+  ['fPair', 'fDirection', 'fMultiplier', 'fStake', 'fSL', 'fTP'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) { el.addEventListener('input', schedulePreview); el.addEventListener('change', schedulePreview); }
+  });
+  schedulePreview();
+
   async function openTrade() {
     const btn = document.getElementById('openBtn');
     const toast = document.getElementById('openToast');
@@ -1511,6 +1573,18 @@
         stopLoss: Number(document.getElementById('fSL').value),
         takeProfit: Number(document.getElementById('fTP').value),
       };
+      // Thibitisha kwa kuona faida/hasara zinazotarajiwa KABLA ya kufungua.
+      const pv = await fetchOpenPreview();
+      const goTrade = await showWarning(
+        `Thibitisha ${body.direction} ${body.pair}`,
+        pv ? previewText(pv) : `Stake $${body.stake} · SL $${body.stopLoss} · TP $${body.takeProfit} · x${body.multiplier}\n(Makadirio ya bei hayakupatikana.)`,
+        'Ndiyo, fungua trade'
+      );
+      if (!goTrade) {
+        toast.className = 'toast error';
+        toast.textContent = '⛔ Haikufunguliwa (umeghairi).';
+        return;
+      }
       // Ulinzi wa correlation: angalia KABLA ya kufungua. Ikigongana, onyesha onyo na usifungue.
       try {
         const chk = await api('/api/admin/fx/open-check', { method: 'POST', body: JSON.stringify({ pair: body.pair, direction: body.direction }) });
