@@ -886,8 +886,13 @@
         Trades wazi: ${(a.openTrades || []).length}/${a.maxConcurrentTrades}${a.accountMode === 'real' ? ` (REAL: kikomo ${a.realMaxOpen})` : ''} ·
         Hasara mfululizo (juu): ${a.maxConsecutiveLosses} · Hasara ya siku (juu): $${a.maxDailyLossUsd} ·
         Jozi zote zinakaguliwa kila mzunguko; trade zinafunguliwa kwa strength kubwa kwanza.
-        <br>🧱 Kichujio cha S/R: <b>${a.srFilter ? 'ON' : 'OFF'}</b> (inazuia entry ikiwa S/R iko chini ya ${a.srMinRoomAtr}×ATR mbele — badilisha kwa env AUTO_TRADE_SR_FILTER).
       </div>
+      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🧱 Kichujio cha S/R (inazuia entry S/R ikiwa chini ya ${a.srMinRoomAtr}×ATR mbele)</div>
+      <span class="badge ${a.srFilter ? 'on' : 'off'}">${a.srFilter ? 'ON' : 'OFF'}</span>
+      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleSetting('sr-filter', ${!a.srFilter})">${a.srFilter ? 'Zima' : 'Washa'}</button>
+      <div class="section-label" style="margin-top:12px; margin-bottom:6px;">🔔 Arifa za S/R & onyo la SL (${a.slWarnPct}% ⚠️ / ${a.slDangerPct}% 🚨 ya SL)</div>
+      <span class="badge ${a.srAlerts ? 'on' : 'off'}">${a.srAlerts ? 'ON' : 'OFF'}</span>
+      <button class="ghost" style="margin-left:8px; font-size:11px; padding:4px 10px;" onclick="toggleSetting('sr-alerts', ${!a.srAlerts})">${a.srAlerts ? 'Zima' : 'Washa'}</button>
       <div style="margin-top:12px;">${signalsHtml}</div>
       <div class="section-label" style="margin-top:12px; margin-bottom:6px;">Currency Exposure (correlation guard, kikomo ±${a.maxCurrencyExposure})</div>
       <div style="font-size:11px;">${exposureHtml}</div>
@@ -905,6 +910,15 @@
     if (enabled && !confirm('Kuwasha auto-trade? Bot itaanza kufungua trades mpya kwenye akaunti ya sasa.')) return;
     try {
       await api('/api/admin/fx/auto-enabled', { method: 'POST', body: JSON.stringify({ enabled }) });
+      refresh();
+    } catch (e) {
+      alert('❌ ' + e.message);
+    }
+  }
+
+  async function toggleSetting(name, enabled) {
+    try {
+      await api('/api/admin/fx/' + name, { method: 'POST', body: JSON.stringify({ enabled }) });
       refresh();
     } catch (e) {
       alert('❌ ' + e.message);
