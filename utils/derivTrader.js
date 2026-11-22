@@ -654,6 +654,7 @@ async function getOpenPositionsLive() {
           bid_price: details?.bid_price ?? p.bid_price,
           profit: details?.profit ?? p.profit,
           current_spot: details?.current_spot,
+          multiplier: details?.multiplier ?? p.multiplier,
           limit_order: details?.limit_order ?? p.limit_order,
         };
       } catch (err) {

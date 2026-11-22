@@ -87,6 +87,7 @@
 
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL, DAILY_INTERVAL, HTF_GATE, DAILY_GATE, getTrends, DATA_SOURCE } = require('./forexSignal');
 const { checkRoom, toPips } = require('./supportResistance');
+const srAlerts = require('./srAlerts');
 const {
   placeMultiplier,
   getOpenPositions,
@@ -295,8 +296,18 @@ const MAX_CONCURRENT_TRADES = (() => {
 // AUTO_TRADE_SR_FILTER=on  → usifungue trade kama resistance (BUY) / support (SELL) iko karibu mbele ya entry
 //   (chini ya AUTO_TRADE_SR_MIN_ROOM_ATR × ATR, default 1.5). IMEZIMWA kwa default — jaribu kwanza kwa
 //   `.fxbacktest <JOZI> sr` kulinganisha kabla/baada. Info ya S/R inaonekana kwenye signals hata ikiwa imezimwa.
-const SR_FILTER = String(process.env.AUTO_TRADE_SR_FILTER || 'off').toLowerCase() === 'on';
+// Sasa inabadilishwa "live" (bila restart): `.fxsrfilter on|off` au dashboard → setSrFilter(); uamuzi unahifadhiwa
+// DB (fx_auto_settings) na unabaki baada ya redeploy. Env ndiyo default tu pale DB haina thamani.
+let SR_FILTER = String(process.env.AUTO_TRADE_SR_FILTER || 'off').toLowerCase() === 'on';
 const SR_MIN_ROOM_ATR = Number(process.env.AUTO_TRADE_SR_MIN_ROOM_ATR || 1.5);
+const SR_FILTER_KEY = 'srFilter';
+// Arifa za S/R (blocked/cleared/approach/broken) + onyo la trade kukaribia SL. Default ON.
+// Kuzima/kuwasha: `.fxsralerts on|off` au dashboard → setSrAlerts() (inahifadhiwa DB).
+let SR_ALERTS = String(process.env.AUTO_TRADE_SR_ALERTS || 'on').toLowerCase() !== 'off';
+const SR_ALERTS_KEY = 'srAlerts';
+const srTracker = srAlerts.createTracker();
+const lastSrZones = new Map();   // code -> { zones, price, atr, at } (kwa ushauri wa S/R kwenye onyo la SL)
+const slAlertState = new Map();  // contractId -> { level, stopPnl }
 
 const MAX_CURRENCY_EXPOSURE = Number(process.env.AUTO_TRADE_MAX_CURRENCY_EXPOSURE || 1);
 
@@ -868,6 +879,77 @@ async function loadAutoOnFromDb() {
   }
 }
 
+async function saveSetting(key, value) {
+  try {
+    await fxTradesDb.initSchema();
+    await fxTradesDb.query(
+      `INSERT INTO fx_auto_settings (settingKey, settingValue, updatedAt) VALUES (?, ?, ?)
+       ON CONFLICT(settingKey) DO UPDATE SET settingValue = excluded.settingValue, updatedAt = excluded.updatedAt`,
+      [key, value, Date.now()]
+    );
+    return true;
+  } catch (err) {
+    console.error(`[autoTrader] Imeshindwa kuhifadhi mpangilio "${key}" (unafanya kazi hadi restart):`, err.message);
+    return false;
+  }
+}
+
+/**
+ * Washa/zima kichujio cha S/R (kinazuia entry S/R ikiwa karibu). Inatuma arifa kwa owner kila hali inapobadilika,
+ * isipokuwa `notifyOwner:false` (command ya WhatsApp tayari inajibu kwenye chat hiyo hiyo).
+ */
+async function setSrFilter(on, { source = 'dashboard', notifyOwner = true } = {}) {
+  const next = !!on;
+  const changed = next !== SR_FILTER;
+  SR_FILTER = next;
+  await saveSetting(SR_FILTER_KEY, SR_FILTER ? '1' : '0');
+  console.log(`[autoTrader] 🧱 Kichujio cha S/R: ${SR_FILTER ? 'ON' : 'OFF'} (${source}).`);
+  if (changed && notifyOwner) {
+    await notify(
+      `🧱 *KICHUJIO CHA S/R ${SR_FILTER ? '🟢 IMEWASHWA' : '🔴 IMEZIMWA'}* (${source})\n\n` +
+        (SR_FILTER
+          ? `Bot itaruka entry ikiwa resistance (BUY) / support (SELL) iko chini ya ${SR_MIN_ROOM_ATR}×ATR mbele.`
+          : `Bot haitazuia entry kwa sababu ya S/R tena. S/R bado inaonekana kwenye signals na arifa.`) +
+        `\n_Trades zilizo wazi hazibadiliki._`
+    );
+  }
+  return { ok: true, srFilter: SR_FILTER, changed };
+}
+
+/** Washa/zima arifa za S/R + onyo la SL. Arifa ya mabadiliko inatumwa kila mara (isipokuwa notifyOwner:false). */
+async function setSrAlerts(on, { source = 'dashboard', notifyOwner = true } = {}) {
+  const next = !!on;
+  const changed = next !== SR_ALERTS;
+  SR_ALERTS = next;
+  srTracker.reset();       // usilinganishe na bei ya zamani baada ya kuwashwa tena
+  slAlertState.clear();
+  await saveSetting(SR_ALERTS_KEY, SR_ALERTS ? '1' : '0');
+  console.log(`[autoTrader] 🔔 Arifa za S/R + SL: ${SR_ALERTS ? 'ON' : 'OFF'} (${source}).`);
+  if (changed && notifyOwner) {
+    await notify(
+      `🔔 *ARIFA ZA S/R & SL ${SR_ALERTS ? '🟢 ZIMEWASHWA' : '🔴 ZIMEZIMWA'}* (${source})\n\n` +
+        (SR_ALERTS
+          ? `Utapata arifa: S/R ikizuia/ikiachia, bei ikikaribia zone, zone ikivunjwa, na trade ikikaribia Stop Loss.`
+          : `Hutapata tena arifa za S/R wala onyo la trade kukaribia SL. (Arifa za kufungua/kufunga trade zinaendelea.)`)
+    );
+  }
+  return { ok: true, srAlerts: SR_ALERTS, changed };
+}
+
+async function loadSrSettingsFromDb() {
+  try {
+    await fxTradesDb.initSchema();
+    for (const [key, apply] of [[SR_FILTER_KEY, (v) => { SR_FILTER = v; }], [SR_ALERTS_KEY, (v) => { SR_ALERTS = v; }]]) {
+      const r = await fxTradesDb.query('SELECT settingValue FROM fx_auto_settings WHERE settingKey = ?', [key]);
+      const row = (r.rows || [])[0];
+      if (row) apply(row.settingValue === '1');
+    }
+    console.log(`[autoTrader] 🧱 S/R filter: ${SR_FILTER ? 'ON' : 'OFF'} • 🔔 Arifa za S/R+SL: ${SR_ALERTS ? 'ON' : 'OFF'} (kutoka DB/env).`);
+  } catch (err) {
+    console.error('[autoTrader] Imeshindwa kusoma mipangilio ya S/R kutoka DB (inatumia env):', err.message);
+  }
+}
+
 // Kikomo cha REAL: idadi ya trades wazi (hesabu kubwa kati ya Deriv live na RAM) imefika REAL_MAX_OPEN?
 function realLimitReached(liveCount) {
   if (getAccountMode() !== 'real') return false;
@@ -882,12 +964,90 @@ function realLimitReached(liveCount) {
  * songa Stop Loss kwenye Deriv — KAMWE kuipeleka nyuma (ratchet moja tu
  * kuelekea usalama/faida zaidi).
  */
+// Ombi moja la positions za live linashirikiwa na trailing + onyo la SL (kila moja ingeomba contract_details upya kila dakika).
+let liveCache = { at: 0, data: null };
+let livePending = null;
+const LIVE_CACHE_MS = Number(process.env.AUTO_TRADE_LIVE_CACHE_MS ?? 20000);
+async function getLiveShared(maxAgeMs = LIVE_CACHE_MS) {
+  if (liveCache.data && Date.now() - liveCache.at < maxAgeMs) return liveCache.data;
+  if (!livePending) {
+    livePending = getOpenPositionsLive()
+      .then((d) => { liveCache = { at: Date.now(), data: d }; return d; })
+      .finally(() => { livePending = null; });
+  }
+  return livePending;
+}
+
+/**
+ * Onyo la trade kukaribia Stop Loss — trades ZOTE zilizo wazi za jozi zetu (auto + za mkono, zisizo za News).
+ * Hasara ikifika 70% ya SL → ⚠️, 90% → 🚨, ikirudi chini ya 50% → ✅. Inajumuisha S/R iliyo karibu upande wa SL
+ * ili mmiliki aone kama kuna sababu ya kusogeza SL. Haibadilishi SL yenyewe.
+ */
+async function checkSlProximity() {
+  if (!SR_ALERTS) return;
+  let live;
+  try {
+    live = await getLiveShared();
+  } catch (err) {
+    console.error('[autoTrader] Onyo la SL: imeshindwa kupata positions za live:', err.message);
+    return;
+  }
+  const seen = new Set();
+  for (const p of live) {
+    const id = String(p.contract_id);
+    seen.add(id);
+    const code = String(p.symbol || '').replace(/^frx/i, '').toUpperCase();
+    if (!PAIRS.some((x) => x.code === code)) continue;
+    if (newsTrader.isNewsContract(id)) continue;
+    const profit = Number(p.profit);
+    if (!Number.isFinite(profit)) continue;
+
+    const info = openAutoTrades.get(id);
+    const dAmt = Number(p.limit_order?.stop_loss?.order_amount);
+    let stopPnl = null; // P/L ambapo SL inagusa: hasi = hasara ya juu, chanya = faida iliyofungwa
+    if (Number.isFinite(dAmt) && dAmt !== 0) {
+      stopPnl = dAmt > 0 && info && info.slUsd > 0 ? -dAmt : dAmt; // Deriv hurudisha hasara kama namba hasi
+    } else if (info && Number.isFinite(info.slUsd) && info.slUsd !== 0) {
+      stopPnl = -info.slUsd; // slUsd chanya = hasara ya juu (muundo wa updateContractLimits)
+    }
+    if (stopPnl === null) { slAlertState.delete(id); continue; } // hakuna SL — hakuna cha kuonya
+
+    const risk = srAlerts.slRisk({ profit, stopPnl });
+    const prev = slAlertState.get(id);
+    const { notify: kind, next } = srAlerts.slAlertDecision(prev, risk, stopPnl);
+    if (next) slAlertState.set(id, next); else slAlertState.delete(id);
+    if (!kind) continue;
+
+    const direction = /up/i.test(p.contract_type || '') ? 'BUY' : 'SELL';
+    const spot = Number(p.current_spot);
+    const stake = Number(p.buy_price) || info?.stake;
+    const multiplier = Number(p.multiplier) || MULTIPLIER;
+    const dist = srAlerts.priceDistanceForUsd(risk.remaining, { spot, stake, multiplier });
+    const slPrice = dist == null ? null : direction === 'BUY' ? spot - dist : spot + dist;
+    const zinfo = lastSrZones.get(code);
+    const adviceLines = zinfo && Number.isFinite(spot)
+      ? srAlerts.slAdviceLines({ code, direction, price: spot, atr: zinfo.atr, zones: zinfo.zones, slPrice, profit, notional: stake * multiplier })
+      : [];
+    try {
+      await notify(srAlerts.formatSlAlert(kind, {
+        code, direction, contractId: id, profit, risk, stopPnl,
+        pipsToSl: dist == null ? null : Math.abs(toPips(code, dist)),
+        adviceLines,
+      }));
+      console.log(`[autoTrader] ⚠️ Onyo la SL (${kind}) ${code} ${id}: hasara $${fmt(risk.loss)} / SL $${fmt(risk.lossBudget)} (${risk.lossPct.toFixed(0)}%).`);
+    } catch (err) {
+      console.error('[autoTrader] Onyo la SL limeshindwa kutumwa:', err.message);
+    }
+  }
+  for (const id of [...slAlertState.keys()]) if (!seen.has(id)) slAlertState.delete(id); // trade imefungwa
+}
+
 async function checkTrailingStops() {
   if (!TRAILING_ENABLED || openAutoTrades.size === 0) return;
 
   let livePositions;
   try {
-    livePositions = await getOpenPositionsLive();
+    livePositions = await getLiveShared();
   } catch (err) {
     console.error('[autoTrader] Trailing: imeshindwa kupata positions za live:', err.message);
     return;
@@ -1251,6 +1411,18 @@ async function evaluatePairInner(pairInfo) {
       roomAtr: srRoom.roomAtr == null ? null : Number(srRoom.roomAtr.toFixed(2)),
       roomPips: srRoom.roomPrice == null ? null : Number(toPips(code, srRoom.roomPrice).toFixed(1)),
     };
+  }
+
+  lastSrZones.set(code, { zones: snapshot.srZones || [], price: snapshot.price, atr: snapshot.atr, at: Date.now() });
+  if (SR_ALERTS) {
+    try {
+      const events = srTracker.observe({ code, price: snapshot.price, atr: snapshot.atr, zones: snapshot.srZones || [], direction: srDir, room: srRoom });
+      for (const ev of events) {
+        await notify(srAlerts.formatEvent(code, ev, { price: snapshot.price, atr: snapshot.atr, filterOn: SR_FILTER, minRoomAtr: SR_MIN_ROOM_ATR }));
+      }
+    } catch (err) {
+      console.error(`[autoTrader] Arifa za S/R za ${code} zimeshindwa:`, err.message);
+    }
   }
 
   lastSignals.set(code, {
@@ -1813,6 +1985,7 @@ function start({ sock, notifyJid }) {
     await loadStakeOverrideFromDb();
     await loadTrailingOverrideFromDb();
     await loadAutoOnFromDb();
+    await loadSrSettingsFromDb();
     await restoreOpenTradesFromDb();
     await pollClosedTrades();
     await adoptAllLivePositions();
@@ -1827,6 +2000,7 @@ function start({ sock, notifyJid }) {
 
       pollInterval = setInterval(() => {
         pollClosedTrades().catch((err) => console.error('[autoTrader] pollClosedTrades error:', err.message));
+        checkSlProximity().catch((err) => console.error('[autoTrader] checkSlProximity error:', err.message));
         checkTrailingStops().catch((err) => console.error('[autoTrader] checkTrailingStops error:', err.message));
         checkWatchdog();
       }, POLL_CLOSED_MS);
@@ -1857,6 +2031,8 @@ onAccountSwitched(async (newMode, prevMode) => {
   openAutoTrades.clear();
   peakProfitPct.clear();
   closeMisses.clear();
+  slAlertState.clear();
+  liveCache = { at: 0, data: null };
   console.log(`[autoTrader] 🔄 Akaunti: ${prevMode || '?'} → ${newMode}. Trades ${dropped} za akaunti ya zamani zimeachwa kwenye DB (hazifuatiliwi sasa).`);
   await restoreOpenTradesFromDb();
   await pollClosedTrades();
@@ -1887,6 +2063,9 @@ function getStatus() {
     tpAtrMult: TP_ATR_MULT,
     srFilter: SR_FILTER,
     srMinRoomAtr: SR_MIN_ROOM_ATR,
+    srAlerts: SR_ALERTS,
+    slWarnPct: srAlerts.CFG.slWarnPct,
+    slDangerPct: srAlerts.CFG.slDangerPct,
     fallbackSl: FALLBACK_SL_USD,
     fallbackTp: FALLBACK_TP_USD,
     pairs: PAIRS.map((p) => p.code),
@@ -2095,6 +2274,8 @@ module.exports = {
   getStatus,
   setStakeUsd,
   setTrailingEnabled,
+  setSrFilter,
+  setSrAlerts,
   setAutoEnabled,
   placeManualTrade,
   checkCorrelatedExposure,
@@ -2107,6 +2288,7 @@ module.exports = {
   assignLegacyTrades,
   recordClosedFromDashboard,
   reconcileHistoryFromDeriv,
+  checkSlProximity, // onyo la trade kukaribia SL (inaitwa kila POLL_CLOSED_MS; pia inajaribika kwa mkono)
   PAIRS,
   STRENGTH_THRESHOLD,
   openAutoTrades,
