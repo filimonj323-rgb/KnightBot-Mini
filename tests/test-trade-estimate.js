@@ -70,3 +70,18 @@ d = te.describeSr({ code: 'EURUSD', direction: 'BUY', price: 1.1, atr, zones: []
 assert.ok(d.ok === true && /njia iko wazi/.test(d.verdict));
 assert.ok(d.lines.join('\n').includes('Resistance') && d.lines.join('\n').includes('Support'));
 console.log('✅ test-trade-estimate: zote zimepita');
+
+// ── Hali ya PIPS: pips → dola (stake 10 × 100 = 1000, EURUSD entry 1.1000)
+{
+  const usd = te.pipsToUsd({ code: 'EURUSD', pips: 10, entry: 1.1, stake: 10, multiplier: 100 });
+  assert.strictEqual(usd, 0.91); // 1000 × 0.0010 / 1.1
+  assert.strictEqual(te.usdToPips({ code: 'EURUSD', usd: 0.91, entry: 1.1, stake: 10, multiplier: 100 }), 10);
+  const jp = te.pipsToUsd({ code: 'USDJPY', pips: 20, entry: 150, stake: 10, multiplier: 100 });
+  assert.strictEqual(jp, 1.33); // 1000 × 0.20 / 150
+  const pe = te.estimateTrade({ code: 'EURUSD', direction: 'BUY', entry: 1.1, stake: 10, multiplier: 100, slPips: 10, tpPips: 20 });
+  assert.strictEqual(pe.slPips, 10); assert.strictEqual(pe.tpPips, 20);
+  assert.ok(Math.abs(pe.maxLoss - 0.91) < 1e-9 && Math.abs(pe.target - 1.82) < 1e-9);
+  assert.strictEqual(pe.rr, 2);
+  assert.strictEqual(te.pipsToUsd({ code: 'EURUSD', pips: 0, entry: 1.1, stake: 10, multiplier: 100 }), null);
+  console.log('pips mode OK');
+}
