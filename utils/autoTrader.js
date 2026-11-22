@@ -307,6 +307,8 @@ const SR_FILTER_KEY = 'srFilter';
 let SR_ALERTS = String(process.env.AUTO_TRADE_SR_ALERTS || 'on').toLowerCase() !== 'off';
 const SR_ALERTS_KEY = 'srAlerts';
 const srTracker = srAlerts.createTracker();
+const SR_SENT_KEY = 'srAlertSent';
+const srSentLog = srAlerts.createSentLog(); // ujumbe mmoja wa S/R haurudiwi (hubaki baada ya redeploy)
 const lastSrZones = new Map();   // code -> { zones, price, atr, at } (kwa ushauri wa S/R kwenye onyo la SL)
 const slAlertState = new Map();  // contractId -> { level, stopPnl }
 
@@ -945,6 +947,8 @@ async function loadSrSettingsFromDb() {
       const row = (r.rows || [])[0];
       if (row) apply(row.settingValue === '1');
     }
+    const sent = await fxTradesDb.query('SELECT settingValue FROM fx_auto_settings WHERE settingKey = ?', [SR_SENT_KEY]);
+    if ((sent.rows || [])[0]) srSentLog.load(sent.rows[0].settingValue);
     console.log(`[autoTrader] 🧱 S/R filter: ${SR_FILTER ? 'ON' : 'OFF'} • 🔔 Arifa za S/R+SL: ${SR_ALERTS ? 'ON' : 'OFF'} (kutoka DB/env).`);
   } catch (err) {
     console.error('[autoTrader] Imeshindwa kusoma mipangilio ya S/R kutoka DB (inatumia env):', err.message);
@@ -1491,10 +1495,18 @@ async function evaluatePairInner(pairInfo) {
       // yenye trade WAZI (auto/mkono) — na tu matukio yanayohusu trade hiyo: kukaribia zone na kuvunjwa kwa zone.
       // (blocked/cleared ni kuhusu entry mpya, hazina maana kwa jozi iliyo na trade tayari.)
       const events = srTracker.observe({ code, price: snapshot.price, atr: snapshot.atr, zones: snapshot.srZones || [], direction: srDir, room: srRoom });
-      const openTrade = [...openAutoTrades.values()].find((t) => t.code === code);
+      const openEntry = [...openAutoTrades.entries()].find(([, t]) => t.code === code);
+      const openTrade = openEntry ? openEntry[1] : null;
       if (openTrade) {
+        const openIds = new Set([...openAutoTrades.keys()].map(String));
         for (const ev of events) {
           if (ev.type !== 'approach' && ev.type !== 'broken') continue;
+          // LIMIT: ujumbe uleule wa S/R (trade + aina + upande + zone) hutumwa MARA MOJA tu.
+          if (!srSentLog.claim({ tradeId: openEntry[0], code, ev, atr: snapshot.atr, openIds })) {
+            console.log(`[autoTrader] ${code}: arifa ya S/R (${ev.type}) imeshatumwa — haitumwi tena.`);
+            continue;
+          }
+          saveSetting(SR_SENT_KEY, srSentLog.toJSON()).catch(() => {});
           await notify(srAlerts.formatEvent(code, ev, {
             price: snapshot.price, atr: snapshot.atr, filterOn: SR_FILTER, minRoomAtr: SR_MIN_ROOM_ATR, tradeDirection: openTrade.direction,
           }));

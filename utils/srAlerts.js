@@ -120,6 +120,46 @@ function createTracker(cfg = CFG) {
   return { observe, reset: () => state.clear() };
 }
 
+
+// ── LIMIT: ujumbe mmoja wa S/R usitumwe zaidi ya MARA MOJA ─────────────────
+/**
+ * Kumbukumbu ya arifa za S/R zilizokwisha tumwa. Alama ya ujumbe = trade + aina ya tukio + upande (resistance/support
+ * au UP/DOWN) + timeframe ya zone. Zone ya karibu (ndani ya max(5 pips, 0.5×ATR)) ikirudi, inahesabiwa ni ujumbe uleule
+ * (bei ya zone huyumba kidogo kila mzunguko) — hivyo HAITUMWI tena. Cooldown ya tracker haitoshi (inapotea kwenye restart
+ * na ufunguo wa zone unaweza kubadilika ATR ikibadilika), ndiyo maana kumbukumbu hii ni ya ziada na inahifadhiwa DB.
+ */
+function createSentLog({ ttlMs = 48 * 60 * 60 * 1000, max = 300 } = {}) {
+  let entries = []; // { tradeId, code, type, side, tf, price, at }
+  const sideOf = (ev) => (ev.type === 'approach' ? ev.side : ev.dir);
+  const tolOf = (code, atr) => Math.max(pipSize(code) * 5, (Number(atr) || 0) * 0.5);
+
+  function prune(now, openIds) {
+    entries = entries.filter((e) => now - e.at < ttlMs && (!openIds || openIds.has(e.tradeId)));
+    if (entries.length > max) entries = entries.slice(-max);
+  }
+
+  /** true = tuma (na ukumbuke); false = ishatumwa tayari. */
+  function claim({ tradeId, code, ev, atr, now = Date.now(), openIds = null }) {
+    if (!ev || !ev.zone) return true; // aina zisizo na zone hazihusiki
+    prune(now, openIds);
+    const side = sideOf(ev); const tf = ev.zone.tf || '?'; const price = Number(ev.zone.price);
+    const tol = tolOf(code, atr);
+    const dup = entries.some((e) => e.tradeId === String(tradeId) && e.code === code && e.type === ev.type
+      && e.side === side && e.tf === tf && Math.abs(e.price - price) <= tol);
+    if (dup) return false;
+    entries.push({ tradeId: String(tradeId), code, type: ev.type, side, tf, price, at: now });
+    return true;
+  }
+
+  return {
+    claim,
+    toJSON: () => JSON.stringify(entries),
+    load: (raw) => { try { const a = JSON.parse(raw); if (Array.isArray(a)) entries = a; } catch (_) { /* anza upya */ } },
+    size: () => entries.length,
+    reset: () => { entries = []; },
+  };
+}
+
 /** Maelezo ya zone moja: "1.08500 (touches 3 • 4h)". */
 function zoneLabel(code, z) {
   return `${z.price.toFixed(dp(code))} (touches ${z.touches}${z.tf ? ` • ${z.tf}` : ''})`;
@@ -281,6 +321,6 @@ function formatSlAlert(kind, d) {
 }
 
 module.exports = {
-  CFG, createTracker, zoneKey, distToZone, formatEvent, tradeContextLine,
+  CFG, createTracker, createSentLog, zoneKey, distToZone, formatEvent, tradeContextLine,
   slRisk, slAlertDecision, priceDistanceForUsd, slAdviceLines, formatSlAlert,
 };
