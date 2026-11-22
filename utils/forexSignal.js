@@ -62,6 +62,7 @@ const axios = require('axios');
 const { getCalendarContext, computeCalendarVote } = require('./economicCalendar');
 const { computeAllIndicators, MIN_CANDLES_RECOMMENDED } = require('./indicators');
 const { detectCandlePattern } = require('./candlePatterns');
+const { zonesForSnapshot } = require('./supportResistance');
 
 const API_KEY = process.env.TWELVE_DATA_API_KEY || null;
 const BASE_URL = 'https://api.twelvedata.com';
@@ -416,9 +417,21 @@ async function fetchForexSnapshot(pairSymbol, interval = DEFAULT_INTERVAL, opts 
   const htf21 = htfInd.ema21;
   const htfTrend = htf9 != null && htf21 != null ? (htf9 > htf21 ? 'BUY' : 'SELL') : null;
 
+  // Support/Resistance: zones za 1h + 4h (zilizothibitishwa, candle inayoendelea haihesabiwi). Ikishindwa, haizuii signal.
+  let srZones = [];
+  try {
+    srZones = [
+      ...zonesForSnapshot(candles, ind.atr, interval),
+      ...zonesForSnapshot(htfCandles, htfInd.atr, HTF_INTERVAL, { left: 3, right: 3 }),
+    ];
+  } catch (err) {
+    console.error(`[forexSignal] S/R imeshindwa kwa ${pairSymbol}:`, err.message);
+  }
+
   const snapshot = {
     pair: pairSymbol,
     interval,
+    srZones,
     price: ind.price,
     rsi: ind.rsi,
     macd: ind.macd,

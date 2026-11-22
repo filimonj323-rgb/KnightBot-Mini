@@ -86,6 +86,7 @@
  */
 
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, HTF_INTERVAL, DAILY_INTERVAL, HTF_GATE, DAILY_GATE, getTrends, DATA_SOURCE } = require('./forexSignal');
+const { checkRoom, toPips } = require('./supportResistance');
 const {
   placeMultiplier,
   getOpenPositions,
@@ -290,6 +291,13 @@ const MAX_CONCURRENT_TRADES = (() => {
 // wouldExceedCorrelationLimit() chini. Default 1 = usiruhusu currency
 // yoyote iwe na zaidi ya "upande mmoja" wa net exposure kwa wakati mmoja
 // kutoka kwenye jozi zote zilizo wazi (auto + za mkono).
+// ── Support/Resistance filter ───────────────────────────────────────────
+// AUTO_TRADE_SR_FILTER=on  → usifungue trade kama resistance (BUY) / support (SELL) iko karibu mbele ya entry
+//   (chini ya AUTO_TRADE_SR_MIN_ROOM_ATR × ATR, default 1.5). IMEZIMWA kwa default — jaribu kwanza kwa
+//   `.fxbacktest <JOZI> sr` kulinganisha kabla/baada. Info ya S/R inaonekana kwenye signals hata ikiwa imezimwa.
+const SR_FILTER = String(process.env.AUTO_TRADE_SR_FILTER || 'off').toLowerCase() === 'on';
+const SR_MIN_ROOM_ATR = Number(process.env.AUTO_TRADE_SR_MIN_ROOM_ATR || 1.5);
+
 const MAX_CURRENCY_EXPOSURE = Number(process.env.AUTO_TRADE_MAX_CURRENCY_EXPOSURE || 1);
 
 // ── Regime filter (walk-forward validation) ─────────────────────────────
@@ -1229,7 +1237,24 @@ async function evaluatePairInner(pairInfo) {
     return null;
   }
 
+  const srDir = sig.direction !== 'NEUTRAL' ? sig.direction : sig.rawDirection;
+  let srInfo = null;
+  let srRoom = null;
+  if (srDir === 'BUY' || srDir === 'SELL') {
+    srRoom = checkRoom({ direction: srDir, price: snapshot.price, atr: snapshot.atr, zones: snapshot.srZones || [], minRoomAtr: SR_MIN_ROOM_ATR });
+    srInfo = {
+      ok: srRoom.ok,
+      direction: srDir,
+      level: srRoom.level ? Number(srRoom.level.price.toFixed(5)) : null,
+      touches: srRoom.level ? srRoom.level.touches : null,
+      tf: srRoom.level ? srRoom.level.tf : null,
+      roomAtr: srRoom.roomAtr == null ? null : Number(srRoom.roomAtr.toFixed(2)),
+      roomPips: srRoom.roomPrice == null ? null : Number(toPips(code, srRoom.roomPrice).toFixed(1)),
+    };
+  }
+
   lastSignals.set(code, {
+    sr: srInfo,
     direction: sig.direction,
     strength: sig.strength,
     price: snapshot.price,
@@ -1319,6 +1344,12 @@ async function evaluatePairInner(pairInfo) {
   // haziguswi (SL/TP zake zinaendelea Deriv) — hii inazuia trade MPYA tu.
   if (sig.newsRisk) {
     console.log(`[autoTrader] ${code}: skip — habari kubwa (High impact) iko karibu.`);
+    return null;
+  }
+
+  // Support/Resistance: S/R iko karibu mbele ya entry → nafasi ya kwenda ni ndogo, TP/trend inaweza kugonga ukuta.
+  if (SR_FILTER && srRoom && !srRoom.ok) {
+    console.log(`[autoTrader] ${code}: skip — S/R (${srRoom.reason}).`);
     return null;
   }
 
@@ -1854,6 +1885,8 @@ function getStatus() {
     multiplier: MULTIPLIER,
     slAtrMult: SL_ATR_MULT,
     tpAtrMult: TP_ATR_MULT,
+    srFilter: SR_FILTER,
+    srMinRoomAtr: SR_MIN_ROOM_ATR,
     fallbackSl: FALLBACK_SL_USD,
     fallbackTp: FALLBACK_TP_USD,
     pairs: PAIRS.map((p) => p.code),

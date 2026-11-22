@@ -42,6 +42,25 @@ const {
 const { computeAllIndicatorSeries, MIN_CANDLES_RECOMMENDED } = require('./indicators');
 const { detectCandlePattern } = require('./candlePatterns');
 const { getStatus, computeAtrBasedRisk } = require('./autoTrader');
+const { buildZones, checkRoom, toPips } = require('./supportResistance');
+const { forwardExcursion, summarizeExcursions } = require('./excursion');
+
+// Timeframe ya signal → timeframe ya uthibitisho (HTF) + dakika za candle moja.
+// '1h' inatumia HTF_INTERVAL (4h) kama live; timeframe ndogo zinatumia HTF iliyo karibu juu yake.
+const TF_MINUTES = { '1min': 1, '5min': 5, '15min': 15, '30min': 30, '1h': 60, '2h': 120, '4h': 240 };
+const TF_HTF = { '1min': '5min', '5min': '15min', '15min': '1h', '30min': '2h', '1h': null, '2h': '4h' };
+const SR_MIN_ROOM_ATR = Number(process.env.AUTO_TRADE_SR_MIN_ROOM_ATR || 1.5);
+
+// Cache fupi ya candles (dakika 10) ili kulinganisha runs (sr on/off) zisitumie credits mara mbili.
+const candleCache = new Map();
+async function cachedCandles(symbol, interval, size) {
+  const key = `${symbol}|${interval}|${size}`;
+  const hit = candleCache.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
+  const data = await fetchCandles(symbol, interval, size);
+  candleCache.set(key, { data, at: Date.now() });
+  return data;
+}
 
 const BASE_OUTPUTSIZE_DEFAULT = 1500; // ~62 siku za candles za 1h
 const MAX_OUTPUTSIZE = 5000; // kikomo cha kawaida cha Twelve Data time_series
@@ -119,6 +138,15 @@ async function runBacktest(opts) {
 
   const [baseCcy, quoteCcy] = symbol.split('/');
 
+  // Timeframe ya signal (default 1h = tabia ya live). Ndogo (15min/5min) inatumia HTF iliyo karibu juu yake.
+  const interval = opts.interval && TF_MINUTES[opts.interval] ? opts.interval : DEFAULT_INTERVAL;
+  const tfMin = TF_MINUTES[interval];
+  const htfInterval = interval === DEFAULT_INTERVAL ? HTF_INTERVAL : TF_HTF[interval] || HTF_INTERVAL;
+  const htfMin = TF_MINUTES[htfInterval] || 240;
+  const srFilter = opts.sr === true; // true = zuia entry zilizo karibu na S/R; vinginevyo S/R inarekodiwa tu
+  const srMinRoomAtr = Number(opts.srMinRoomAtr) || SR_MIN_ROOM_ATR;
+  const horizon = Math.max(4, Math.min(Number(opts.horizon) || 24, 200));
+
   // Credits 2 TU (kama live) — bila kujali `bars` (outputsize haiathiri
   // gharama ya Twelve Data kwa /time_series).
   const gateOpts = {};
@@ -129,10 +157,10 @@ async function runBacktest(opts) {
   const useDaily = opts.dailyGate !== false && require('./forexSignal').DAILY_GATE;
 
   const [candles1h, candlesHtf, candlesDaily] = await Promise.all([
-    fetchCandles(symbol, DEFAULT_INTERVAL, bars),
-    fetchCandles(symbol, HTF_INTERVAL, Math.min(MAX_OUTPUTSIZE, Math.ceil(bars / 4) + 60)),
+    cachedCandles(symbol, interval, bars),
+    cachedCandles(symbol, htfInterval, Math.min(MAX_OUTPUTSIZE, Math.ceil((bars * tfMin) / htfMin) + 60)),
     useDaily
-      ? fetchCandles(symbol, DAILY_INTERVAL, Math.min(MAX_OUTPUTSIZE, Math.ceil(bars / 24) + 60))
+      ? cachedCandles(symbol, DAILY_INTERVAL, Math.min(MAX_OUTPUTSIZE, Math.ceil((bars * tfMin) / 1440) + 60))
       : Promise.resolve(null),
   ]);
 
@@ -149,6 +177,8 @@ async function runBacktest(opts) {
   const dailyIndexFor1h = useDaily ? alignDailyIndex(candles1h, candlesDaily) : null;
 
   const trades = [];
+  const entries = []; // KILA entry iliyofunguliwa (hata ikibaki wazi) — kwa takwimu za excursion
+  let srBlocked = 0;
   let openTrade = null; // { direction, entryIndex, entryPrice, slPrice, tpPrice }
   const warmup = MIN_CANDLES_RECOMMENDED; // epuka bars za mwanzo zenye null nyingi
 
@@ -224,7 +254,7 @@ async function runBacktest(opts) {
               atr: series1h.atr[i], rsi: series1h.rsi[i], bbLower: series1h.bbLower[i], bbUpper: series1h.bbUpper[i],
             })
           : null,
-        htfInterval: HTF_INTERVAL,
+        htfInterval,
         htfTrend,
         dailyRequested: useDaily,
         dailyInterval: DAILY_INTERVAL,
@@ -238,6 +268,16 @@ async function runBacktest(opts) {
       const sig = computeSignal(snapshot, gateOpts);
       if (sig.direction !== 'NEUTRAL' && sig.strength >= strengthThreshold) {
         const entryPrice = series1h.price[i];
+        // S/R: zones za timeframe ya signal + HTF (zilizothibitishwa hadi sasa tu — hakuna lookahead).
+        const zones = buildZones(candles1h, i, series1h.atr[i]);
+        if (htfIdx >= 0 && seriesHtf.atr[htfIdx] > 0) {
+          zones.push(...buildZones(candlesHtf, htfIdx, seriesHtf.atr[htfIdx], { left: 3, right: 3 }));
+        }
+        const room = checkRoom({ direction: sig.direction, price: entryPrice, atr: series1h.atr[i], zones, minRoomAtr: srMinRoomAtr });
+        if (srFilter && !room.ok) {
+          srBlocked += 1;
+          continue;
+        }
         const risk = computeAtrBasedRisk({ atr: series1h.atr[i], price: entryPrice, stake, multiplier });
         let slUsd, tpUsd;
         if (risk && risk.sl > 0 && risk.tp > 0) {
@@ -249,6 +289,15 @@ async function runBacktest(opts) {
         }
         const slDist = (slUsd * entryPrice) / (stake * multiplier);
         const tpDist = (tpUsd * entryPrice) / (stake * multiplier);
+        entries.push({
+          index: i,
+          direction: sig.direction,
+          price: entryPrice,
+          roomAtr: room.roomAtr == null ? null : Number(room.roomAtr.toFixed(2)),
+          roomPips: room.roomPrice == null ? null : Number(toPips(symbol, room.roomPrice).toFixed(1)),
+          slPips: Number(toPips(symbol, slDist).toFixed(1)),
+          tpPips: Number(toPips(symbol, tpDist).toFixed(1)),
+        });
         openTrade = {
           direction: sig.direction,
           entryIndex: i,
@@ -263,6 +312,18 @@ async function runBacktest(opts) {
   // Trade ambayo bado ni "wazi" mwishoni mwa data — HAIHESABIWI kwenye
   // win-rate (haijulikani mwisho wake), lakini tunaitaja kwenye ripoti.
   const stillOpenAtEnd = !!openTrade;
+
+  // ── Excursion: bei ilisogea pips ngapi baada ya KILA entry (horizon = candles za timeframe hii) ──
+  for (const e of entries) {
+    e.exc = forwardExcursion({ candles: candles1h, entryIndex: e.index, direction: e.direction, entryPrice: e.price, horizon, pair: symbol });
+  }
+  const excursion = summarizeExcursions(entries.map((e) => e.exc));
+  // Kulinganisha kwa umbali wa S/R: entries zenye nafasi ndogo (<1.5×ATR) vs zenye nafasi kubwa/hakuna S/R.
+  const nearSr = entries.filter((e) => e.roomAtr != null && e.roomAtr < srMinRoomAtr);
+  const openRoad = entries.filter((e) => e.roomAtr == null || e.roomAtr >= srMinRoomAtr);
+  const excursionNearSr = summarizeExcursions(nearSr.map((e) => e.exc));
+  const excursionOpenRoad = summarizeExcursions(openRoad.map((e) => e.exc));
+  const avg = (a) => (a.length ? Number((a.reduce((x, y) => x + y, 0) / a.length).toFixed(1)) : null);
 
   // ── Takwimu ──────────────────────────────────────────────────────────
   const wins = trades.filter((t) => t.outcome === 'WIN');
@@ -292,6 +353,16 @@ async function runBacktest(opts) {
   return {
     code,
     symbol,
+    interval,
+    htfInterval,
+    horizon,
+    sr: { filter: srFilter, minRoomAtr: srMinRoomAtr, blocked: srBlocked },
+    avgSlPips: avg(entries.map((e) => e.slPips)),
+    avgTpPips: avg(entries.map((e) => e.tpPips)),
+    excursion,
+    excursionNearSr,
+    excursionOpenRoad,
+    entries: entries.length,
     bars: candles1h.length,
     from: candles1h[warmup]?.datetime,
     to: candles1h[candles1h.length - 1]?.datetime,
