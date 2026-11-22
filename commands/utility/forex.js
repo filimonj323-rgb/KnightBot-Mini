@@ -15,6 +15,7 @@
  */
 
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = require('../../utils/forexSignal');
+const { describeSr } = require('../../utils/tradeEstimate');
 
 // ─────────────────────────────────────────────
 // Formatting helpers — mtindo uleule wa stock.js/analyze.js
@@ -97,6 +98,14 @@ function buildForexMessage(pairSymbol, s, sig) {
     L.push(`⛔ *Gate imezuia:* 1h ilisema ${sig.rawDirection} (${sig.rawStrength}%) lakini timeframe kubwa inapinga — si salama kuingia.`);
   }
   L.push('');
+
+  // S/R kwa lugha rahisi: ukuta wa juu, sakafu ya chini, na maana yake kwa signal hii.
+  try {
+    const dir = sig.direction !== 'NEUTRAL' ? sig.direction : sig.rawDirection;
+    const sr = describeSr({ code: displayPair, direction: dir, price: s.price, atr: s.atr, zones: s.srZones || [] });
+    L.push(...sr.lines);
+    L.push('');
+  } catch (_) { /* S/R ikishindwa, signal inaendelea */ }
 
   if (sig.newsRisk) {
     L.push(`🚨 *TAHADHARI: Habari kubwa (High impact) iko karibu* — spread/slippage inaweza kuongezeka, epuka kuingia trade mpya sasa hivi.`);

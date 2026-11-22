@@ -56,6 +56,7 @@ module.exports = {
             `🆔 Contract ID: ${result.contract_id}\n` +
             `💵 Bei ya ununuzi: $${result.buy_price}\n` +
             (result.longcode ? `📄 ${result.longcode}\n` : '') +
+            (result.estimateText ? `\n${result.estimateText}\n` : '') +
             `\n_Tumia .positions kuona trades wazi, .panic kufunga zote dharura._`,
         },
         { quoted: msg }
