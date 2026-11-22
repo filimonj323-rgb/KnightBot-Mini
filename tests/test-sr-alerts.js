@@ -98,3 +98,18 @@ for (const type of ['blocked', 'cleared', 'approach', 'broken']) {
 assert.ok(/haitafunguliwa/.test(sa.formatEvent('EURUSD', { type: 'blocked', direction: 'BUY', room: roomBad }, { price: 1.1, atr, filterOn: true, minRoomAtr: 1.5 })));
 assert.ok(/haizuiwi/.test(sa.formatEvent('EURUSD', { type: 'blocked', direction: 'BUY', room: roomBad }, { price: 1.1, atr, filterOn: false, minRoomAtr: 1.5 })));
 console.log('✅ test-sr-alerts: zote zimepita');
+
+// ── Muktadha wa trade ──
+{
+  const ctx = (type, extra, dir) => sa.tradeContextLine({ type, ...extra }, dir);
+  assert.ok(/kufunga faida/.test(ctx('approach', { side: 'resistance' }, 'BUY')));
+  assert.ok(/SL iko hatarini/.test(ctx('approach', { side: 'support' }, 'BUY')));
+  assert.ok(/kufunga faida/.test(ctx('approach', { side: 'support' }, 'SELL')));
+  assert.ok(/KWA FAIDA/.test(ctx('broken', { dir: 'UP' }, 'BUY')));
+  assert.ok(/DHIDI/.test(ctx('broken', { dir: 'DOWN' }, 'BUY')));
+  assert.ok(/KWA FAIDA/.test(ctx('broken', { dir: 'DOWN' }, 'SELL')));
+  assert.strictEqual(ctx('approach', { side: 'support' }, undefined), '');
+  const m = sa.formatEvent('EURUSD', { type: 'approach', zone: zRes, side: 'resistance', distAtr: 0.3 }, { price: 1.1, atr, tradeDirection: 'BUY' });
+  assert.ok(/Trade yako ya BUY/.test(m), m);
+  console.log('✅ test-sr-alerts (muktadha wa trade): zimepita');
+}
