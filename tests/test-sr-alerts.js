@@ -113,3 +113,20 @@ console.log('✅ test-sr-alerts: zote zimepita');
   assert.ok(/Trade yako ya BUY/.test(m), m);
   console.log('✅ test-sr-alerts (muktadha wa trade): zimepita');
 }
+
+// ── LIMIT: ujumbe mmoja wa S/R haurudiwi ──
+{
+  const log = sa.createSentLog();
+  const ev1 = { type: 'approach', side: 'support', zone: { price: 1.09569, low: 1.0956, high: 1.0958, touches: 4, tf: '1h' }, distAtr: 0.2 };
+  const evNear = { ...ev1, zone: { ...ev1.zone, price: 1.09571, touches: 5 } };
+  const evOther = { ...ev1, zone: { ...ev1.zone, price: 1.1050, tf: '4h' } };
+  const a = 0.0010; const ids = new Set(['111']);
+  assert.strictEqual(log.claim({ tradeId: '111', code: 'EURUSD', ev: ev1, atr: a, now: T, openIds: ids }), true, 'ya kwanza inatumwa');
+  assert.strictEqual(log.claim({ tradeId: '111', code: 'EURUSD', ev: ev1, atr: a, now: T + 120000, openIds: ids }), false, 'ileile haitumwi tena');
+  assert.strictEqual(log.claim({ tradeId: '111', code: 'EURUSD', ev: evNear, atr: a, now: T + 240000, openIds: ids }), false, 'zone iliyoyumba kidogo = ujumbe uleule');
+  assert.strictEqual(log.claim({ tradeId: '111', code: 'EURUSD', ev: evOther, atr: a, now: T + 5, openIds: ids }), true, 'zone tofauti inaruhusiwa');
+  const log2 = sa.createSentLog(); log2.load(log.toJSON());
+  assert.strictEqual(log2.claim({ tradeId: '111', code: 'EURUSD', ev: ev1, atr: a, now: T + 9, openIds: ids }), false, 'inabaki baada ya restart');
+  assert.strictEqual(log2.claim({ tradeId: '222', code: 'EURUSD', ev: ev1, atr: a, now: T + 9, openIds: new Set(['222']) }), true, 'trade mpya = ujumbe mpya');
+  console.log('S/R sent-once limit OK');
+}
