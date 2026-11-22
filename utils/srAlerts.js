@@ -3,7 +3,8 @@
  *
  * Kazi safi (hakuna mtandao/DB/WhatsApp) ili ijaribiwe kwa urahisi; autoTrader.js ndiye anayetuma arifa.
  *
- * MATUKIO YA S/R (kwa kila jozi, kila mzunguko wa signal) — createTracker().observe():
+ * MATUKIO YA S/R (kwa kila jozi, kila mzunguko wa signal) — createTracker().observe().
+ *   autoTrader.js inatuma TU approach/broken, na TU kwa jozi yenye trade wazi (blocked/cleared hazitumwi):
  *   • blocked  — S/R imekuwa karibu mbele ya trade (resistance kwa BUY / support kwa SELL), nafasi < kikomo cha ATR.
  *   • cleared  — S/R iliyokuwa inazuia imeondoka (nafasi imerudi ya kutosha).
  *   • approach — bei imekaribia zone ya S/R (ndani ya APPROACH_ATR × ATR).
@@ -124,6 +125,28 @@ function zoneLabel(code, z) {
   return `${z.price.toFixed(dp(code))} (touches ${z.touches}${z.tf ? ` • ${z.tf}` : ''})`;
 }
 
+/**
+ * Mstari unaoeleza tukio la S/R kwa mtazamo wa TRADE iliyo wazi (BUY/SELL) ya jozi hiyo.
+ * Arifa za S/R zinatumwa tu kwa jozi zenye trade wazi, kwa hiyo hii inaeleza "inamaanisha nini kwa trade yangu".
+ */
+function tradeContextLine(ev, tradeDir) {
+  if (tradeDir !== 'BUY' && tradeDir !== 'SELL') return '';
+  const buy = tradeDir === 'BUY';
+  const who = `Trade yako ya ${tradeDir}`;
+  if (ev.type === 'approach') {
+    const wall = ev.side === 'resistance';
+    if (buy === wall) return `🎯 ${who} inakaribia ${wall ? 'resistance' : 'support'} mbele yake — bei inaweza kugeuka. Fikiria kufunga faida au kusogeza SL kulinda faida.`;
+    return `🛡️ Bei inarudi kwenye ${wall ? 'resistance' : 'support'} nyuma ya ${who} — zone ikishikilia inalinda trade; ikivunjwa, SL iko hatarini.`;
+  }
+  if (ev.type === 'broken') {
+    const favorable = (ev.dir === 'UP') === buy;
+    return favorable
+      ? `✅ Uvunjaji huu uko KWA FAIDA ya ${who} — njia mbele imefunguka zaidi.`
+      : `🚨 Uvunjaji huu uko DHIDI ya ${who} — fikiria kufunga mapema au kuthibitisha SL.`;
+  }
+  return '';
+}
+
 /** Ujumbe wa WhatsApp kwa tukio la S/R. */
 function formatEvent(code, ev, ctx = {}) {
   const { price, atr, filterOn, minRoomAtr } = ctx;
@@ -148,13 +171,14 @@ function formatEvent(code, ev, ctx = {}) {
       return `${head} — ${isRes ? '🔴' : '🟢'} *Bei inakaribia ${isRes ? 'Resistance' : 'Support'}*${px}\n` +
         `Zone: ${zoneLabel(code, ev.zone)}\n` +
         `Umbali: ${ev.distAtr === 0 ? 'bei iko NDANI ya zone' : `${pips(ev.distAtr * atr)} pips`}\n` +
-        `💡 Bei mara nyingi hugeuka au kusita hapa. Trades zilizo wazi kuelekea zone hii: fikiria kufunga faida/kusogeza SL.`;
+        (tradeContextLine(ev, ctx.tradeDirection) || `💡 Bei mara nyingi hugeuka au kusita hapa.`);
     }
     case 'broken': {
       const up = ev.dir === 'UP';
       return `${head} — 💥 *${up ? 'Resistance imevunjwa (breakout ↑)' : 'Support imevunjwa (breakdown ↓)'}*${px}\n` +
         `Zone: ${zoneLabel(code, ev.zone)}\n` +
-        `Zone hii sasa inaweza kubadilisha kazi (${up ? 'resistance → support' : 'support → resistance'}). Angalia trades zako za ${code}.`;
+        `Zone hii sasa inaweza kubadilisha kazi (${up ? 'resistance → support' : 'support → resistance'}).\n` +
+        (tradeContextLine(ev, ctx.tradeDirection) || `Angalia trade yako ya ${code}.`);
     }
     default: return `${head} — ${ev.type}`;
   }
@@ -257,6 +281,6 @@ function formatSlAlert(kind, d) {
 }
 
 module.exports = {
-  CFG, createTracker, zoneKey, distToZone, formatEvent,
+  CFG, createTracker, zoneKey, distToZone, formatEvent, tradeContextLine,
   slRisk, slAlertDecision, priceDistanceForUsd, slAdviceLines, formatSlAlert,
 };

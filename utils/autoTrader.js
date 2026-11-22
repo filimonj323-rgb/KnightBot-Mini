@@ -930,7 +930,7 @@ async function setSrAlerts(on, { source = 'dashboard', notifyOwner = true } = {}
     await notify(
       `🔔 *ARIFA ZA S/R & SL ${SR_ALERTS ? '🟢 ZIMEWASHWA' : '🔴 ZIMEZIMWA'}* (${source})\n\n` +
         (SR_ALERTS
-          ? `Utapata arifa: S/R ikizuia/ikiachia, bei ikikaribia zone, zone ikivunjwa, na trade ikikaribia Stop Loss.`
+          ? `Utapata arifa kwa jozi zenye trade WAZI tu: bei ikikaribia zone, zone ikivunjwa, na trade ikikaribia Stop Loss.`
           : `Hutapata tena arifa za S/R wala onyo la trade kukaribia SL. (Arifa za kufungua/kufunga trade zinaendelea.)`)
     );
   }
@@ -1467,9 +1467,18 @@ async function evaluatePairInner(pairInfo) {
   lastSrZones.set(code, { zones: snapshot.srZones || [], price: snapshot.price, atr: snapshot.atr, at: Date.now() });
   if (SR_ALERTS) {
     try {
+      // Tracker inasasishwa kila mzunguko (ili isilinganishe na bei chakavu), lakini arifa zinatumwa TU kwa jozi
+      // yenye trade WAZI (auto/mkono) — na tu matukio yanayohusu trade hiyo: kukaribia zone na kuvunjwa kwa zone.
+      // (blocked/cleared ni kuhusu entry mpya, hazina maana kwa jozi iliyo na trade tayari.)
       const events = srTracker.observe({ code, price: snapshot.price, atr: snapshot.atr, zones: snapshot.srZones || [], direction: srDir, room: srRoom });
-      for (const ev of events) {
-        await notify(srAlerts.formatEvent(code, ev, { price: snapshot.price, atr: snapshot.atr, filterOn: SR_FILTER, minRoomAtr: SR_MIN_ROOM_ATR }));
+      const openTrade = [...openAutoTrades.values()].find((t) => t.code === code);
+      if (openTrade) {
+        for (const ev of events) {
+          if (ev.type !== 'approach' && ev.type !== 'broken') continue;
+          await notify(srAlerts.formatEvent(code, ev, {
+            price: snapshot.price, atr: snapshot.atr, filterOn: SR_FILTER, minRoomAtr: SR_MIN_ROOM_ATR, tradeDirection: openTrade.direction,
+          }));
+        }
       }
     } catch (err) {
       console.error(`[autoTrader] Arifa za S/R za ${code} zimeshindwa:`, err.message);
