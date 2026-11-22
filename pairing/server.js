@@ -83,6 +83,7 @@ const derivTrader = require('../utils/derivTrader');
 const autoTrader = require('../utils/autoTrader');
 const { fetchForexSnapshot, computeSignal, DEFAULT_INTERVAL, getTrends } = require('../utils/forexSignal');
 const { runBacktest } = require('../utils/backtest');
+const srLib = require('../utils/supportResistance');
 const economicCalendar = require('../utils/economicCalendar');
 const newsTrader = require('../utils/newsTrader');
 const newsObserver = require('../utils/newsObserver');
@@ -108,6 +109,29 @@ const signalTargets = require('../utils/signalTargets');
 // auto-trader kiotomatiki (crosses zimeongezwa MAKUSUDI kupunguza
 // correlation risk, hazina USD); nyingine 3 zinaangaliwa TU mtu akibonyeza
 // "Angalia" (kuepuka 429).
+// S/R kwa dashboard: nafasi ya trade (direction) + zones 3 za juu/3 za chini kwa pips kutoka bei ya sasa.
+function buildSrPayload(code, snapshot, direction) {
+  const zones = snapshot.srZones || [];
+  const price = snapshot.price;
+  const minRoomAtr = autoTrader.getStatus().srMinRoomAtr;
+  const pips = (d) => Number(Math.abs(srLib.toPips(code, d)).toFixed(1));
+  const mk = (z) => ({ price: z.price, pips: pips(z.price - price), touches: z.touches, tf: z.tf });
+  const sorted = [...zones].sort((a, b) => a.price - b.price);
+  const above = sorted.filter((z) => z.low > price).slice(0, 3).map(mk);
+  const below = sorted.filter((z) => z.high < price).slice(-3).reverse().map(mk);
+  let room = null;
+  if (direction === 'BUY' || direction === 'SELL') {
+    const r = srLib.checkRoom({ direction, price, atr: snapshot.atr, zones, minRoomAtr });
+    room = {
+      ok: r.ok, direction,
+      level: r.level ? r.level.price : null, touches: r.level ? r.level.touches : null, tf: r.level ? r.level.tf : null,
+      roomAtr: r.roomAtr == null ? null : Number(r.roomAtr.toFixed(2)),
+      roomPips: r.roomPrice == null ? null : pips(r.roomPrice),
+    };
+  }
+  return { room, above, below, atrPips: Number(srLib.toPips(code, snapshot.atr).toFixed(1)), minRoomAtr, filterOn: autoTrader.getStatus().srFilter };
+}
+
 const FX_SYMBOL_MAP = {
   EURUSD: 'EUR/USD',
   GBPUSD: 'GBP/USD',
@@ -1362,6 +1386,7 @@ async function handlePairingRequest(req, res) {
           notes: sig.notes,
           price: snapshot.price,
           atr: snapshot.atr,
+          sr: buildSrPayload(code, snapshot, sig.direction !== 'NEUTRAL' ? sig.direction : sig.rawDirection),
           checkedAt: Date.now(),
         };
         global.__fxSignalCache.set(code, payload);
@@ -1751,6 +1776,9 @@ async function handlePairingRequest(req, res) {
             multiplier: body.multiplier ? Number(body.multiplier) : undefined,
             strengthThreshold: body.strengthThreshold ? Number(body.strengthThreshold) : undefined,
             patterns: typeof body.patterns === 'boolean' ? body.patterns : undefined,
+            interval: ['5min', '15min', '30min', '1h'].includes(body.interval) ? body.interval : undefined,
+            sr: body.sr === true ? true : undefined,
+            horizon: body.horizon ? Number(body.horizon) : undefined,
           });
           return sendJson(res, 200, { ok: true, result });
         } catch (err) {
