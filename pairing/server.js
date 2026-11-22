@@ -1275,6 +1275,7 @@ async function handlePairingRequest(req, res) {
           return sendJson(res, 200, await autoTrader.previewManualTrade({
             pair: body.pair, direction: body.direction === 'SELL' ? 'SELL' : 'BUY',
             stake: Number(body.stake), stopLoss: Number(body.stopLoss), takeProfit: Number(body.takeProfit),
+            slPips: Number(body.slPips) || undefined, tpPips: Number(body.tpPips) || undefined,
             multiplier: body.multiplier ? Number(body.multiplier) : undefined,
           }));
         } catch (err) {
@@ -1297,6 +1298,8 @@ async function handlePairingRequest(req, res) {
             stake: Number(body.stake),
             stopLoss: Number(body.stopLoss),
             takeProfit: Number(body.takeProfit),
+            slPips: Number(body.slPips) || undefined,
+            tpPips: Number(body.tpPips) || undefined,
             multiplier: body.multiplier ? Number(body.multiplier) : undefined,
             allowCorrelated: body.allowCorrelated === true, // dashboard tu, baada ya kuthibitisha onyo
           });
