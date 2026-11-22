@@ -1238,6 +1238,16 @@ async function handlePairingRequest(req, res) {
         return sendJson(res, 200, { ok: true, ...result });
       }
 
+      // Washa/zima kichujio cha S/R na arifa za S/R + onyo la SL (arifa ya mabadiliko inatumwa WhatsApp na autoTrader).
+      if (req.method === 'POST' && req.url === '/api/admin/fx/sr-filter') {
+        const body = await readJsonBody(req);
+        return sendJson(res, 200, await autoTrader.setSrFilter(!!body.enabled, { source: 'Dashboard' }));
+      }
+      if (req.method === 'POST' && req.url === '/api/admin/fx/sr-alerts') {
+        const body = await readJsonBody(req);
+        return sendJson(res, 200, await autoTrader.setSrAlerts(!!body.enabled, { source: 'Dashboard' }));
+      }
+
       // Washa/zima auto-trade (kufungua trades MPYA tu — zilizo wazi haziguswi).
       if (req.method === 'POST' && req.url === '/api/admin/fx/auto-enabled') {
         const body = await readJsonBody(req);
