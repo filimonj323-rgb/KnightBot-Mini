@@ -661,7 +661,14 @@ async function getOpenPositionsLive() {
     positions.map(async (p) => {
       try {
         const details = await getContractDetails(p.contract_id);
-        if (isExpiredUnsold(details) || isClosedState(details)) { markContractClosed(p.contract_id); return null; }
+        if (isClosedState(details)) { markContractClosed(p.contract_id); return null; }
+        if (isExpiredUnsold(details)) {
+          // Jaribu kuisettle kweli (balance ya Deriv ibadilike); isipowezekana, ificha lakini iendelee kujaribiwa (retryUnsettled).
+          if (!unsettled.has(String(p.contract_id))) unsettled.set(String(p.contract_id), { since: Date.now(), tries: 0, lastTry: 0 });
+          try { await trySettleExpired(p.contract_id); } catch (_) { /* endelea kuficha */ }
+          markContractClosed(p.contract_id);
+          return null;
+        }
         return {
           ...p,
           bid_price: details?.bid_price ?? p.bid_price,
@@ -725,6 +732,49 @@ function isExpiredUnsold(d) {
   if (!d) return false;
   if (isClosedState(d)) return false;
   return Number(d.is_expired) === 1 || Number(d.is_settleable) === 1;
+}
+
+// ── Settle ya contracts "zimeganda" (expired lakini Deriv haijaziuza) ─────────────────────────
+// TATIZO: bot ilikuwa inaziandika "zimefungwa" upande wake (ficha + DB + arifa) bila Deriv kuziuza,
+// kwa hiyo balance ya Deriv haikubadilika. Sasa: tunajaribu KUZISETTLE kweli (sell price:0, kisha sell_expired),
+// na zile zisizoweza bado zinaorodheshwa kwenye `unsettled` na kujaribiwa tena kila poll hadi Deriv iziuze.
+const unsettled = new Map(); // contractId -> { since, tries, lastTry }
+const SETTLE_RETRY_MS = 20 * 1000;
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function isSettledOnDeriv(id) {
+  let d = null;
+  try { d = await getContractDetails(id); } catch (_) { /* tumia profit_table */ }
+  if (isClosedState(d)) return true;
+  try { return !!(await getClosedContractFromHistory(id)); } catch (_) { return false; }
+}
+
+/** Jaribu kusettle contract moja. true = Deriv IMEIUZA (balance imesasishwa). */
+async function trySettleExpired(contractId, { force = false } = {}) {
+  const id = toContractId(contractId);
+  const rec = unsettled.get(String(id)) || { since: Date.now(), tries: 0, lastTry: 0 };
+  if (!force && Date.now() - rec.lastTry < SETTLE_RETRY_MS) return false;
+  rec.lastTry = Date.now(); rec.tries += 1;
+  unsettled.set(String(id), rec);
+  try { await send({ sell: id, price: 0 }); } catch (_) { /* inaweza kukataliwa kwa expired — endelea na sell_expired */ }
+  await settleExpiredContracts();
+  await sleepMs(900);
+  if (await isSettledOnDeriv(id)) { unsettled.delete(String(id)); return true; }
+  return false;
+}
+
+/** Orodha ya contracts zinazosubiri Deriv (kwa dashboard/logs). */
+function getUnsettled() {
+  return [...unsettled.entries()].map(([contractId, r]) => ({ contractId, sinceMs: Date.now() - r.since, tries: r.tries }));
+}
+
+/** Inajaribu tena zote zilizokwama; inarudisha ids zilizosettlewa SASA (ili kutuma arifa + kusasisha balance). */
+async function retryUnsettled() {
+  const done = [];
+  for (const id of [...unsettled.keys()]) {
+    try { if (await trySettleExpired(id)) done.push(id); } catch (err) { console.error(`[derivTrader] retryUnsettled ${id}:`, err.message); }
+  }
+  return done;
 }
 
 async function closeContract(contractId) {
@@ -1025,6 +1075,9 @@ module.exports = {
   isMarkedClosed,
   closeContractWithPnL,
   closeAll,
+  trySettleExpired,
+  retryUnsettled,
+  getUnsettled,
   getBalance,
   getAccountMode,
   getAccountState,

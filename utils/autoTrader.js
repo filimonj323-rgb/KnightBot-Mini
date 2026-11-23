@@ -105,6 +105,8 @@ const {
   onAccountSwitched,
   getRecentOpens,
   settleExpiredContracts,
+  trySettleExpired,
+  retryUnsettled,
   isExpiredUnsold,
   isClosedState,
   markContractClosed,
@@ -1918,6 +1920,15 @@ const CLOSE_CONFIRM_POLLS = 3;
 const closeMisses = new Map(); // contractId -> idadi ya polls zilizokosa
 
 async function pollClosedTrades() {
+  // Contracts zilizofichwa kwa sababu Deriv haikuziuza: jaribu kuzisettle tena (hata kama hakuna trade wazi).
+  try {
+    const settledNow = await retryUnsettled();
+    for (const id of settledNow) {
+      console.log(`[autoTrader] ${id}: Deriv imesettle sasa — balance imesasishwa.`);
+      await notify(`✅ Contract ${id} imesettlewa na Deriv — balance yako sasa imesasishwa.`).catch(() => {});
+    }
+  } catch (err) { console.error('[autoTrader] retryUnsettled:', err.message); }
+
   if (openAutoTrades.size === 0) return;
 
   let openIds;
@@ -1940,7 +1951,11 @@ async function pollClosedTrades() {
     try {
       const d = await getContractDetails(contractId);
       if (isExpiredUnsold(d)) {
-        console.log(`[autoTrader] ${contractId}: TP/SL imefikiwa (expired) lakini Deriv haijaiuza — nahesabu imefungwa.`);
+        // Jaribu kuisettle KWELI kwanza (ndiyo inayosasisha balance ya Deriv); ikishindikana, ihesabu imefungwa
+        // upande wa bot lakini iendelee kujaribiwa kila poll (retryUnsettled).
+        let settled = false;
+        try { settled = await trySettleExpired(contractId, { force: true }); } catch (_) { /* endelea */ }
+        console.log(`[autoTrader] ${contractId}: TP/SL imefikiwa (expired) — settle ya Deriv: ${settled ? 'IMEFANIKIWA' : 'bado (itajaribiwa tena)'}.`);
         markContractClosed(contractId);
         openIds.delete(String(contractId));
       }
