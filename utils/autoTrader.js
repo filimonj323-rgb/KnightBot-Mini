@@ -104,6 +104,8 @@ const {
   getAccountState,
   onAccountSwitched,
   getRecentOpens,
+  settleExpiredContracts,
+  isExpiredUnsold,
 } = require('./derivTrader');
 // Turso (libSQL) — tayari inatumika na pairing/server.js kwa users/payments;
 // hapa tunatumia kuhifadhi openAutoTrades ili isipotee kila redeploy/restart
@@ -307,6 +309,10 @@ const SR_FILTER_KEY = 'srFilter';
 let SR_ALERTS = String(process.env.AUTO_TRADE_SR_ALERTS || 'on').toLowerCase() !== 'off';
 const SR_ALERTS_KEY = 'srAlerts';
 const srTracker = srAlerts.createTracker();
+// Arifa za S/R zinatumia zones za HIGH timeframe tu (4h + 1day) — za 1h ni za muda mfupi, zinaleta kelele.
+// Badilisha kwa env AUTO_TRADE_SR_ALERT_TFS (mfano "4h,1day" au "1h,4h,1day").
+const SR_ALERT_TFS = String(process.env.AUTO_TRADE_SR_ALERT_TFS || '4h,1day,1d').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+const highTfZones = (zs) => (Array.isArray(zs) ? zs : []).filter((z) => SR_ALERT_TFS.includes(String(z.tf || '').toLowerCase()));
 const SR_SENT_KEY = 'srAlertSent';
 const srSentLog = srAlerts.createSentLog(); // ujumbe mmoja wa S/R haurudiwi (hubaki baada ya redeploy)
 const lastSrZones = new Map();   // code -> { zones, price, atr, at } (kwa ushauri wa S/R kwenye onyo la SL)
@@ -976,7 +982,7 @@ function realLimitReached(liveCount) {
 async function getSrContext(code) {
   try {
     const snap = await fetchForexSnapshot(`${code.slice(0, 3)}/${code.slice(3)}`, DEFAULT_INTERVAL);
-    return { zones: snap.srZones || [], price: snap.price, atr: snap.atr };
+    return { zones: highTfZones(snap.srZones), price: snap.price, atr: snap.atr };
   } catch (_) {
     return lastSrZones.get(code) || null;
   }
@@ -1101,7 +1107,7 @@ async function checkSlProximity() {
     const slPrice = dist == null ? null : direction === 'BUY' ? spot - dist : spot + dist;
     const zinfo = lastSrZones.get(code);
     const adviceLines = zinfo && Number.isFinite(spot)
-      ? srAlerts.slAdviceLines({ code, direction, price: spot, atr: zinfo.atr, zones: zinfo.zones, slPrice, profit, notional: stake * multiplier })
+      ? srAlerts.slAdviceLines({ code, direction, price: spot, atr: zinfo.atr, zones: highTfZones(zinfo.zones), slPrice, profit, notional: stake * multiplier })
       : [];
     try {
       await notify(srAlerts.formatSlAlert(kind, {
@@ -1494,7 +1500,7 @@ async function evaluatePairInner(pairInfo) {
       // Tracker inasasishwa kila mzunguko (ili isilinganishe na bei chakavu), lakini arifa zinatumwa TU kwa jozi
       // yenye trade WAZI (auto/mkono) — na tu matukio yanayohusu trade hiyo: kukaribia zone na kuvunjwa kwa zone.
       // (blocked/cleared ni kuhusu entry mpya, hazina maana kwa jozi iliyo na trade tayari.)
-      const events = srTracker.observe({ code, price: snapshot.price, atr: snapshot.atr, zones: snapshot.srZones || [], direction: srDir, room: srRoom });
+      const events = srTracker.observe({ code, price: snapshot.price, atr: snapshot.atr, zones: highTfZones(snapshot.srZones), direction: srDir, room: srRoom });
       const openEntry = [...openAutoTrades.entries()].find(([, t]) => t.code === code);
       const openTrade = openEntry ? openEntry[1] : null;
       if (openTrade) {
@@ -1920,6 +1926,23 @@ async function pollClosedTrades() {
   } catch (err) {
     console.error('[autoTrader] Imeshindwa kuangalia positions:', err.message);
     return;
+  }
+
+  // Contracts zilizofika TP/SL (expired) lakini Deriv haijazisettle — zinabaki kwenye portfolio "zimeganda".
+  // Zisettle kwa sell_expired ili zifungwe na kupata faida/hasara halisi.
+  let settledNow = false;
+  for (const [contractId] of [...openAutoTrades.entries()]) {
+    if (!openIds.has(String(contractId))) continue;
+    try {
+      const d = await getContractDetails(contractId);
+      if (isExpiredUnsold(d) && !settledNow) {
+        console.log(`[autoTrader] ${contractId}: imekwisha (TP/SL imefikiwa) lakini haijauzwa — nafanya sell_expired.`);
+        await settleExpiredContracts();
+        settledNow = true;
+        const after = await getOpenPositions();
+        openIds = new Set(after.map((p) => String(p.contract_id)));
+      }
+    } catch (_) { /* tutajaribu poll ijayo */ }
   }
 
   for (const [contractId, info] of [...openAutoTrades.entries()]) {

@@ -656,6 +656,10 @@ async function getOpenPositionsLive() {
           current_spot: details?.current_spot,
           multiplier: details?.multiplier ?? p.multiplier,
           limit_order: details?.limit_order ?? p.limit_order,
+          is_expired: details?.is_expired,
+          is_settleable: details?.is_settleable,
+          is_sold: details?.is_sold,
+          awaiting_settle: isExpiredUnsold(details),
         };
       } catch (err) {
         return p; // ukiona hitilafu kwa contract moja, bado onyesha nyingine
@@ -673,6 +677,32 @@ function toContractId(contractId) {
   return n;
 }
 
+// Ujumbe wa Deriv wa contract iliyokwisha muda / tayari imefungwa (mfano "This contract has expired",
+// "already sold", "has been sold"). Kwa Multipliers ikifika Take Profit/Stop Loss, contract inaweza kubaki
+// "expired" bila kuuzwa mara moja — "sell" inakataliwa, na inahitaji "sell_expired" kuisettle.
+const EXPIRED_RE = /expired|already (?:been )?(?:sold|closed|settled)|has been (?:sold|closed|settled)|not (?:valid|open) to sell|is_valid_to_sell/i;
+
+/**
+ * Settle contracts zilizokwisha muda (sell_expired) — Deriv inauza zote zilizo expired kwenye akaunti.
+ * Inarudisha idadi iliyosettlewa, au null ikishindwa.
+ */
+async function settleExpiredContracts() {
+  try {
+    const res = await send({ sell_expired: 1 });
+    return Number(res?.sell_expired?.count) || 0;
+  } catch (err) {
+    console.error('[derivTrader] sell_expired imeshindwa:', err.message);
+    return null;
+  }
+}
+
+/** Contract hii ipo katika hali ya "imekwisha lakini haijauzwa"? (TP/SL imefikiwa, inasubiri settle). */
+function isExpiredUnsold(d) {
+  if (!d) return false;
+  if (Number(d.is_sold) === 1 || d.status === 'sold') return false;
+  return Number(d.is_expired) === 1 || Number(d.is_settleable) === 1;
+}
+
 async function closeContract(contractId) {
   const id = toContractId(contractId);
   let lastErr;
@@ -682,6 +712,26 @@ async function closeContract(contractId) {
       return res.sell; // { contract_id, sold_for, transaction_id, ... } — HAINA "profit"!
     } catch (err) {
       lastErr = err;
+      // Contract imekwisha (TP/SL imefikiwa) — isettle kwa sell_expired kisha thibitisha na Deriv.
+      if (EXPIRED_RE.test(String(err.message))) {
+        const settled = await settleExpiredContracts();
+        await new Promise((r) => setTimeout(r, 700));
+        let d = null;
+        try { d = await getContractDetails(id); } catch (_) { /* tutatumia profit_table */ }
+        let closed = null;
+        if (!d || Number(d.is_sold) !== 1) {
+          try { closed = await getClosedContractFromHistory(id); } catch (_) { /* hakuna */ }
+        }
+        if ((d && Number(d.is_sold) === 1) || closed) {
+          const soldFor = Number(d?.sell_price ?? closed?.sell_price);
+          console.log(`[derivTrader] ${id}: ilikuwa expired — imesettlewa (sell_expired=${settled}).`);
+          return { contract_id: id, sold_for: Number.isFinite(soldFor) ? soldFor : undefined, alreadyClosed: true };
+        }
+        throw new Error(
+          `Contract ${id} imefika TP/SL na imekwisha, lakini Deriv bado haijaisettle (sell_expired=${settled ?? 'imeshindwa'}). ` +
+          'Jaribu tena baada ya sekunde chache — itaonekana kwenye History.'
+        );
+      }
       // Jaribu mara ya pili TU kwa matatizo ya muunganisho/muda, si kwa kukataliwa na Deriv.
       if (!/muda|timeout|connect|socket|closed|ws/i.test(String(err.message))) break;
       await new Promise((r) => setTimeout(r, 800));
@@ -916,6 +966,8 @@ module.exports = {
   getClosedContractFromHistory,
   getProfitTable,
   closeContract,
+  settleExpiredContracts,
+  isExpiredUnsold,
   closeContractWithPnL,
   closeAll,
   getBalance,
