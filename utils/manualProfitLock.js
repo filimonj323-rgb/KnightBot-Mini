@@ -88,6 +88,7 @@ async function tick(deps = {}) {
           `✅ Faida ya angalau $${fmt(-newSl)} imefungwa sasa.\n🆔 Contract ID: ${id}`
         );
       } catch (err) {
+        if (err && err.code === 'CONTRACT_CLOSED') { locked.add(id); continue; } // imeshafungwa/kwisha — hakuna cha kulinda, usitume arifa ya uongo
         const n = (attempts.get(id) || 0) + 1;
         attempts.set(id, n);
         console.error(`[manualProfitLock] imeshindwa kuweka lock ya ${id} (jaribio ${n}/${MAX_ATTEMPTS}):`, err.message);

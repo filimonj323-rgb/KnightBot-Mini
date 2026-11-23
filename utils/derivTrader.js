@@ -634,9 +634,21 @@ function parseLimitOrderAmountConstraint(message) {
   return null;
 }
 
+// Contracts ambazo tunajua zimeshafika TP/SL au zimeuzwa (Deriv inaweza kuziacha kwenye portfolio "zimeganda",
+// status=open + is_expired=1, na hakuna njia ya kuzisettle kwa API mpya). Tunazificha kwenye orodha ya wazi.
+const closedMarks = new Map(); // contractId -> ms
+const CLOSED_MARK_TTL_MS = 24 * 60 * 60 * 1000;
+function markContractClosed(id) { closedMarks.set(String(id), Date.now()); }
+function isMarkedClosed(id) {
+  const t = closedMarks.get(String(id));
+  if (t == null) return false;
+  if (Date.now() - t > CLOSED_MARK_TTL_MS) { closedMarks.delete(String(id)); return false; }
+  return true;
+}
+
 async function getOpenPositions() {
   const res = await send({ portfolio: 1 });
-  return res.portfolio?.contracts || [];
+  return (res.portfolio?.contracts || []).filter((c) => !isMarkedClosed(c.contract_id));
 }
 
 // Kama getOpenPositions() lakini kwa kila contract inaongeza bid_price/profit
@@ -645,10 +657,11 @@ async function getOpenPositions() {
 // "live" (kupanda/kushuka) kwenye admin dashboard (fxtrading.html).
 async function getOpenPositionsLive() {
   const positions = await getOpenPositions();
-  return Promise.all(
+  const all = await Promise.all(
     positions.map(async (p) => {
       try {
         const details = await getContractDetails(p.contract_id);
+        if (isExpiredUnsold(details) || isClosedState(details)) { markContractClosed(p.contract_id); return null; }
         return {
           ...p,
           bid_price: details?.bid_price ?? p.bid_price,
@@ -666,6 +679,7 @@ async function getOpenPositionsLive() {
       }
     })
   );
+  return all.filter(Boolean);
 }
 
 // Deriv inahitaji contract_id kama NAMBA (integer). Dashboard hutuma kama
@@ -686,13 +700,16 @@ const EXPIRED_RE = /expired|already (?:been )?(?:sold|closed|settled)|has been (
  * Settle contracts zilizokwisha muda (sell_expired) — Deriv inauza zote zilizo expired kwenye akaunti.
  * Inarudisha idadi iliyosettlewa, au null ikishindwa.
  */
+let sellExpiredUnsupported = false;
 async function settleExpiredContracts() {
+  if (sellExpiredUnsupported) { settleExpiredContracts.lastError = 'sell_expired haitambuliki kwenye API mpya ya Deriv'; return null; }
   try {
     const res = await send({ sell_expired: 1 });
     return Number(res?.sell_expired?.count) || 0;
   } catch (err) {
-    console.error('[derivTrader] sell_expired imeshindwa:', err.message);
     settleExpiredContracts.lastError = String(err.message || err);
+    if (/no recognized method|unrecognised|unrecognized/i.test(settleExpiredContracts.lastError)) sellExpiredUnsupported = true;
+    else console.error('[derivTrader] sell_expired imeshindwa:', err.message);
     return null;
   }
 }
@@ -726,8 +743,8 @@ async function closeContract(contractId) {
         try { d = await getContractDetails(id); } catch (_) { /* tutatumia profit_table */ }
         let settled = null;
         if (!isClosedState(d)) {
-          settled = await settleExpiredContracts(); // 2) bado haijauzwa → isettle kwa sell_expired
-          await new Promise((r) => setTimeout(r, 900));
+          settled = await settleExpiredContracts(); // 2) bado haijauzwa → jaribu sell_expired (ikiwepo kwenye API)
+          if (settled != null) await new Promise((r) => setTimeout(r, 900));
           try { d = await getContractDetails(id); } catch (_) { /* endelea */ }
         }
         let closed = null;
@@ -738,6 +755,14 @@ async function closeContract(contractId) {
           const soldFor = Number(d?.sell_price ?? closed?.sell_price);
           console.log(`[derivTrader] ${id}: ilikuwa expired — sasa imefungwa (sell_expired=${settled}).`);
           return { contract_id: id, sold_for: Number.isFinite(soldFor) ? soldFor : undefined, alreadyClosed: true };
+        }
+        // TP/SL imefikiwa (expired + settleable) lakini Deriv haijaiuza kwenye mfumo — kwa vitendo trade IMEKWISHA.
+        // Ifunge upande wetu (ficha kwenye orodha, rekodi); faida halisi inasahihishwa na reconcile kutoka profit_table.
+        if (isExpiredUnsold(d)) {
+          markContractClosed(id);
+          const est = Number(d.sell_price ?? d.bid_price);
+          console.log(`[derivTrader] ${id}: TP/SL imefikiwa (expired) — imefungwa upande wa bot; bei ya kufunga ≈ ${Number.isFinite(est) ? est : '?'}.`);
+          return { contract_id: id, sold_for: Number.isFinite(est) ? est : undefined, alreadyClosed: true, estimated: true };
         }
         const info = d
           ? `status=${d.status}, is_sold=${d.is_sold}, is_expired=${d.is_expired}, is_settleable=${d.is_settleable}, valid_to_sell=${d.is_valid_to_sell}` +
@@ -793,6 +818,10 @@ async function updateContractLimits(contractId, { stopLoss, takeProfit } = {}) {
     const res = await send({ contract_update: 1, contract_id: toContractId(contractId), limit_order: limitOrder });
     return res.contract_update;
   } catch (err) {
+    if (EXPIRED_RE.test(String(err.message))) {
+      markContractClosed(contractId);
+      throw Object.assign(new Error('Contract imeshafungwa/kwisha — hakuna cha kubadilisha.'), { code: 'CONTRACT_CLOSED' });
+    }
     // Sawa na placeMultiplier(): Deriv inaweza kukataa thamani mpya kwa
     // kiwango cha chini/juu kinachohitajika wakati huo (hutofautiana kwa
     // jozi/bei ya sasa) — soma ujumbe wake tuutoe ufafanuzi wazi zaidi
@@ -992,6 +1021,8 @@ module.exports = {
   settleExpiredContracts,
   isExpiredUnsold,
   isClosedState,
+  markContractClosed,
+  isMarkedClosed,
   closeContractWithPnL,
   closeAll,
   getBalance,

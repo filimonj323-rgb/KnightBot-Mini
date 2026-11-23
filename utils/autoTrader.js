@@ -107,6 +107,8 @@ const {
   settleExpiredContracts,
   isExpiredUnsold,
   isClosedState,
+  markContractClosed,
+  isMarkedClosed,
 } = require('./derivTrader');
 // Turso (libSQL) — tayari inatumika na pairing/server.js kwa users/payments;
 // hapa tunatumia kuhifadhi openAutoTrades ili isipotee kila redeploy/restart
@@ -1205,6 +1207,7 @@ async function checkTrailingStops() {
           `\n🆔 Contract ID: ${contractId}`
       );
     } catch (err) {
+      if (err && err.code === 'CONTRACT_CLOSED') continue; // contract imeshafungwa — monitor ya kufunga itaishughulikia
       console.error(`[autoTrader] Trailing: imeshindwa kusogeza SL ya ${info.code} (${contractId}):`, err.message);
     }
   }
@@ -1929,19 +1932,17 @@ async function pollClosedTrades() {
     return;
   }
 
-  // Contracts zilizofika TP/SL (expired) lakini Deriv haijazisettle — zinabaki kwenye portfolio "zimeganda".
-  // Zisettle kwa sell_expired ili zifungwe na kupata faida/hasara halisi.
-  let settledNow = false;
+  // Contracts zilizofika TP/SL (expired) lakini Deriv haijazisettle zinabaki kwenye portfolio "zimeganda"
+  // (status=open, is_expired=1). Kwa API mpya hakuna sell_expired — zihesabu kama zimefungwa ili
+  // zifuate njia ya kawaida ya kufunga (faida/hasara + DB + arifa).
   for (const [contractId] of [...openAutoTrades.entries()]) {
     if (!openIds.has(String(contractId))) continue;
     try {
       const d = await getContractDetails(contractId);
-      if (isExpiredUnsold(d) && !settledNow) {
-        console.log(`[autoTrader] ${contractId}: imekwisha (TP/SL imefikiwa) lakini haijauzwa — nafanya sell_expired.`);
-        await settleExpiredContracts();
-        settledNow = true;
-        const after = await getOpenPositions();
-        openIds = new Set(after.map((p) => String(p.contract_id)));
+      if (isExpiredUnsold(d)) {
+        console.log(`[autoTrader] ${contractId}: TP/SL imefikiwa (expired) lakini Deriv haijaiuza — nahesabu imefungwa.`);
+        markContractClosed(contractId);
+        openIds.delete(String(contractId));
       }
     } catch (_) { /* tutajaribu poll ijayo */ }
   }
@@ -1954,12 +1955,12 @@ async function pollClosedTrades() {
     // kwamba contract IMEUZWA kweli kabla ya kuifunga kwenye DB.
     let verify = null;
     try { verify = await getContractDetails(contractId); } catch (_) { /* hakuna ushahidi */ }
-    if (verify && !isClosedState(verify)) {
+    if (verify && !isClosedState(verify) && !isMarkedClosed(contractId) && !isExpiredUnsold(verify)) {
       closeMisses.delete(contractId);
       console.log(`[autoTrader] ${info.code} (${contractId}): haipo kwenye portfolio lakini Deriv inasema BADO WAZI — inaendelea kufuatiliwa.`);
       continue;
     }
-    let soldProof = isClosedState(verify);
+    let soldProof = isClosedState(verify) || isMarkedClosed(contractId) || isExpiredUnsold(verify);
     if (!soldProof) {
       try { soldProof = !!(await getClosedContractFromHistory(contractId)); } catch (_) { /* hakuna ushahidi */ }
     }
