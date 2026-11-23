@@ -106,6 +106,7 @@ const {
   getRecentOpens,
   settleExpiredContracts,
   isExpiredUnsold,
+  isClosedState,
 } = require('./derivTrader');
 // Turso (libSQL) — tayari inatumika na pairing/server.js kwa users/payments;
 // hapa tunatumia kuhifadhi openAutoTrades ili isipotee kila redeploy/restart
@@ -1953,12 +1954,12 @@ async function pollClosedTrades() {
     // kwamba contract IMEUZWA kweli kabla ya kuifunga kwenye DB.
     let verify = null;
     try { verify = await getContractDetails(contractId); } catch (_) { /* hakuna ushahidi */ }
-    if (verify && Number(verify.is_sold) === 0 && verify.status !== 'sold') {
+    if (verify && !isClosedState(verify)) {
       closeMisses.delete(contractId);
       console.log(`[autoTrader] ${info.code} (${contractId}): haipo kwenye portfolio lakini Deriv inasema BADO WAZI — inaendelea kufuatiliwa.`);
       continue;
     }
-    let soldProof = !!(verify && Number(verify.is_sold) === 1);
+    let soldProof = isClosedState(verify);
     if (!soldProof) {
       try { soldProof = !!(await getClosedContractFromHistory(contractId)); } catch (_) { /* hakuna ushahidi */ }
     }

@@ -692,14 +692,21 @@ async function settleExpiredContracts() {
     return Number(res?.sell_expired?.count) || 0;
   } catch (err) {
     console.error('[derivTrader] sell_expired imeshindwa:', err.message);
+    settleExpiredContracts.lastError = String(err.message || err);
     return null;
   }
+}
+
+/** Contract imeshafungwa tayari (inajumuisha status za won/lost, si is_sold pekee)? */
+function isClosedState(d) {
+  if (!d) return false;
+  return Number(d.is_sold) === 1 || ['sold', 'won', 'lost'].includes(String(d.status || '').toLowerCase());
 }
 
 /** Contract hii ipo katika hali ya "imekwisha lakini haijauzwa"? (TP/SL imefikiwa, inasubiri settle). */
 function isExpiredUnsold(d) {
   if (!d) return false;
-  if (Number(d.is_sold) === 1 || d.status === 'sold') return false;
+  if (isClosedState(d)) return false;
   return Number(d.is_expired) === 1 || Number(d.is_settleable) === 1;
 }
 
@@ -714,22 +721,32 @@ async function closeContract(contractId) {
       lastErr = err;
       // Contract imekwisha (TP/SL imefikiwa) — isettle kwa sell_expired kisha thibitisha na Deriv.
       if (EXPIRED_RE.test(String(err.message))) {
-        const settled = await settleExpiredContracts();
-        await new Promise((r) => setTimeout(r, 700));
+        // 1) Angalia hali halisi ya contract kwanza — mara nyingi tayari imeuzwa (TP/SL) na orodha ndiyo iliyochelewa.
         let d = null;
         try { d = await getContractDetails(id); } catch (_) { /* tutatumia profit_table */ }
+        let settled = null;
+        if (!isClosedState(d)) {
+          settled = await settleExpiredContracts(); // 2) bado haijauzwa → isettle kwa sell_expired
+          await new Promise((r) => setTimeout(r, 900));
+          try { d = await getContractDetails(id); } catch (_) { /* endelea */ }
+        }
         let closed = null;
-        if (!d || Number(d.is_sold) !== 1) {
+        if (!isClosedState(d)) {
           try { closed = await getClosedContractFromHistory(id); } catch (_) { /* hakuna */ }
         }
-        if ((d && Number(d.is_sold) === 1) || closed) {
+        if (isClosedState(d) || closed) {
           const soldFor = Number(d?.sell_price ?? closed?.sell_price);
-          console.log(`[derivTrader] ${id}: ilikuwa expired — imesettlewa (sell_expired=${settled}).`);
+          console.log(`[derivTrader] ${id}: ilikuwa expired — sasa imefungwa (sell_expired=${settled}).`);
           return { contract_id: id, sold_for: Number.isFinite(soldFor) ? soldFor : undefined, alreadyClosed: true };
         }
+        const info = d
+          ? `status=${d.status}, is_sold=${d.is_sold}, is_expired=${d.is_expired}, is_settleable=${d.is_settleable}, valid_to_sell=${d.is_valid_to_sell}` +
+            (d.validation_error ? `, "${d.validation_error}"` : '')
+          : 'hali ya contract haikupatikana';
         throw new Error(
-          `Contract ${id} imefika TP/SL na imekwisha, lakini Deriv bado haijaisettle (sell_expired=${settled ?? 'imeshindwa'}). ` +
-          'Jaribu tena baada ya sekunde chache — itaonekana kwenye History.'
+          `Contract ${id} imekwisha lakini Deriv bado haijaisettle. ` +
+          `[${info}] [sell_expired: ${settled == null ? 'imeshindwa — ' + (settleExpiredContracts.lastError || 'sababu haijulikani') : settled + ' zimesettlewa'}] ` +
+          'Subiri sekunde chache na ujaribu tena; ikiendelea, funga kupitia app/tovuti ya Deriv.'
         );
       }
       // Jaribu mara ya pili TU kwa matatizo ya muunganisho/muda, si kwa kukataliwa na Deriv.
@@ -851,6 +868,12 @@ async function getContractDetails(contractId) {
 // cha kuaminika zaidi ni "profit_table" — historia ya transactions
 // zilizokamilika — hivyo tunatafuta contract_id husika humo.
 async function getClosedContractFromHistory(contractId) {
+  // Jaribu kwanza kwa contract_id moja kwa moja (haikosi hata ikiwa si kati ya 25 za mwisho).
+  try {
+    const one = await send({ profit_table: 1, description: 1, contract_id: toContractId(contractId), limit: 5 });
+    const hit = (one.profit_table?.transactions || []).find((t) => String(t.contract_id) === String(contractId));
+    if (hit) return hit;
+  } catch (_) { /* tuendelee na orodha ya jumla */ }
   const res = await send({
     profit_table: 1,
     description: 1,
@@ -968,6 +991,7 @@ module.exports = {
   closeContract,
   settleExpiredContracts,
   isExpiredUnsold,
+  isClosedState,
   closeContractWithPnL,
   closeAll,
   getBalance,
