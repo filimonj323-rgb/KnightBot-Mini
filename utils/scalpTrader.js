@@ -42,8 +42,11 @@ const DEFAULTS = {
   allowRealAuto: false,
   stake: 2,
   multiplier: 100,
-  slAtr: 0.8,        // SL = slAtr × ATR(M5)
-  rr: 1.5,           // TP = SL × rr
+  slMode: 'atr',     // 'atr' = SL/TP kutoka ATR(M5); 'fixed' = kiasi cha $ unachoweka mwenyewe
+  slAtr: 0.8,        // (atr) SL = slAtr × ATR(M5)
+  rr: 1.5,           // (atr) TP = SL × rr
+  slFixed: 0.5,      // (fixed) SL kwa $
+  tpFixed: 0.75,     // (fixed) TP kwa $
   minStrength: 75,   // nguvu ya chini ya signal kwa auto
   maxOpen: 3,
   maxDailyLoss: 6,   // $ — hasara ya jumla ya siku (UTC) ikifika, auto inasimama hadi kesho
@@ -58,7 +61,7 @@ const DEFAULTS = {
   sessionEndUtc: 21,
 };
 const LIMITS = {
-  stake: [1, 50], multiplier: [100, 800], slAtr: [0.3, 3], rr: [0.8, 4], minStrength: [50, 100],
+  stake: [1, 50], multiplier: [100, 800], slAtr: [0.3, 3], rr: [0.8, 4], slFixed: [0.1, 100], tpFixed: [0.1, 500], minStrength: [50, 100],
   maxOpen: [1, 6], maxDailyLoss: [1, 200], maxConsecLosses: [1, 10], cooldownMin: [0, 240],
   timeStopMin: [0, 240], newsPreMin: [0, 60], newsPostMin: [0, 30], sessionStartUtc: [0, 23], sessionEndUtc: [1, 24],
 };
@@ -128,6 +131,7 @@ function sanitize(s) {
   if (!out.pairs.length) out.pairs = DEFAULT_PAIRS.slice();
   for (const k of ['autoEnabled', 'allowRealAuto', 'sessionOnly']) out[k] = !!out[k];
   out.newsImpact = out.newsImpact === 'Medium' ? 'Medium' : 'High';
+  out.slMode = out.slMode === 'fixed' ? 'fixed' : 'atr';
   return out;
 }
 
@@ -269,12 +273,17 @@ async function analyze(pair, events) {
 
 /** Kokotoa SL/TP ($) kutoka ATR ya M5 kwa stake/multiplier. */
 function sizing(sig, stake, multiplier, o = {}) {
+  const k0 = (stake * multiplier) / sig.price; // $ kwa kila 1 ya bei
+  if ((o.slMode || settings.slMode) === 'fixed') {
+    const slUsd = r2(clamp(num(o.slFixed, settings.slFixed), 0.1, stake * 0.9)); const tpUsd = r2(Math.max(0.1, num(o.tpFixed, settings.tpFixed)));
+    return { slUsd, tpUsd, slDist: slUsd / k0, tpDist: tpUsd / k0, riskUsd: slUsd, rewardUsd: tpUsd, rr: Number((tpUsd / slUsd).toFixed(2)), mode: 'fixed' };
+  }
   const slAtr = num(o.slAtr, settings.slAtr); const rr = num(o.rr, settings.rr);
   const slDist = Math.max(slAtr * sig.atr5, sig.price * 0.0002);
   const k = (stake * multiplier) / sig.price; // $ kwa kila 1 ya bei
   let slUsd = clamp(slDist * k, 0.1, stake * 0.9);
   const slDistEff = slUsd / k; const tpUsd = Math.max(0.1, slUsd * rr);
-  return { slUsd: r2(slUsd), tpUsd: r2(tpUsd), slDist: slDistEff, tpDist: slDistEff * rr, riskUsd: r2(slUsd), rewardUsd: r2(tpUsd), rr };
+  return { slUsd: r2(slUsd), tpUsd: r2(tpUsd), slDist: slDistEff, tpDist: slDistEff * rr, riskUsd: r2(slUsd), rewardUsd: r2(tpUsd), rr, mode: 'atr' };
 }
 
 // ── Scan ya watchlist ──────────────────────────────────────────────────────────────────
