@@ -89,6 +89,7 @@ const economicCalendar = require('../utils/economicCalendar');
 const newsTrader = require('../utils/newsTrader');
 const newsObserver = require('../utils/newsObserver');
 const scalpTrader = require('../utils/scalpTrader');
+const scalpRegistry = require('../utils/scalpRegistry');
 const newsBacktest = require('../utils/newsBacktest');
 const fxPredictions = require('../utils/fxPredictions');
 const tradeAnalysis = require('../utils/tradeAnalysis');
@@ -1033,6 +1034,17 @@ async function handlePairingRequest(req, res) {
         const route = req.url.split('?')[0].slice('/api/admin/scalp/'.length);
         const q = new URL(req.url, 'http://x').searchParams;
 
+        // Usalama wa REAL: kitendo cha hatari kwenye akaunti ya pesa halisi kinahitaji kuandika REAL + PIN (FX_REAL_PIN ikiwa imewekwa).
+        const realGuardError = (body) => {
+          if (String(body && body.confirm || '').trim().toUpperCase() !== 'REAL') return 'Andika REAL kuthibitisha.';
+          const requiredPin = process.env.FX_REAL_PIN;
+          if (requiredPin) {
+            const a = Buffer.from(String(body.pin || '')); const b = Buffer.from(String(requiredPin));
+            if (!(a.length === b.length && crypto.timingSafeEqual(a, b))) return 'PIN si sahihi.';
+          }
+          return null;
+        };
+
         if (req.method === 'GET' && route === 'overview') {
           const [status, positions, balance, rows, stats] = await Promise.all([
             scalpTrader.getStatus(),
@@ -1043,8 +1055,9 @@ async function handlePairingRequest(req, res) {
           ]);
           const mine = new Map(rows.map((r) => [String(r.contractId), r]));
           return sendJson(res, 200, {
-            ok: true, balance, stats, ...status,
-            positions: positions.map((p) => ({ ...p, scalp: mine.has(String(p.contract_id)) ? { source: mine.get(String(p.contract_id)).source, openedAt: mine.get(String(p.contract_id)).openedAt, mode: mine.get(String(p.contract_id)).mode, strength: mine.get(String(p.contract_id)).strength } : null })),
+            ok: true, balance, stats, ...status, pinRequired: !!process.env.FX_REAL_PIN,
+            // Ukurasa wa Scalp unaonyesha trades za Scalp TU — za fx hazionekani hapa.
+            positions: positions.filter((p) => mine.has(String(p.contract_id))).map((p) => ({ ...p, scalp: { source: mine.get(String(p.contract_id)).source, openedAt: mine.get(String(p.contract_id)).openedAt, mode: mine.get(String(p.contract_id)).mode, strength: mine.get(String(p.contract_id)).strength } })),
           });
         }
         if (req.method === 'POST' && route === 'scan') {
@@ -1059,7 +1072,14 @@ async function handlePairingRequest(req, res) {
         }
         if (req.method === 'POST' && route === 'settings') {
           const body = await readJsonBody(req);
+          const before = await scalpTrader.getSettings();
+          // Kuwasha "Ruhusu auto kwenye REAL" ni hatari — inahitaji REAL + PIN.
+          if (body && body.allowRealAuto === true && !before.allowRealAuto) {
+            const bad = realGuardError(body);
+            if (bad) return sendJson(res, 403, { ok: false, needReal: true, error: bad });
+          }
           const settings = await scalpTrader.setSettings(body || {});
+          console.log('[scalp] settings zimebadilishwa:', Object.keys(body || {}).filter((k) => !['pin', 'confirm'].includes(k)).join(', '));
           return sendJson(res, 200, { ok: true, settings });
         }
         if (req.method === 'POST' && route === 'preview') {
@@ -1070,12 +1090,19 @@ async function handlePairingRequest(req, res) {
         if (req.method === 'POST' && route === 'open') {
           const body = await readJsonBody(req);
           try {
+            let confirmReal = false;
+            if (body.confirm !== undefined || body.pin !== undefined) { // mtumiaji ametoa uthibitisho wa REAL — ukague (PIN)
+              const bad = realGuardError(body);
+              if (bad) return sendJson(res, 403, { ok: false, needReal: true, error: bad });
+              confirmReal = true;
+            }
             const result = await scalpTrader.openTrade({
-              pair: body.pair, direction: body.direction === 'SELL' ? 'SELL' : 'BUY', stake: body.stake, multiplier: body.multiplier,
-              slUsd: body.slUsd, tpUsd: body.tpUsd, source: 'manual', force: body.force === true,
+              pair: body.pair, direction: body.direction === 'SELL' ? 'SELL' : body.direction === 'BUY' ? 'BUY' : null, stake: body.stake, multiplier: body.multiplier,
+              slUsd: body.slUsd, tpUsd: body.tpUsd, source: 'manual', force: body.force === true, confirmReal,
             });
             return sendJson(res, 200, { ok: true, result });
           } catch (err) {
+            if (err.code === 'REAL_CONFIRM') return sendJson(res, 409, { ok: false, needReal: true, error: err.message });
             if (err.code === 'NEWS_BLACKOUT') return sendJson(res, 409, { ok: false, news: true, error: err.message });
             if (err.code === 'DUPLICATE_OPEN') return sendJson(res, 409, { ok: false, duplicate: true, error: err.message });
             return sendJson(res, 400, { ok: false, error: err.message });
@@ -1100,10 +1127,13 @@ async function handlePairingRequest(req, res) {
 
       // Muhtasari kamili: balance + positions wazi + hali ya auto-trader.
       if (req.method === 'GET' && req.url === '/api/admin/fx/overview') {
-        const [positions, balance] = await Promise.all([
+        const [positionsAll, balance] = await Promise.all([
           derivTrader.getOpenPositionsLive(),
           derivTrader.getBalance(),
         ]);
+        // Trades za Scalp zina ukurasa wake (scalping.html) — hazionekani wala kuhesabiwa kwenye fxtrading.
+        await scalpRegistry.ensureLoaded();
+        const positions = positionsAll.filter((p) => !scalpRegistry.isScalpContract(p.contract_id));
         return sendJson(res, 200, {
           ok: true,
           balance,
