@@ -37,6 +37,7 @@ let notifyFn = null;
 const locked = new Set();          // contract IDs zilizoshawekewa lock
 const attempts = new Map();        // contractId -> idadi ya majaribio yaliyoshindwa
 const gaveUp = new Set();
+const minLockSeen = new Map();   // contractId -> kiwango cha chini cha lock kilichojulikana kutoka Deriv (kuepuka maombi yanayorudiwa)
 
 const fmt = (n) => Number(n).toFixed(2);
 
@@ -68,18 +69,35 @@ async function tick(deps = {}) {
     let positions;
     try { positions = await d.getOpenPositionsLive(); } catch (_) { return; } // hakuna muunganiko/Deriv imekataa — jaribu tena tick ijayo
     const openIds = new Set(positions.map((p) => String(p.contract_id)));
-    for (const id of [...locked]) if (!openIds.has(id)) { locked.delete(id); attempts.delete(id); gaveUp.delete(id); } // trade imefungwa
+    for (const id of [...locked, ...minLockSeen.keys()]) if (!openIds.has(id)) { locked.delete(id); attempts.delete(id); gaveUp.delete(id); minLockSeen.delete(id); } // trade imefungwa
 
     for (const p of positions) {
       const id = String(p.contract_id);
       if (locked.has(id) || gaveUp.has(id)) continue;
       if (d.isTrackedByAuto(id) || d.isNews(id)) continue;
       const tp = Number(p.limit_order && p.limit_order.take_profit && p.limit_order.take_profit.order_amount);
-      const newSl = decideLock(p.profit, tp);
+      let newSl = decideLock(p.profit, tp);
       if (newSl === null) continue;
+      const known = minLockSeen.get(id);
+      if (known != null) { // tayari tunajua kiwango cha chini cha Deriv kwa trade hii
+        if (known >= Number(p.profit)) continue; // faida bado ndogo — usiulize Deriv tena
+        newSl = -Math.max(-newSl, known);
+      }
 
       try {
-        await d.updateContractLimits(id, { stopLoss: newSl });
+        try {
+          await d.updateContractLimits(id, { stopLoss: newSl });
+        } catch (firstErr) {
+          // Deriv ina kiwango cha chini cha lock (mfano "angalau $0.28"). Rekebisha mara moja hadi kiwango hicho,
+          // lakini TU kama bado kiko chini ya faida ya sasa; la sivyo subiri faida iongezeke (bila kurudia maombi).
+          const m = /angalau\s*\$?\s*(\d+(?:\.\d+)?)/i.exec(String(firstErr && firstErr.message));
+          const minLock = m ? Math.round((Number(m[1]) + 0.01) * 100) / 100 : NaN;
+          if (!Number.isFinite(minLock)) throw firstErr;
+          minLockSeen.set(id, minLock);
+          if (minLock >= Number(p.profit)) continue; // faida bado ndogo kuliko kiwango cha chini cha Deriv — subiri faida iongezeke
+          newSl = -minLock;
+          await d.updateContractLimits(id, { stopLoss: newSl });
+        }
         locked.add(id);
         console.log(`[manualProfitLock] 🔒 ${id}: faida $${fmt(p.profit)} (≥${TRIGGER_PCT}% ya TP $${fmt(tp)}) → SL ${fmt(newSl)} (faida ya $${fmt(-newSl)} imefungwa).`);
         if (notifyFn) await notifyFn(
