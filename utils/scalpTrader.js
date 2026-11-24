@@ -18,23 +18,22 @@
 const db = require('../pairing/db');
 const derivTrader = require('./derivTrader');
 const economicCalendar = require('./economicCalendar');
+const scalpRegistry = require('./scalpRegistry');
 
 // ── Katalogi ya instruments zinazoruhusiwa ─────────────────────────────────────────────
+// Scalp inaruhusu pairs zenye MOVEMENT KUBWA tu (ATR/range kubwa — scalp ina nafasi ya kufikia TP kabla ya spread kula faida).
+// Pairs za movement ndogo (EURUSD, USDCAD, USDCHF, AUDUSD, NZDUSD, EURGBP, USDJPY) zimeondolewa hapa na zinabaki kwenye FX (fxtrading) pekee.
 const CATALOG = {
   XAUUSD: { label: 'Gold (XAU/USD)', ccy: ['USD'], kind: 'metal', hot: true },
-  EURUSD: { label: 'EUR/USD', ccy: ['EUR', 'USD'], kind: 'major' },
-  GBPUSD: { label: 'GBP/USD', ccy: ['GBP', 'USD'], kind: 'major' },
-  USDJPY: { label: 'USD/JPY', ccy: ['USD', 'JPY'], kind: 'major' },
-  USDCAD: { label: 'USD/CAD', ccy: ['USD', 'CAD'], kind: 'major' },
-  AUDUSD: { label: 'AUD/USD', ccy: ['AUD', 'USD'], kind: 'major' },
-  NZDUSD: { label: 'NZD/USD', ccy: ['NZD', 'USD'], kind: 'major' },
-  USDCHF: { label: 'USD/CHF', ccy: ['USD', 'CHF'], kind: 'major' },
   GBPJPY: { label: 'GBP/JPY', ccy: ['GBP', 'JPY'], kind: 'volatile', hot: true },
-  EURJPY: { label: 'EUR/JPY', ccy: ['EUR', 'JPY'], kind: 'cross' },
-  AUDJPY: { label: 'AUD/JPY', ccy: ['AUD', 'JPY'], kind: 'cross' },
-  EURGBP: { label: 'EUR/GBP', ccy: ['EUR', 'GBP'], kind: 'cross' },
+  GBPUSD: { label: 'GBP/USD', ccy: ['GBP', 'USD'], kind: 'major', hot: true },
+  EURJPY: { label: 'EUR/JPY', ccy: ['EUR', 'JPY'], kind: 'cross', hot: true },
+  AUDJPY: { label: 'AUD/JPY', ccy: ['AUD', 'JPY'], kind: 'cross', hot: true },
+  NZDJPY: { label: 'NZD/JPY', ccy: ['NZD', 'JPY'], kind: 'cross', hot: true },
+  CADJPY: { label: 'CAD/JPY', ccy: ['CAD', 'JPY'], kind: 'cross', hot: true },
+  GBPCHF: { label: 'GBP/CHF', ccy: ['GBP', 'CHF'], kind: 'volatile', hot: true },
 };
-const DEFAULT_PAIRS = ['XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'GBPJPY', 'USDCAD', 'AUDUSD'];
+const DEFAULT_PAIRS = ['XAUUSD', 'GBPJPY', 'GBPUSD', 'EURJPY', 'AUDJPY'];
 
 const DEFAULTS = {
   pairs: DEFAULT_PAIRS,
@@ -59,11 +58,15 @@ const DEFAULTS = {
   sessionOnly: true,
   sessionStartUtc: 6,
   sessionEndUtc: 21,
+  minAtrPct: 0.025,  // ATR(M5) ya chini kama % ya bei: pair ikiwa "imelala" (chini ya hii) auto haifungui (movement ndogo)
+  maxAutoPerHour: 6, // kikomo cha trades za AUTO kwa saa (kinga dhidi ya kufungua kupita kiasi)
+  realStakeCap: 5,   // REAL: stake ya juu kwa trade ya scalp ($) — juu ya hapo inapunguzwa
 };
 const LIMITS = {
   stake: [1, 50], multiplier: [100, 800], slAtr: [0.3, 3], rr: [0.8, 4], slFixed: [0.1, 100], tpFixed: [0.1, 500], minStrength: [50, 100],
   maxOpen: [1, 6], maxDailyLoss: [1, 200], maxConsecLosses: [1, 10], cooldownMin: [0, 240],
   timeStopMin: [0, 240], newsPreMin: [0, 60], newsPostMin: [0, 30], sessionStartUtc: [0, 23], sessionEndUtc: [1, 24],
+  minAtrPct: [0, 0.5], maxAutoPerHour: [1, 30], realStakeCap: [1, 50],
 };
 
 let settings = { ...DEFAULTS };
@@ -100,6 +103,7 @@ async function ensureSchema() {
     buyPrice REAL, openedAt INTEGER, closedAt INTEGER, sellPrice REAL, profit REAL, source TEXT, mode TEXT,
     strength REAL, accountMode TEXT, reason TEXT)`, []);
   schemaReady = true;
+  await scalpRegistry.ensureLoaded();
 }
 
 async function loadSettings() {
@@ -125,7 +129,7 @@ async function saveSettings() {
 function sanitize(s) {
   const out = { ...DEFAULTS, ...s };
   for (const [k, [lo, hi]] of Object.entries(LIMITS)) out[k] = clamp(num(out[k], DEFAULTS[k]), lo, hi);
-  out.maxOpen = Math.round(out.maxOpen); out.maxConsecLosses = Math.round(out.maxConsecLosses);
+  out.maxOpen = Math.round(out.maxOpen); out.maxConsecLosses = Math.round(out.maxConsecLosses); out.maxAutoPerHour = Math.round(out.maxAutoPerHour);
   out.multiplier = [100, 200, 300, 500, 800].reduce((a, b) => (Math.abs(b - out.multiplier) < Math.abs(a - out.multiplier) ? b : a));
   out.pairs = [...new Set((Array.isArray(out.pairs) ? out.pairs : DEFAULT_PAIRS).map((p) => String(p).toUpperCase()).filter((p) => CATALOG[p]))];
   if (!out.pairs.length) out.pairs = DEFAULT_PAIRS.slice();
@@ -137,7 +141,9 @@ function sanitize(s) {
 
 async function setSettings(patch = {}) {
   await loadSettings();
-  const next = sanitize({ ...settings, ...patch });
+  const clean = {}; // ruhusu funguo zinazojulikana tu (hakuna data isiyotarajiwa kwenye settings)
+  for (const k of Object.keys(DEFAULTS)) if (Object.prototype.hasOwnProperty.call(patch || {}, k)) clean[k] = patch[k];
+  const next = sanitize({ ...settings, ...clean });
   const turnedOn = next.autoEnabled && !settings.autoEnabled;
   settings = next;
   if (turnedOn) { pausedUntil = 0; pauseReason = null; }
@@ -382,6 +388,12 @@ async function consecutiveAutoLosses() {
 
 // ── Kufungua / kufunga ─────────────────────────────────────────────────────────────────
 const inBlackout = (sig) => sig && sig.news && sig.news.state === 'blackout';
+/** Soko "limelala": ATR(M5) kama % ya bei iko chini ya kiwango — scalp haina maana (spread inakula TP). */
+const lowMovement = (sig) => Number.isFinite(sig && sig.atrPct5) && sig.atrPct5 < settings.minAtrPct;
+async function autoOpenedLastHour() {
+  const r = await db.query(`SELECT COUNT(*) AS n FROM scalp_trades WHERE source = 'auto' AND openedAt >= ?`, [Date.now() - 3600000]);
+  return num(r.rows && r.rows[0] && r.rows[0].n, 0);
+}
 
 async function previewTrade({ pair, direction, stake, multiplier }) {
   await loadSettings();
@@ -393,18 +405,31 @@ async function previewTrade({ pair, direction, stake, multiplier }) {
   return { pair, direction: direction === 'SELL' ? 'SELL' : 'BUY', stake: st, multiplier: mu, price: sig.price, atr5: sig.atr5, news: sig.news, ...sizing(sig, st, mu) };
 }
 
-async function openTrade({ pair, direction, stake, multiplier, slUsd, tpUsd, source = 'manual', force = false, strength = null, mode = null }) {
+async function openTrade({ pair, direction, stake, multiplier, slUsd, tpUsd, source = 'manual', force = false, strength = null, mode = null, confirmReal = false }) {
   await loadSettings(); await ensureSchema();
   pair = String(pair || '').toUpperCase();
-  if (!CATALOG[pair]) throw new Error(`Pair "${pair}" haitambuliki.`);
-  direction = direction === 'SELL' ? 'SELL' : 'BUY';
+  if (!CATALOG[pair]) throw new Error(`Pair "${pair}" haitambuliki kwenye Scalp (ni pairs zenye movement kubwa tu; nyingine zinabaki FX).`);
+  if (direction !== 'BUY' && direction !== 'SELL') throw new Error('Direction lazima iwe BUY au SELL.');
+  const accMode = derivTrader.getAccountMode ? derivTrader.getAccountMode() : null;
+  // Usalama: trade ya MKONO kwenye akaunti ya REAL inahitaji uthibitisho wa wazi (ukurasa unauliza; server inadai PIN ikiwa FX_REAL_PIN ipo).
+  if (source === 'manual' && accMode === 'real' && !confirmReal) {
+    const e = new Error('Akaunti ni REAL (pesa halisi) — thibitisha kufungua trade hii.'); e.code = 'REAL_CONFIRM'; throw e;
+  }
   const sig = signals.get(pair);
   if (source === 'auto' && inBlackout(sig)) throw new Error('Dirisha la habari kubwa.');
   if (source === 'manual' && inBlackout(sig) && !force) { const e = new Error(`Habari kubwa (${sig.news.event && sig.news.event.title}) — thibitisha kuendelea.`); e.code = 'NEWS_BLACKOUT'; throw e; }
-  const p = await previewTrade({ pair, direction, stake, multiplier });
-  const sl = num(slUsd) > 0 ? num(slUsd) : p.slUsd; const tp = num(tpUsd) > 0 ? num(tpUsd) : p.tpUsd;
-  const result = await derivTrader.placeMultiplier({ pair, direction, stake: p.stake, stopLoss: sl, takeProfit: tp, multiplier: p.multiplier });
-  const accountMode = derivTrader.getAccountMode ? derivTrader.getAccountMode() : null;
+  // Kikomo cha trades wazi cha Scalp (kinahesabu trades za scalp TU, si za fx).
+  const openNow = await openRows();
+  if (openNow.length >= settings.maxOpen + (source === 'manual' ? 2 : 0)) throw new Error(`Trades za Scalp zilizo wazi zimefika kikomo (${openNow.length}).`);
+  if (openNow.some((r) => r.pair === pair)) { const e = new Error(`${pair} tayari ina trade ya Scalp iliyo wazi.`); e.code = 'DUPLICATE_OPEN'; throw e; }
+  let useStake = stake;
+  if (accMode === 'real') useStake = Math.min(num(stake, settings.stake), settings.realStakeCap); // kikomo cha stake kwenye REAL
+  const p = await previewTrade({ pair, direction, stake: useStake, multiplier });
+  const sl = num(slUsd) > 0 ? Math.min(num(slUsd), p.stake * 0.9) : p.slUsd; const tp = num(tpUsd) > 0 ? num(tpUsd) : p.tpUsd;
+  // scope:'scalp' → ulinzi wa "pair moja" unaangalia trades za scalp TU; trade ya fx kwenye pair ileile HAIZUII (na kinyume chake).
+  const result = await derivTrader.placeMultiplier({ pair, direction, stake: p.stake, stopLoss: sl, takeProfit: tp, multiplier: p.multiplier, scope: 'scalp' });
+  scalpRegistry.addScalpContract(result.contract_id); // tia alama MARA MOJA — autoTrader isinase kama yake
+  const accountMode = accMode;
   await db.query(
     `INSERT OR REPLACE INTO scalp_trades (contractId, pair, direction, stake, multiplier, slUsd, tpUsd, buyPrice, openedAt, source, mode, strength, accountMode)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -415,7 +440,8 @@ async function openTrade({ pair, direction, stake, multiplier, slUsd, tpUsd, sou
 
 async function closeTrade(contractId) {
   await ensureSchema();
-  const id = String(contractId);
+  const id = String(contractId).trim();
+  if (!/^\d{5,20}$/.test(id)) throw new Error('contract_id si sahihi.');
   const row = ((await db.query('SELECT * FROM scalp_trades WHERE contractId = ?', [id])).rows || [])[0];
   if (!row) throw new Error('Trade hii si ya Scalp (funga kupitia fxtrading).');
   const r = await derivTrader.closeContractWithPnL(id);
@@ -458,13 +484,19 @@ async function autoStep() {
       }
     }
   }
+  const hourAuto = await autoOpenedLastHour();
+  if (hourAuto >= settings.maxAutoPerHour) { lastAutoNote = `Kikomo cha auto kwa saa (${hourAuto}/${settings.maxAutoPerHour}) — subiri`; return; }
   const open = await openRows();
   if (open.length >= settings.maxOpen) { lastAutoNote = `Trades wazi ${open.length}/${settings.maxOpen}`; return; }
   const openPairs = new Set(open.map((r) => r.pair));
   const cands = [...signals.values()]
-    .filter((s) => !s.error && s.direction !== 'NEUTRAL' && s.strength >= settings.minStrength && !inBlackout(s) && !openPairs.has(s.pair) && Date.now() >= (cooldowns.get(s.pair) || 0) && Date.now() - s.checkedAt < 90000)
+    .filter((s) => !s.error && CATALOG[s.pair] && s.direction !== 'NEUTRAL' && s.strength >= settings.minStrength && !lowMovement(s) && !inBlackout(s) && !openPairs.has(s.pair) && Date.now() >= (cooldowns.get(s.pair) || 0) && Date.now() - s.checkedAt < 90000)
     .sort((a, b) => b.strength - a.strength);
-  if (!cands.length) { lastAutoNote = `Hakuna signal ≥ ${settings.minStrength}% inayoruhusiwa`; return; }
+  if (!cands.length) {
+    const asleep = [...signals.values()].filter((x) => !x.error && x.direction !== 'NEUTRAL' && x.strength >= settings.minStrength && lowMovement(x)).map((x) => x.pair);
+    lastAutoNote = asleep.length ? `Movement ndogo sasa (${asleep.join(', ')}) — imeruka` : `Hakuna signal ≥ ${settings.minStrength}% inayoruhusiwa`;
+    return;
+  }
   const c = cands[0];
   try {
     const r = await openTrade({ pair: c.pair, direction: c.direction, source: 'auto', strength: c.strength, mode: c.mode });
@@ -490,6 +522,21 @@ function start({ notify } = {}) {
   if (typeof notify === 'function') notifier = notify;
   if (timer) return true;
   timer = setInterval(() => tick().catch(() => {}), 20000); if (timer.unref) timer.unref();
+  // Usalama: akaunti ikibadilishwa (DEMO ↔ REAL) auto ya scalp inazimwa kabisa na ruhusa ya REAL inaondolewa —
+  // isiendelee kufanya trades kimya kimya kwenye akaunti mpya; lazima uiwashe tena kwa makusudi.
+  try {
+    if (typeof derivTrader.onAccountSwitched === 'function') {
+      derivTrader.onAccountSwitched(async (mode, prev) => {
+        await loadSettings();
+        if (settings.autoEnabled || settings.allowRealAuto) {
+          settings = sanitize({ ...settings, autoEnabled: false, allowRealAuto: false });
+          await saveSettings();
+          say(`🛑 *SCALP AUTO IMEZIMWA*\nAkaunti imebadilishwa (${prev || '?'} → ${mode}). Washa tena kwenye scalping.html ukihitaji.`);
+        }
+        candleCache.clear(); signals.clear(); cooldowns.clear();
+      });
+    }
+  } catch (_) { /* endelea */ }
   console.log('[scalp] ✅ Injini ya scalping imeanza (auto imezimwa mpaka uiwashe kwenye scalping.html).');
   return true;
 }
@@ -521,8 +568,9 @@ async function getStatus() {
 
 module.exports = {
   start, stop, tick, scan, getStatus, getNewsBoard, setSettings, previewTrade, openTrade, closeTrade, closeAllScalp,
-  openRows, history, stats, reconcile, CATALOG, DEFAULTS,
+  openRows, history, stats, reconcile, CATALOG, DEFAULTS, getSettings: async () => { await loadSettings(); return settings; },
   // majaribio
   _ema: ema, _atr: atr, _rsi: rsi, _sizing: sizing, _newsStateFrom: newsStateFrom,
+  _lowMovement: lowMovement,
   _setSettingsForTest: (s) => { settings = sanitize({ ...settings, ...s }); settingsLoaded = true; },
 };

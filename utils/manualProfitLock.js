@@ -60,12 +60,13 @@ async function tick(deps = {}) {
     isTrackedByAuto: (id) => {
       try { const a = require('./autoTrader').openAutoTrades.get(String(id)); return !!(a && Number.isFinite(a.slUsd) && a.slUsd > 0); } catch (_) { return false; }
     },
-    isNews: (id) => { try { return require('./newsTrader').isNewsContract(id); } catch (_) { return false; } },
+    isNews: (id) => { try { return require('./newsTrader').isNewsContract(id) || require('./scalpRegistry').isScalpContract(id); } catch (_) { return false; } }, // news + scalp zina usimamizi wao
     ...deps,
   };
   if (busy) return;
   busy = true;
   try {
+    try { await require('./scalpRegistry').ensureLoaded(); } catch (_) { /* endelea */ }
     let positions;
     try { positions = await d.getOpenPositionsLive(); } catch (_) { return; } // hakuna muunganiko/Deriv imekataa — jaribu tena tick ijayo
     const openIds = new Set(positions.map((p) => String(p.contract_id)));

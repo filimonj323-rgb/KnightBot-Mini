@@ -120,6 +120,14 @@ const fxTradesDb = require('../pairing/db');
 const signalTargets = require('./signalTargets');
 // News Trading (utils/newsTrader.js) ina table na ufuatiliaji wake — auto-trader isi-adopt wala isi-import trades hizo.
 const newsTrader = require('./newsTrader');
+// Scalp (utils/scalpTrader.js) inatumia akaunti ileile ya Deriv lakini ni mfumo TOFAUTI: trades zake HAZIPASWI kunaswa (adopt),
+// kuingia kwenye History/Stats za fx, kuhesabiwa kwenye correlation/kikomo cha REAL, wala kuguswa na fx close-all.
+const scalpRegistry = require('./scalpRegistry');
+const isForeignContract = (id) => newsTrader.isNewsContract(id) || scalpRegistry.isScalpContract(id);
+async function fxOnly(list) {
+  await scalpRegistry.ensureLoaded();
+  return (list || []).filter((p) => !scalpRegistry.isScalpContract(p.contract_id));
+}
 
 const ENABLED = String(process.env.AUTO_TRADE_ENABLED || 'false').toLowerCase() === 'true';
 // Swichi ya LIVE (dashboard): inaamua kama bot ifungue trades MPYA. Thamani ya mwanzo = AUTO_TRADE_ENABLED; ikibadilishwa
@@ -538,6 +546,7 @@ async function reconcileHistoryFromDeriv(force = false) {
   reconcileRunning = true;
   try {
     await ensureModeResolved();
+    await scalpRegistry.ensureLoaded();
     const mode0 = getAccountMode(); // akaunti ambayo profit_table hii ni yake — usiichanganye ikibadilika katikati
     if (!mode0) return;
     const txs = await getProfitTable(100);
@@ -553,7 +562,7 @@ async function reconcileHistoryFromDeriv(force = false) {
     const byId = new Map((existing.rows || []).map((r) => [String(r.contractId), r]));
     for (const t of txs) {
       const id = String(t.contract_id);
-      if (newsTrader.isNewsContract(id)) continue; // trade ya News Trading — ina table yake
+      if (isForeignContract(id)) continue; // trade ya News Trading / Scalp — zina table zao
       const buy = Number(t.buy_price);
       const sell = Number(t.sell_price);
       if (!Number.isFinite(buy) || !Number.isFinite(sell)) continue;
@@ -1058,6 +1067,7 @@ async function getLiveShared(maxAgeMs = LIVE_CACHE_MS) {
   if (liveCache.data && Date.now() - liveCache.at < maxAgeMs) return liveCache.data;
   if (!livePending) {
     livePending = getOpenPositionsLive()
+      .then(fxOnly)
       .then((d) => { liveCache = { at: Date.now(), data: d }; return d; })
       .finally(() => { livePending = null; });
   }
@@ -1084,7 +1094,7 @@ async function checkSlProximity() {
     seen.add(id);
     const code = String(p.symbol || '').replace(/^frx/i, '').toUpperCase();
     if (!PAIRS.some((x) => x.code === code)) continue;
-    if (newsTrader.isNewsContract(id)) continue;
+    if (isForeignContract(id)) continue;
     const profit = Number(p.profit);
     if (!Number.isFinite(profit)) continue;
 
@@ -1224,6 +1234,25 @@ async function checkTrailingStops() {
  * itagundua kama yoyote kati ya hizi tayari ilifungwa wakati bot ilikuwa
  * imezimwa, na kusasisha DB + kutuma notification kama kawaida.
  */
+// Trades za Scalp zilizokwisha kunaswa/kuingizwa kwenye fx_auto_trades (kabla ya utenganisho) zinaharibu History/Stats za fx.
+// Ziondoe mara moja kwenye start (scalp ina table yake, scalp_trades — hakuna data inayopotea). Trades za wateja hazigusiwi.
+async function purgeScalpFromFx() {
+  try {
+    await scalpRegistry.ensureLoaded();
+    await fxTradesDb.initSchema();
+    const ids = [...(scalpRegistry._ids ? scalpRegistry._ids() : [])];
+    let removed = 0;
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const r = await fxTradesDb.query(
+        `DELETE FROM fx_auto_trades WHERE ownerPhone IS NULL AND contractId IN (${chunk.map(() => '?').join(',')})`, chunk);
+      removed += Number(r && r.rowsAffected) || 0;
+    }
+    for (const id of ids) { openAutoTrades.delete(id); peakProfitPct.delete(id); closeMisses.delete(id); slAlertState.delete(id); }
+    if (removed) console.log(`[autoTrader] 🧹 Trades ${removed} za Scalp ziliondolewa kwenye historia/stats za fx (zimetenganishwa).`);
+  } catch (err) { console.error('[autoTrader] purgeScalpFromFx imeshindwa:', err.message); }
+}
+
 async function restoreOpenTradesFromDb() {
   let rows = [];
   try {
@@ -1576,7 +1605,7 @@ async function evaluatePairInner(pairInfo) {
   let livePosition;
   try {
     const derivSymbol = toDerivSymbol(code);
-    livePositions = await getOpenPositions();
+    livePositions = await fxOnly(await getOpenPositions()); // trades za scalp hazihesabiwi hapa kabisa
     livePosition = livePositions.find((p) => p.symbol === derivSymbol && !newsTrader.isNewsContract(p.contract_id));
     // Jozi ina trade ya News Trading pekee — usi-adopt, na usifungue nyingine kwa jozi hii.
     if (!livePosition && livePositions.some((p) => p.symbol === derivSymbol)) return null;
@@ -1710,7 +1739,7 @@ async function executeCandidate(c) {
     // Exposure mpya kabisa (positions halisi za Deriv; kama imeshindwa, tumia trades zetu).
     let openForExposure;
     try {
-      const live = await getOpenPositions();
+      const live = await fxOnly(await getOpenPositions());
       if (realLimitReached(live.length)) {
         console.log(`[autoTrader] ${code}: skip — REAL: trades wazi ${live.length}/${REAL_MAX_OPEN} (kikomo cha akaunti ya REAL).`);
         return;
@@ -2138,6 +2167,7 @@ function start({ sock, notifyJid }) {
     await loadTrailingOverrideFromDb();
     await loadAutoOnFromDb();
     await loadSrSettingsFromDb();
+    await purgeScalpFromFx();
     await restoreOpenTradesFromDb();
     await pollClosedTrades();
     await adoptAllLivePositions();
@@ -2186,6 +2216,7 @@ onAccountSwitched(async (newMode, prevMode) => {
   slAlertState.clear();
   liveCache = { at: 0, data: null };
   console.log(`[autoTrader] 🔄 Akaunti: ${prevMode || '?'} → ${newMode}. Trades ${dropped} za akaunti ya zamani zimeachwa kwenye DB (hazifuatiliwi sasa).`);
+  await purgeScalpFromFx();
   await restoreOpenTradesFromDb();
   await pollClosedTrades();
   await adoptAllLivePositions();
@@ -2256,7 +2287,7 @@ function getStatus() {
 async function adoptAllLivePositions() {
   let live;
   try {
-    live = await getOpenPositions();
+    live = await fxOnly(await getOpenPositions());
   } catch (err) {
     console.error('[autoTrader] Imeshindwa kusoma positions za Deriv wakati wa kuanza:', err.message);
     return 0;
@@ -2265,7 +2296,7 @@ async function adoptAllLivePositions() {
   for (const p of live) {
     const id = String(p.contract_id);
     if (openAutoTrades.has(id)) continue;
-    if (newsTrader.isNewsContract(id)) continue; // trade ya News Trading
+    if (isForeignContract(id)) continue; // trade ya News Trading / Scalp
     const code = String(p.symbol || '').replace(/^frx/i, '').toUpperCase();
     if (!PAIRS.some((x) => x.code === code)) continue; // si jozi ya FX yetu
     const info = {
@@ -2344,9 +2375,9 @@ function correlatedMessage(code, dir, conflicts) {
 
 // Trades wazi za Deriv + zile zilizofunguliwa sekunde chache zilizopita (portfolio inaweza kuchelewa).
 async function getLiveWithRecent() {
-  const live = await getOpenPositions();
+  const live = await fxOnly(await getOpenPositions());
   const seen = new Set(live.map((p) => p.symbol));
-  return live.concat(getRecentOpens().filter((r) => !seen.has(r.symbol)));
+  return live.concat(getRecentOpens(undefined, 'fx').filter((r) => !seen.has(r.symbol)));
 }
 
 // Kwa dashboard: angalia KABLA ya kufungua (haifungui kitu).

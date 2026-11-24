@@ -127,6 +127,7 @@ function checkEnv() {
 // Kipaumbele: mode iliyohifadhiwa > DERIV_ACCOUNT_ID (env) > DEMO ya kwanza (tabia ya zamani).
 // REAL ina kikomo chake cha stake (realMaxStake) kinachotekelezwa kwenye placeMultiplier().
 const { classify } = require('./derivValidate');
+const scalpRegistry = require('./scalpRegistry');
 
 const MODE_KEY = 'deriv_account_mode';
 const REAL_STAKE_KEY = 'deriv_real_max_stake';
@@ -476,24 +477,30 @@ const pairBlocked = (msg) => Object.assign(new Error(msg), { code: 'DUPLICATE_OP
 
 // Trades zilizofunguliwa sekunde chache zilizopita (portfolio ya Deriv inaweza kuchelewa kuzionyesha) —
 // zinatumika na ukaguzi wa correlation ili trade ya pili isipite wakati ya kwanza haijaonekana bado.
-function getRecentOpens(maxAgeMs = PAIR_RECENT_MS) {
+function getRecentOpens(maxAgeMs = PAIR_RECENT_MS, scope = 'fx') {
   const now = Date.now();
   const out = [];
-  for (const [symbol, v] of recentOpened) {
-    if (now - v.ts < maxAgeMs) out.push({ symbol, contract_type: v.direction === 'SELL' ? 'MULTDOWN' : 'MULTUP', recent: true });
+  for (const [, v] of recentOpened) {
+    if ((v.scope || 'fx') !== scope) continue; // scalp na fx hazichanganyi kumbukumbu zao
+    if (now - v.ts < maxAgeMs) out.push({ symbol: v.symbol, contract_type: v.direction === 'SELL' ? 'MULTDOWN' : 'MULTUP', recent: true });
   }
   return out;
 }
 
+// scope: 'fx' (default: autoTrader, .buy/.sell, dashboard ya fx, News) au 'scalp' (scalpTrader).
+// Ulinzi wa "pair moja kwa wakati mmoja" unatumika NDANI ya scope yake tu: trade ya scalp ya EURUSD haizuii
+// EURUSD ya fx (na kinyume chake). Kila scope ina kufuli, kumbukumbu ya sekunde 20 na ukaguzi wake wa portfolio.
 async function placeMultiplier(args) {
   const sym = toDerivSymbol(args.pair);
+  const scope = args.scope === 'scalp' ? 'scalp' : 'fx';
+  const key = `${scope}:${sym}`;
   const guarded = !args.allowDuplicate;
   if (guarded) {
-    if (pairOpening.has(sym)) throw pairBlocked(`${args.pair} inafunguliwa sasa hivi na njia nyingine — imezuiwa kuzuia marudio.`);
-    if (Date.now() - (recentOpened.get(sym)?.ts || 0) < PAIR_RECENT_MS) {
+    if (pairOpening.has(key)) throw pairBlocked(`${args.pair} inafunguliwa sasa hivi na njia nyingine — imezuiwa kuzuia marudio.`);
+    if (Date.now() - (recentOpened.get(key)?.ts || 0) < PAIR_RECENT_MS) {
       throw pairBlocked(`${args.pair} imefunguliwa sekunde chache zilizopita — hairuhusiwi kufunguliwa tena (hata mwelekeo tofauti).`);
     }
-    pairOpening.add(sym); // synchronous: hakuna await kati ya has() na add()
+    pairOpening.add(key); // synchronous: hakuna await kati ya has() na add()
   }
   try {
     if (guarded) {
@@ -503,17 +510,21 @@ async function placeMultiplier(args) {
       } catch (err) {
         throw new Error(`Imeshindwa kuthibitisha trades wazi za Deriv (${err.message}) — sifungui trade mpya kuzuia marudio.`);
       }
-      const existing = live.find((p) => p.symbol === sym);
+      await scalpRegistry.ensureLoaded();
+      // Angalia trades za scope hii tu (scalp ↔ fx hazionani).
+      const existing = live.find((p) => p.symbol === sym && (scalpRegistry.isScalpContract(p.contract_id) ? 'scalp' : 'fx') === scope);
       if (existing) {
         const d = /down/i.test(existing.contract_type || '') ? 'SELL' : 'BUY';
-        throw pairBlocked(`${args.pair} tayari ina trade WAZI (${d}) — haifunguliwi nyingine (hata kwa mwelekeo tofauti) hadi ifungwe.`);
+        throw pairBlocked(`${args.pair} tayari ina trade WAZI ya ${scope === 'scalp' ? 'Scalp' : 'FX'} (${d}) — haifunguliwi nyingine (hata kwa mwelekeo tofauti) hadi ifungwe.`);
       }
     }
     const result = await placeMultiplierCore(args);
-    recentOpened.set(sym, { ts: Date.now(), direction: args.direction === 'SELL' ? 'SELL' : 'BUY' });
+    // Sajili MARA MOJA (synchronous) kabla ya kurudisha — autoTrader isinase trade ya scalp kama yake.
+    if (scope === 'scalp' && result && result.contract_id != null) scalpRegistry.addScalpContract(result.contract_id);
+    recentOpened.set(key, { ts: Date.now(), scope, symbol: sym, direction: args.direction === 'SELL' ? 'SELL' : 'BUY' });
     return result;
   } finally {
-    if (guarded) pairOpening.delete(sym);
+    if (guarded) pairOpening.delete(key);
   }
 }
 
@@ -921,8 +932,14 @@ async function closeContractWithPnL(contractId) {
   return { ...sellResult, buy_price: buyPrice, sold_for: soldFor, profit };
 }
 
-async function closeAll() {
-  const positions = await getOpenPositions();
+// scope: 'fx' (default) = trades za fx TU (za scalp haziguswi); 'scalp' = za scalp tu; 'all' = zote (dharura/.panic).
+async function closeAll(scope = 'fx') {
+  await scalpRegistry.ensureLoaded();
+  const positions = (await getOpenPositions()).filter((p) => {
+    if (scope === 'all') return true;
+    const isScalp = scalpRegistry.isScalpContract(p.contract_id);
+    return scope === 'scalp' ? isScalp : !isScalp;
+  });
   const results = [];
   for (const p of positions) {
     try {
