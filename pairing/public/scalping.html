@@ -126,6 +126,8 @@
     <div class="section active" id="sec-scanner">
       <div class="toolbar">
         <button class="primary" id="scanBtn">Changanua sasa</button>
+        <span class="muted">Stake $</span><input id="q_stake" type="number" step="0.5" min="1" style="width:78px;margin:0" />
+        <span class="muted">Multiplier</span><select id="q_multiplier" style="width:84px;margin:0"><option>100</option><option>200</option><option>300</option><option>500</option><option>800</option></select>
         <span class="muted" id="scanInfo"></span>
       </div>
       <div class="grid" id="scanGrid"></div>
@@ -161,8 +163,11 @@
         <div class="form">
           <div><label>Stake ($)</label><input id="f_stake" type="number" step="0.5" /></div>
           <div><label>Multiplier</label><select id="f_multiplier"><option>100</option><option>200</option><option>300</option><option>500</option><option>800</option></select></div>
-          <div><label>SL = × ATR(M5)</label><input id="f_slAtr" type="number" step="0.1" /></div>
-          <div><label>Risk:Reward (TP = SL × …)</label><input id="f_rr" type="number" step="0.1" /></div>
+          <div><label>Njia ya SL/TP</label><select id="f_slMode"><option value="atr">Otomatiki (ATR ya M5)</option><option value="fixed">Fixed ($ ninazoweka)</option></select></div>
+          <div><label>(ATR) SL = × ATR(M5)</label><input id="f_slAtr" type="number" step="0.1" /></div>
+          <div><label>(ATR) Risk:Reward (TP = SL × …)</label><input id="f_rr" type="number" step="0.1" /></div>
+          <div><label>(Fixed) Stop Loss ($)</label><input id="f_slFixed" type="number" step="0.05" /></div>
+          <div><label>(Fixed) Take Profit ($)</label><input id="f_tpFixed" type="number" step="0.05" /></div>
           <div><label>Nguvu ya chini ya signal (%)</label><input id="f_minStrength" type="number" /></div>
           <div><label>Max trades wazi</label><input id="f_maxOpen" type="number" /></div>
           <div><label>Kikomo hasara ya siku ($)</label><input id="f_maxDailyLoss" type="number" step="0.5" /></div>
@@ -274,6 +279,8 @@
     $('engineText').textContent = s.settings.autoEnabled ? (eng.pausedUntil ? '🛑 Auto imesimama: ' + eng.pauseReason : '🤖 Auto-Scalp IMEWASHWA — ' + (eng.lastAutoNote || '')) : '⏸ Auto imezimwa (unaweza kufungua kwa mkono)';
     $('engineSub').textContent = eng.inSession ? 'Ndani ya muda wa kazi' : 'Nje ya muda wa kazi';
     const n = (s.positions || []).filter((p) => p.scalp).length; $('openCount').textContent = n ? '(' + n + ')' : '';
+    if (document.activeElement !== $('q_stake')) $('q_stake').value = s.settings.stake;
+    if (document.activeElement !== $('q_multiplier')) $('q_multiplier').value = s.settings.multiplier;
   }
 
   // ── Render: scanner ──
@@ -314,40 +321,74 @@
   // ── Trade modal ──
   async function openTradeModal(pair, direction, force) {
     const stakeDef = STATE.settings.stake; const multDef = STATE.settings.multiplier;
-    const back = h('div', { class: 'modal-back' }); const stake = h('input', { type: 'number', step: '0.5', value: stakeDef });
+    const back = h('div', { class: 'modal-back' });
+    const stake = h('input', { type: 'number', step: '0.5', min: '1', value: stakeDef });
     const mult = h('select', {}, ...[100, 200, 300, 500, 800].map((m) => h('option', { value: m, selected: m === multDef }, 'x' + m)));
-    const box = h('div', { class: 'modal' }); const pv = h('div', {}, 'Inapakia muhtasari…'); const err = h('div', { class: 'error' });
-    const go = h('button', { class: direction === 'BUY' ? 'buy' : 'sell', style: 'flex:1' }, (direction === 'BUY' ? 'FUNGUA BUY ' : 'FUNGUA SELL ') + pair);
+    const sl = h('input', { type: 'number', step: '0.05', min: '0.1' }); const tp = h('input', { type: 'number', step: '0.05', min: '0.1' });
+    let touched = false; const box = h('div', { class: 'modal' }); const pv = h('div', {}, 'Inapakia muhtasari…'); const sum = h('div', { class: 'row' }); const err = h('div', { class: 'error' });
+    const resetBtn = h('button', { class: 'ghost', type: 'button', onclick: () => { touched = false; refresh(); } }, 'Rudisha otomatiki');
+    const go = h('button', { class: direction === 'BUY' ? 'buy' : 'sell', style: 'flex:1' }, (direction === 'BUY' ? 'KAGUA BUY ' : 'KAGUA SELL ') + pair + ' →');
     const cancel = h('button', { class: 'ghost', onclick: () => back.remove() }, 'Ghairi');
-    box.append(h('h2', {}, direction + ' ' + pair), h('label', {}, 'Stake ($)'), stake, h('label', {}, 'Multiplier'), mult, pv, err, h('div', { class: 'actions' }, cancel, go));
+    box.append(h('h2', {}, direction + ' ' + pair),
+      h('label', {}, 'Stake ($)'), stake, h('label', {}, 'Multiplier'), mult,
+      h('label', {}, 'Stop Loss ($ — hasara ya juu)'), sl, h('label', {}, 'Take Profit ($ — faida ya lengo)'), tp,
+      sum, pv, h('div', { style: 'margin:6px 0' }, resetBtn), err, h('div', { class: 'actions' }, cancel, go));
     back.append(box); back.addEventListener('click', (e) => { if (e.target === back) back.remove(); }); document.body.append(back);
     let current = null;
+    function recalc() {
+      const s1 = Number(sl.value); const t1 = Number(tp.value); const st = Number(stake.value);
+      clear(sum).append(h('span', { class: 'muted' }, 'Risk : Reward'), h('span', {}, s1 > 0 && t1 > 0 ? '1 : ' + (t1 / s1).toFixed(2) + (s1 > st ? '  ⚠️ SL > stake' : '') : '—'));
+    }
     async function refresh() {
       try {
         const r = await post('/api/admin/scalp/preview', { pair, direction, stake: Number(stake.value), multiplier: Number(mult.value) }); current = r.preview;
-        clear(pv).append(
-          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Bei'), h('span', {}, fmtPrice(current.price))),
-          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Stop Loss'), h('span', { class: 'neg' }, '-$' + current.slUsd.toFixed(2))),
-          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Take Profit'), h('span', { class: 'pos' }, '+$' + current.tpUsd.toFixed(2))),
-          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Risk : Reward'), h('span', {}, '1 : ' + current.rr)),
+        if (!touched) { sl.value = current.slUsd; tp.value = current.tpUsd; }
+        clear(pv).append(...[
+          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Bei ya sasa'), h('span', {}, fmtPrice(current.price))),
+          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Pendekezo (' + (current.mode === 'fixed' ? 'fixed' : 'ATR M5') + ')'), h('span', {}, 'SL $' + current.slUsd.toFixed(2) + ' • TP $' + current.tpUsd.toFixed(2))),
           current.news && current.news.state === 'blackout' ? h('div', { class: 'error' }, '⛔ Habari kubwa sasa: ' + (current.news.event ? current.news.event.title : '') + ' — spread/spike zinaweza kuumiza.') : null,
-          h('div', { class: 'note' }, 'SL/TP zimetokana na ATR ya M5. Commission ya Deriv inaweza kubadilisha faida ndogo.'));
-        err.textContent = '';
+          h('div', { class: 'note' }, 'Unaweza kubadilisha SL/TP mwenyewe. Deriv inaweza kurekebisha kidogo ikiwa nje ya kikomo chake. Commission inaweza kula faida ndogo.')].filter(Boolean));
+        err.textContent = ''; recalc();
       } catch (e) { clear(pv); err.textContent = e.message; current = null; }
     }
-    stake.addEventListener('change', refresh); mult.addEventListener('change', refresh); refresh();
-    go.addEventListener('click', async () => {
+    stake.addEventListener('change', () => { refresh(); }); mult.addEventListener('change', () => { refresh(); });
+    sl.addEventListener('input', () => { touched = true; recalc(); }); tp.addEventListener('input', () => { touched = true; recalc(); }); refresh();
+    const formKids = [...box.childNodes]; let forced = !!force;
+    function showConfirm(body) {
+      const real = STATE.accountMode === 'real'; const notional = body.stake * body.multiplier;
+      const cerr = h('div', { class: 'error' });
+      const confirmBtn = h('button', { class: direction === 'BUY' ? 'buy' : 'sell', style: 'flex:1' }, '✅ Thibitisha & Fungua');
+      const backBtn = h('button', { class: 'ghost', type: 'button', onclick: () => { clear(box).append(...formKids); } }, '← Rudi');
+      const row = (k, v, c) => h('div', { class: 'row' }, h('span', { class: 'muted' }, k), h('span', { class: c || '' }, v));
+      clear(box).append(...[
+        h('h2', {}, 'Thibitisha trade'),
+        h('div', { class: 'banner ' + (real ? 'stop' : '') , style: 'margin-bottom:10px' }, real ? '⚠️ Akaunti ni REAL — hii ni pesa halisi!' : 'Akaunti: DEMO'),
+        row('Pair', pair), row('Upande', direction, direction === 'BUY' ? 'pos' : 'neg'),
+        row('Stake', '$' + body.stake.toFixed(2) + ' × x' + body.multiplier), row('Ukubwa wa nafasi', '$' + notional.toFixed(2)),
+        row('Stop Loss', '-$' + body.slUsd.toFixed(2), 'neg'), row('Take Profit', '+$' + body.tpUsd.toFixed(2), 'pos'),
+        row('Risk : Reward', '1 : ' + (body.tpUsd / body.slUsd).toFixed(2)),
+        current && current.price ? row('Bei ya sasa', fmtPrice(current.price)) : null,
+        current && current.news && current.news.state === 'blackout' ? h('div', { class: 'error' }, '⛔ Habari kubwa sasa: ' + (current.news.event ? current.news.event.title : '') + ' — hatari ya spike/spread.') : null,
+        cerr, h('div', { class: 'actions', style: 'margin-top:12px' }, backBtn, confirmBtn)].filter(Boolean));
+      confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true; cerr.textContent = '';
+        try {
+          const r = await post('/api/admin/scalp/open', { ...body, force: forced });
+          back.remove(); toast('✅ Trade imefunguliwa #' + r.result.contractId); refreshOverview(true);
+        } catch (e) {
+          confirmBtn.disabled = false;
+          if (e.data && e.data.news) { forced = true; cerr.textContent = e.message + ' Bonyeza "Thibitisha" tena kuendelea.'; }
+          else cerr.textContent = e.message;
+        }
+      });
+    }
+    go.addEventListener('click', () => {
+      const s1 = Number(sl.value); const t1 = Number(tp.value);
       if (!current) { err.textContent = 'Hakuna muhtasari — jaribu tena.'; return; }
-      go.disabled = true;
-      try {
-        const body = { pair, direction, stake: Number(stake.value), multiplier: Number(mult.value), slUsd: current.slUsd, tpUsd: current.tpUsd, force: !!force };
-        const r = await post('/api/admin/scalp/open', body);
-        back.remove(); toast('✅ Trade imefunguliwa #' + r.result.contractId); refreshOverview(true);
-      } catch (e) {
-        go.disabled = false;
-        if (e.data && e.data.news) { if (confirm(e.message + '\n\nFungua hata hivyo?')) { back.remove(); openTradeModal(pair, direction, true); } }
-        else err.textContent = e.message;
-      }
+      if (!(s1 > 0) || !(t1 > 0)) { err.textContent = 'Weka Stop Loss na Take Profit (zaidi ya 0).'; return; }
+      if (s1 > Number(stake.value)) { err.textContent = 'Stop Loss haiwezi kuzidi stake.'; return; }
+      err.textContent = '';
+      showConfirm({ pair, direction, stake: Number(stake.value), multiplier: Number(mult.value), slUsd: s1, tpUsd: t1 });
     });
   }
 
@@ -392,12 +433,12 @@
   }
 
   // ── Settings form ──
-  const NUM_FIELDS = ['stake', 'multiplier', 'slAtr', 'rr', 'minStrength', 'maxOpen', 'maxDailyLoss', 'maxConsecLosses', 'cooldownMin', 'timeStopMin', 'newsPreMin', 'newsPostMin', 'sessionStartUtc', 'sessionEndUtc'];
+  const NUM_FIELDS = ['stake', 'multiplier', 'slAtr', 'rr', 'slFixed', 'tpFixed', 'minStrength', 'maxOpen', 'maxDailyLoss', 'maxConsecLosses', 'cooldownMin', 'timeStopMin', 'newsPreMin', 'newsPostMin', 'sessionStartUtc', 'sessionEndUtc'];
   function fillForm() {
     if (formDirty || !STATE) return;
     const s = STATE.settings;
     ['autoEnabled', 'allowRealAuto', 'sessionOnly'].forEach((k) => { $('f_' + k).checked = !!s[k]; });
-    NUM_FIELDS.forEach((k) => { $('f_' + k).value = s[k]; }); $('f_newsImpact').value = s.newsImpact;
+    NUM_FIELDS.forEach((k) => { $('f_' + k).value = s[k]; }); $('f_newsImpact').value = s.newsImpact; $('f_slMode').value = s.slMode;
     const box = clear($('pairChecks'));
     (STATE.catalog || []).forEach((c) => {
       const cb = h('input', { type: 'checkbox', 'data-pair': c.code }); cb.checked = s.pairs.includes(c.code);
@@ -407,7 +448,7 @@
   async function saveSettings() {
     const body = {};
     ['autoEnabled', 'allowRealAuto', 'sessionOnly'].forEach((k) => { body[k] = $('f_' + k).checked; });
-    NUM_FIELDS.forEach((k) => { body[k] = Number($('f_' + k).value); }); body.newsImpact = $('f_newsImpact').value;
+    NUM_FIELDS.forEach((k) => { body[k] = Number($('f_' + k).value); }); body.newsImpact = $('f_newsImpact').value; body.slMode = $('f_slMode').value;
     body.pairs = [...document.querySelectorAll('#pairChecks input:checked')].map((x) => x.dataset.pair);
     if (body.autoEnabled && STATE.accountMode === 'real' && !confirm('Akaunti ni REAL. Una uhakika unataka auto-scalp iwe hai?')) return;
     if (body.allowRealAuto && !STATE.settings.allowRealAuto && !confirm('Unaruhusu auto kufungua trades kwenye akaunti ya REAL. Endelea?')) return;
@@ -463,6 +504,11 @@
   $('scanBtn').addEventListener('click', () => scanNow(true));
   $('newsRefresh').addEventListener('click', loadNews);
   $('saveSettings').addEventListener('click', saveSettings);
+  const quickSave = async () => {
+    try { await post('/api/admin/scalp/settings', { stake: Number($('q_stake').value), multiplier: Number($('q_multiplier').value) }); formDirty = false; toast('Stake/multiplier zimehifadhiwa'); refreshOverview(true); }
+    catch (e) { toast(e.message, true); }
+  };
+  $('q_stake').addEventListener('change', quickSave); $('q_multiplier').addEventListener('change', quickSave);
   $('sec-auto').addEventListener('input', () => { formDirty = true; });
   $('closeAllBtn').addEventListener('click', async () => {
     if (!confirm('Funga trades ZOTE za Scalp?')) return;
