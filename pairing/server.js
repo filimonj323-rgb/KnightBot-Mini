@@ -88,6 +88,7 @@ const tradeEstimateLib = require('../utils/tradeEstimate');
 const economicCalendar = require('../utils/economicCalendar');
 const newsTrader = require('../utils/newsTrader');
 const newsObserver = require('../utils/newsObserver');
+const scalpTrader = require('../utils/scalpTrader');
 const newsBacktest = require('../utils/newsBacktest');
 const fxPredictions = require('../utils/fxPredictions');
 const tradeAnalysis = require('../utils/tradeAnalysis');
@@ -1024,6 +1025,72 @@ async function handlePairingRequest(req, res) {
         const query = new URLSearchParams(queryPart || '');
         const result = await adminGetGroupInviteLink(phone, query.get('groupId') || '');
         return sendJson(res, 200, { ok: true, ...result });
+      }
+
+      // ── SCALP / NEWS Trading (M1–M15) — pairing/public/scalping.html ─────
+      // Injini inajitegemea (utils/scalpTrader.js): settings, trades na auto zake; haigusi autoTrader.
+      if (req.url.split('?')[0].startsWith('/api/admin/scalp/')) {
+        const route = req.url.split('?')[0].slice('/api/admin/scalp/'.length);
+        const q = new URL(req.url, 'http://x').searchParams;
+
+        if (req.method === 'GET' && route === 'overview') {
+          const [status, positions, balance, rows, stats] = await Promise.all([
+            scalpTrader.getStatus(),
+            derivTrader.getOpenPositionsLive().catch(() => []),
+            derivTrader.getBalance().catch(() => null),
+            scalpTrader.openRows(),
+            scalpTrader.stats(),
+          ]);
+          const mine = new Map(rows.map((r) => [String(r.contractId), r]));
+          return sendJson(res, 200, {
+            ok: true, balance, stats, ...status,
+            positions: positions.map((p) => ({ ...p, scalp: mine.has(String(p.contract_id)) ? { source: mine.get(String(p.contract_id)).source, openedAt: mine.get(String(p.contract_id)).openedAt, mode: mine.get(String(p.contract_id)).mode, strength: mine.get(String(p.contract_id)).strength } : null })),
+          });
+        }
+        if (req.method === 'POST' && route === 'scan') {
+          await scalpTrader.scan();
+          return sendJson(res, 200, { ok: true, ...(await scalpTrader.getStatus()) });
+        }
+        if (req.method === 'GET' && route === 'news') {
+          return sendJson(res, 200, { ok: true, ...(await scalpTrader.getNewsBoard()) });
+        }
+        if (req.method === 'GET' && route === 'history') {
+          return sendJson(res, 200, { ok: true, trades: await scalpTrader.history(q.get('limit') || 50), stats: await scalpTrader.stats() });
+        }
+        if (req.method === 'POST' && route === 'settings') {
+          const body = await readJsonBody(req);
+          const settings = await scalpTrader.setSettings(body || {});
+          return sendJson(res, 200, { ok: true, settings });
+        }
+        if (req.method === 'POST' && route === 'preview') {
+          const body = await readJsonBody(req);
+          try { return sendJson(res, 200, { ok: true, preview: await scalpTrader.previewTrade(body) }); }
+          catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+        }
+        if (req.method === 'POST' && route === 'open') {
+          const body = await readJsonBody(req);
+          try {
+            const result = await scalpTrader.openTrade({
+              pair: body.pair, direction: body.direction === 'SELL' ? 'SELL' : 'BUY', stake: body.stake, multiplier: body.multiplier,
+              slUsd: body.slUsd, tpUsd: body.tpUsd, source: 'manual', force: body.force === true,
+            });
+            return sendJson(res, 200, { ok: true, result });
+          } catch (err) {
+            if (err.code === 'NEWS_BLACKOUT') return sendJson(res, 409, { ok: false, news: true, error: err.message });
+            if (err.code === 'DUPLICATE_OPEN') return sendJson(res, 409, { ok: false, duplicate: true, error: err.message });
+            return sendJson(res, 400, { ok: false, error: err.message });
+          }
+        }
+        if (req.method === 'POST' && route === 'close') {
+          const body = await readJsonBody(req);
+          if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
+          try { return sendJson(res, 200, { ok: true, result: await scalpTrader.closeTrade(body.contract_id) }); }
+          catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+        }
+        if (req.method === 'POST' && route === 'close-all') {
+          return sendJson(res, 200, { ok: true, results: await scalpTrader.closeAllScalp() });
+        }
+        return sendJson(res, 404, { ok: false, error: 'Route ya scalp haipo.' });
       }
 
       // ── FX Auto-Trader (Deriv Multipliers) — dashboard ya trading ──────
@@ -1997,6 +2064,13 @@ async function initPairingServer() {
     derivCustomerAuto.start({ notify: (phone, text) => sendToSelfChat(phone, text) });
   } catch (err) {
     console.error('❌ Imeshindwa kuanzisha auto-trade ya wateja:', err.message);
+  }
+
+  // Injini ya Scalp/News (auto imezimwa kwa default; inaanza kuchanganua tu ukurasa ukiwa wazi au auto ikiwashwa).
+  try {
+    scalpTrader.start({ notify: (text) => notifyOwnerWA(text) });
+  } catch (err) {
+    console.error('❌ Imeshindwa kuanzisha scalpTrader:', err.message);
   }
 }
 
