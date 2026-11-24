@@ -168,6 +168,9 @@
           <div><label>(ATR) Risk:Reward (TP = SL × …)</label><input id="f_rr" type="number" step="0.1" /></div>
           <div><label>(Fixed) Stop Loss ($)</label><input id="f_slFixed" type="number" step="0.05" /></div>
           <div><label>(Fixed) Take Profit ($)</label><input id="f_tpFixed" type="number" step="0.05" /></div>
+          <div><label>Movement ya chini (ATR M5 %) — chini ya hii auto haifungui</label><input id="f_minAtrPct" type="number" step="0.005" /></div>
+          <div><label>Kikomo cha trades za auto kwa saa</label><input id="f_maxAutoPerHour" type="number" step="1" /></div>
+          <div><label>REAL: stake ya juu kwa trade ($)</label><input id="f_realStakeCap" type="number" step="0.5" /></div>
           <div><label>Nguvu ya chini ya signal (%)</label><input id="f_minStrength" type="number" /></div>
           <div><label>Max trades wazi</label><input id="f_maxOpen" type="number" /></div>
           <div><label>Kikomo hasara ya siku ($)</label><input id="f_maxDailyLoss" type="number" step="0.5" /></div>
@@ -238,6 +241,14 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), isErr ? 6000 : 3000);
   }
 
+  // Uthibitisho wa REAL (pesa halisi): andika REAL + PIN (ikiwa server inadai). Rudisha null ukighairi.
+  function askReal(what) {
+    const c = prompt((what || 'Kitendo hiki kinagusa akaunti ya REAL (pesa halisi).') + '\nAndika REAL kuthibitisha:');
+    if (c === null || c.trim().toUpperCase() !== 'REAL') return null;
+    let pin = '';
+    if (STATE && STATE.pinRequired) { pin = prompt('Weka PIN ya REAL:'); if (pin === null) return null; }
+    return { confirm: 'REAL', pin };
+  }
   async function api(path, opts = {}) {
     const res = await fetch(API_BASE + path, { ...opts, headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}), ...(opts.headers || {}) } });
     let data = {}; try { data = await res.json(); } catch (_) { /* si JSON */ }
@@ -373,7 +384,9 @@
       confirmBtn.addEventListener('click', async () => {
         confirmBtn.disabled = true; cerr.textContent = '';
         try {
-          const r = await post('/api/admin/scalp/open', { ...body, force: forced });
+          let realBits = {};
+          if (STATE && STATE.accountMode === 'real') { const rb = askReal('Unafungua trade ya Scalp kwenye akaunti ya REAL.'); if (!rb) { confirmBtn.disabled = false; return; } realBits = rb; }
+          const r = await post('/api/admin/scalp/open', { ...body, ...realBits, force: forced });
           back.remove(); toast('✅ Trade imefunguliwa #' + r.result.contractId); refreshOverview(true);
         } catch (e) {
           confirmBtn.disabled = false;
@@ -433,7 +446,7 @@
   }
 
   // ── Settings form ──
-  const NUM_FIELDS = ['stake', 'multiplier', 'slAtr', 'rr', 'slFixed', 'tpFixed', 'minStrength', 'maxOpen', 'maxDailyLoss', 'maxConsecLosses', 'cooldownMin', 'timeStopMin', 'newsPreMin', 'newsPostMin', 'sessionStartUtc', 'sessionEndUtc'];
+  const NUM_FIELDS = ['stake', 'multiplier', 'slAtr', 'rr', 'slFixed', 'tpFixed', 'minStrength', 'maxOpen', 'maxDailyLoss', 'maxConsecLosses', 'cooldownMin', 'timeStopMin', 'newsPreMin', 'newsPostMin', 'sessionStartUtc', 'sessionEndUtc', 'minAtrPct', 'maxAutoPerHour', 'realStakeCap'];
   function fillForm() {
     if (formDirty || !STATE) return;
     const s = STATE.settings;
@@ -452,6 +465,7 @@
     body.pairs = [...document.querySelectorAll('#pairChecks input:checked')].map((x) => x.dataset.pair);
     if (body.autoEnabled && STATE.accountMode === 'real' && !confirm('Akaunti ni REAL. Una uhakika unataka auto-scalp iwe hai?')) return;
     if (body.allowRealAuto && !STATE.settings.allowRealAuto && !confirm('Unaruhusu auto kufungua trades kwenye akaunti ya REAL. Endelea?')) return;
+    if (body.allowRealAuto && !STATE.settings.allowRealAuto) { const rb = askReal('Unaruhusu auto-scalp kufungua trades kwenye akaunti ya REAL.'); if (!rb) return; Object.assign(body, rb); }
     try { await post('/api/admin/scalp/settings', body); formDirty = false; toast('✅ Settings zimehifadhiwa'); await post('/api/admin/scalp/scan'); refreshOverview(true); } catch (e) { toast(e.message, true); }
   }
 
