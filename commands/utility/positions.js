@@ -15,6 +15,7 @@ module.exports = {
     if (sock.pairingOwnerId) return require('../../utils/derivCustomerCommands').positions(sock, msg);
     const jid = msg.key.remoteJid;
     try {
+      await require('../../utils/scalpRegistry').ensureLoaded();
       const [positions, balance] = await Promise.all([getOpenPositions(), getBalance()]);
 
       if (!positions.length) {
@@ -29,7 +30,7 @@ module.exports = {
       positions.forEach((p) => {
         const pl = p.profit != null ? `${p.profit >= 0 ? '+' : ''}${p.profit}` : 'N/A';
         lines.push(
-          `🆔 ${p.contract_id} — ${p.shortcode || p.symbol || ''}\n` +
+          `🆔 ${p.contract_id} — ${require('../../utils/scalpRegistry').isScalpContract(p.contract_id) ? '⚡SCALP ' : ''}${p.shortcode || p.symbol || ''}\n` +
           `   Buy: $${p.buy_price}  •  Sasa: $${p.bid_price ?? 'N/A'}  •  P/L: ${pl}`
         );
       });

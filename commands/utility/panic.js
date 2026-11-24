@@ -15,7 +15,7 @@ module.exports = {
     if (sock.pairingOwnerId) return require('../../utils/derivCustomerCommands').panic(sock, msg);
     const jid = msg.key.remoteJid;
     try {
-      const results = await closeAll();
+      const results = await closeAll('all');
       if (!results.length) {
         return sock.sendMessage(jid, { text: `📭 Hakuna trade iliyokuwa wazi.` }, { quoted: msg });
       }
