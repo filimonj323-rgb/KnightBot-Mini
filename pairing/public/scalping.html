@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="sw">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Scalp &amp; News — Mr. IT MEDIATOR</title>
+<style>
+  :root {
+    --bg: #0b0a05; --panel: #15130a; --panel-2: #1b1810; --border: #3a3318; --text: #fff3cf; --muted: #a39565;
+    --accent: #ffc83d; --accent-dim: #8a6d12; --green: #39ff88; --red: #ff5566; --blue: #5ab8ff; --amber: #ff9f43;
+    --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; width: 100%; margin: 0; overflow-x: clip; -webkit-text-size-adjust: 100%; }
+  body { font-family: var(--mono); background: radial-gradient(ellipse at top, rgba(255,200,61,0.07), transparent 60%), var(--bg); color: var(--text); font-size: 13px; }
+  label { display: block; font-size: 11px; color: var(--muted); margin: 0 0 5px; }
+  input, select { width: 100%; padding: 9px 10px; background: #0d0b05; border: 1px solid var(--border); border-radius: 3px; color: var(--text); font-family: var(--mono); font-size: 13px; margin-bottom: 10px; }
+  input:focus, select:focus { outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 2px rgba(255,200,61,0.15); }
+  input[type=checkbox] { width: auto; margin: 0 8px 0 0; }
+  button { font-family: var(--mono); cursor: pointer; border-radius: 3px; border: 1px solid var(--accent-dim); background: rgba(255,200,61,0.08); color: var(--accent); padding: 8px 12px; font-size: 12px; font-weight: 600; }
+  button:hover { background: rgba(255,200,61,0.17); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #1a1300; border-color: var(--accent); }
+  button.primary:hover { background: #ffd866; }
+  button.buy { border-color: rgba(57,255,136,.5); background: rgba(57,255,136,.08); color: var(--green); }
+  button.sell, button.danger { border-color: rgba(255,85,102,.5); background: rgba(255,85,102,.08); color: var(--red); }
+  button.ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+  .error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 14px; }
+  .hidden { display: none !important; }
+
+  #loginCard { max-width: min(380px, calc(100% - 24px)); margin: 12vh auto 0; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 30px; }
+  #loginCard h1 { font-size: 16px; margin: 0 0 18px; text-align: center; }
+  #app { display: none; width: 100%; min-height: 100vh; }
+  .sticky-head { position: sticky; top: 0; z-index: 20; background: rgba(11,10,5,.96); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px; }
+  .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  .top-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; border: 1px solid var(--border); }
+  .chip.demo { color: var(--blue); border-color: rgba(90,184,255,.5); } .chip.real { color: var(--red); border-color: rgba(255,85,102,.6); background: rgba(255,85,102,.1); }
+  .tabs { display: flex; gap: 2px; overflow-x: auto; padding: 0 12px; scrollbar-width: none; }
+  .tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); padding: 10px 14px; white-space: nowrap; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: transparent; }
+  .content { width: 100%; padding: 16px max(16px, calc((100% - 1100px) / 2)) calc(40px + env(safe-area-inset-bottom, 0px)); }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; }
+  .stat .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; } .stat .v { font-size: 18px; margin-top: 3px; font-weight: 700; }
+  .pos { color: var(--green); } .neg { color: var(--red); } .muted { color: var(--muted); }
+  .banner { border: 1px solid var(--border); background: var(--panel); border-radius: 4px; padding: 9px 12px; margin-bottom: 14px; font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  .banner.warn { border-color: rgba(255,159,67,.6); background: rgba(255,159,67,.08); } .banner.stop { border-color: rgba(255,85,102,.6); background: rgba(255,85,102,.08); }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 14px; overflow-wrap: anywhere; }
+  .card.hot { border-color: var(--accent-dim); }
+  .card h3 { margin: 0; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .price { font-size: 12px; color: var(--muted); }
+  .dir { display: inline-block; font-weight: 800; padding: 2px 10px; border-radius: 3px; font-size: 12px; }
+  .dir.BUY { background: rgba(57,255,136,.15); color: var(--green); } .dir.SELL { background: rgba(255,85,102,.15); color: var(--red); } .dir.NEUTRAL { background: rgba(163,149,101,.12); color: var(--muted); }
+  .bar { height: 6px; background: #0d0b05; border-radius: 3px; overflow: hidden; margin: 8px 0; border: 1px solid var(--border); } .bar > i { display: block; height: 100%; background: var(--accent); }
+  .bar.ok > i { background: var(--green); }
+  .tfs { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; } .tf { font-size: 11px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 3px; color: var(--muted); }
+  .tf.up { color: var(--green); border-color: rgba(57,255,136,.4); } .tf.down { color: var(--red); border-color: rgba(255,85,102,.4); }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border); margin-right: 4px; }
+  .badge.blackout { color: var(--red); border-color: var(--red); background: rgba(255,85,102,.1); } .badge.post { color: var(--green); border-color: var(--green); } .badge.next { color: var(--amber); border-color: var(--amber); }
+  .notes { font-size: 11px; color: var(--muted); margin: 6px 0; min-height: 14px; } .actions { display: flex; gap: 8px; margin-top: 8px; } .actions button { flex: 1; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; } th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); } th { color: var(--muted); font-weight: 500; font-size: 11px; }
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; }
+  .ev { display: grid; grid-template-columns: 74px 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .ev:last-child { border-bottom: none; } .ev.past { opacity: .55; }
+  .imp { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; } .imp.High { background: var(--red); } .imp.Medium { background: var(--amber); }
+  .pairchip { font-size: 10px; border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; margin: 2px 3px 0 0; display: inline-block; color: var(--accent); }
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 14px; }
+  .check { display: flex; align-items: center; font-size: 12px; margin-bottom: 10px; color: var(--text); }
+  .pairs { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 14px; }
+  .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 14px; }
+  .modal { background: var(--panel); border: 1px solid var(--accent-dim); border-radius: 8px; padding: 18px; width: min(420px, 100%); max-height: 92vh; overflow: auto; }
+  .modal h2 { margin: 0 0 12px; font-size: 15px; } .row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 12px; }
+  .toast { position: fixed; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--accent-dim); padding: 10px 16px; border-radius: 6px; z-index: 60; max-width: 92vw; font-size: 12px; }
+  .toast.err { border-color: var(--red); color: var(--red); }
+  .section { display: none; } .section.active { display: block; }
+  .note { font-size: 11px; color: var(--muted); line-height: 1.5; margin-top: 12px; }
+  @media (max-width: 520px) { .ev { grid-template-columns: 62px 1fr; } .ev .right { grid-column: 2; } }
+</style>
+</head>
+<body>
+
+<div id="loginCard">
+  <h1>⚡ Scalp &amp; News — Login</h1>
+  <label for="username">Username</label><input id="username" autocomplete="username" />
+  <label for="password">Password</label><input id="password" type="password" autocomplete="current-password" />
+  <button class="primary" id="loginBtn" style="width:100%">Ingia</button>
+  <div class="error" id="loginError"></div>
+</div>
+
+<div id="app">
+  <div class="sticky-head">
+    <div class="topbar">
+      <div class="brand"><span class="dot"></span><strong>⚡ SCALP &amp; NEWS</strong><span id="modeChip" class="chip">—</span></div>
+      <div class="top-actions">
+        <a href="/fxtrading.html"><button class="ghost" type="button">FX Trading</button></a>
+        <button class="ghost" id="logoutBtn" type="button">Toka</button>
+      </div>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-sec="scanner">Scanner</button>
+      <button class="tab" data-sec="news">Habari</button>
+      <button class="tab" data-sec="trades">Trades <span id="openCount" class="muted"></span></button>
+      <button class="tab" data-sec="auto">Auto &amp; Settings</button>
+      <button class="tab" data-sec="history">Historia</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="stats">
+      <div class="stat"><div class="k">Balance</div><div class="v" id="sBalance">—</div></div>
+      <div class="stat"><div class="k">P/L wazi</div><div class="v" id="sOpenPl">—</div></div>
+      <div class="stat"><div class="k">Leo (UTC)</div><div class="v" id="sToday">—</div></div>
+      <div class="stat"><div class="k">Win rate leo</div><div class="v" id="sWin">—</div></div>
+    </div>
+    <div class="banner" id="engineBanner"><span id="engineText">Inapakia…</span><span class="muted" id="engineSub"></span></div>
+
+    <!-- SCANNER -->
+    <div class="section active" id="sec-scanner">
+      <div class="toolbar">
+        <button class="primary" id="scanBtn">Changanua sasa</button>
+        <span class="muted" id="scanInfo"></span>
+      </div>
+      <div class="grid" id="scanGrid"></div>
+      <div class="note">
+        Mkakati: M15 = upendeleo, M5 = mwelekeo, M1 = kichocheo (pullback au breakout). Nguvu 0–100: ≥ kiwango cha "Auto" ndipo bot inaweza kufungua.
+        SL/TP zinatokana na ATR ya M5 na zinabadilishwa kuwa $ kwa stake × multiplier. Hii si ushauri wa kifedha — jaribu kwenye DEMO kwanza.
+      </div>
+    </div>
+
+    <!-- HABARI -->
+    <div class="section" id="sec-news">
+      <div class="toolbar"><button id="newsRefresh">Onyesha upya</button><span class="muted">Saa za Tanzania (EAT). Inaonyesha matukio ya masaa 3 yaliyopita hadi 36 yajayo kwa pairs za watchlist.</span></div>
+      <div class="card" style="padding:0" id="newsList"></div>
+      <h3 style="margin:18px 0 8px;font-size:13px">Hali ya habari kwa kila pair</h3>
+      <div class="tablewrap"><table><thead><tr><th>Pair</th><th>Hali</th><th>Tukio linalofuata</th></tr></thead><tbody id="riskBody"></tbody></table></div>
+      <div class="note">⛔ Blackout = dirisha la kabla/baada ya tukio kubwa (auto haifungui; kwa mkono utaulizwa kuthibitisha). ✅ Post-news = dakika 20 baada ya dirisha, breakout zenye momentum zinapewa bonus ya nguvu.</div>
+    </div>
+
+    <!-- TRADES -->
+    <div class="section" id="sec-trades">
+      <div class="toolbar"><button class="danger" id="closeAllBtn">Funga trades zote za Scalp</button><span class="muted">Trades za fxtrading hazifungwi hapa.</span></div>
+      <div class="tablewrap"><table><thead><tr><th>Pair</th><th>Upande</th><th>Chanzo</th><th>Stake</th><th>P/L</th><th>Umri</th><th></th></tr></thead><tbody id="posBody"></tbody></table></div>
+    </div>
+
+    <!-- AUTO -->
+    <div class="section" id="sec-auto">
+      <div class="card">
+        <div class="form">
+          <div><div class="check"><input type="checkbox" id="f_autoEnabled" /><b>Washa Auto-Scalp</b></div></div>
+          <div><div class="check"><input type="checkbox" id="f_allowRealAuto" /><span class="neg">Ruhusu auto kwenye REAL</span></div></div>
+          <div><div class="check"><input type="checkbox" id="f_sessionOnly" />Fanya kazi kwenye muda maalum tu</div></div>
+        </div>
+        <div class="form">
+          <div><label>Stake ($)</label><input id="f_stake" type="number" step="0.5" /></div>
+          <div><label>Multiplier</label><select id="f_multiplier"><option>100</option><option>200</option><option>300</option><option>500</option><option>800</option></select></div>
+          <div><label>SL = × ATR(M5)</label><input id="f_slAtr" type="number" step="0.1" /></div>
+          <div><label>Risk:Reward (TP = SL × …)</label><input id="f_rr" type="number" step="0.1" /></div>
+          <div><label>Nguvu ya chini ya signal (%)</label><input id="f_minStrength" type="number" /></div>
+          <div><label>Max trades wazi</label><input id="f_maxOpen" type="number" /></div>
+          <div><label>Kikomo hasara ya siku ($)</label><input id="f_maxDailyLoss" type="number" step="0.5" /></div>
+          <div><label>Hasara mfululizo (pumziko saa 1)</label><input id="f_maxConsecLosses" type="number" /></div>
+          <div><label>Cooldown kwa pair (dk)</label><input id="f_cooldownMin" type="number" /></div>
+          <div><label>Time-stop auto (dk, 0 = zima)</label><input id="f_timeStopMin" type="number" /></div>
+          <div><label>Habari: usifungue dk KABLA</label><input id="f_newsPreMin" type="number" /></div>
+          <div><label>Habari: usifungue dk BAADA</label><input id="f_newsPostMin" type="number" /></div>
+          <div><label>Impact ya habari</label><select id="f_newsImpact"><option value="High">High tu</option><option value="Medium">Medium + High</option></select></div>
+          <div><label>Muda: kuanzia (UTC saa)</label><input id="f_sessionStartUtc" type="number" /></div>
+          <div><label>Muda: hadi (UTC saa)</label><input id="f_sessionEndUtc" type="number" /></div>
+        </div>
+        <label>Watchlist (pairs za kuchanganua)</label>
+        <div class="pairs" id="pairChecks"></div>
+        <button class="primary" id="saveSettings">Hifadhi settings</button>
+        <div class="note">
+          Auto imezimwa kwa default. Inaheshimu: kikomo cha hasara ya siku, hasara mfululizo, max trades wazi, cooldown, time-stop na dirisha la habari.
+          Kwenye akaunti ya REAL, auto haifanyi kazi mpaka uruhusu wazi. Saa za UTC: Tanzania = UTC+3 (mfano 06–21 UTC ni 09:00–00:00 EAT).
+          Dhahabu (XAUUSD) na GBPJPY zinatembea sana — tumia stake ndogo. Multiplier zinazokubaliwa kwa dhahabu zinaweza kutofautiana na forex; Deriv ikikataa utaona ujumbe wake.
+        </div>
+      </div>
+    </div>
+
+    <!-- HISTORIA -->
+    <div class="section" id="sec-history">
+      <div class="stats" id="histStats"></div>
+      <div class="tablewrap"><table><thead><tr><th>Imefungwa (EAT)</th><th>Pair</th><th>Upande</th><th>Chanzo</th><th>Mode</th><th>P/L</th></tr></thead><tbody id="histBody"></tbody></table></div>
+      <h3 style="margin:18px 0 8px;font-size:13px">Kwa pair</h3>
+      <div class="tablewrap"><table><thead><tr><th>Pair</th><th>Trades</th><th>Jumla</th></tr></thead><tbody id="byPairBody"></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const API_BASE = '';
+  let TOKEN = sessionStorage.getItem('adminToken') || '';
+  let STATE = null;       // /overview
+  let NEWS = null;
+  let formDirty = false;
+  const $ = (id) => document.getElementById(id);
+  const TZ = 'Africa/Dar_es_Salaam';
+
+  // ── Msaidizi wa DOM (textContent tu — hakuna innerHTML kwa data ya nje) ──
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v; else if (k.startsWith('on')) el.addEventListener(k.slice(2), v); else el.setAttribute(k, v === true ? '' : v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    return el;
+  }
+  const clear = (el) => { while (el.firstChild) el.removeChild(el.firstChild); return el; };
+  const money = (x, sign) => (x == null || !Number.isFinite(Number(x)) ? '—' : (sign && x > 0 ? '+' : x < 0 ? '-' : '') + '$' + Math.abs(Number(x)).toFixed(2));
+  const cls = (x) => (Number(x) > 0 ? 'pos' : Number(x) < 0 ? 'neg' : '');
+  const fmtPrice = (p) => (p == null ? '—' : p >= 100 ? Number(p).toFixed(2) : Number(p).toFixed(5));
+  const timeEat = (v) => new Date(v).toLocaleString('sw-TZ', { timeZone: TZ, hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short', hour12: false });
+  const hm = (v) => new Date(v).toLocaleTimeString('sw-TZ', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  function age(ms) { const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); return m < 60 ? m + ' dk' : Math.floor(m / 60) + ' h ' + (m % 60) + ' dk'; }
+  function countdown(min) { const a = Math.abs(min); const t = a < 60 ? a + ' dk' : Math.floor(a / 60) + 'h ' + (a % 60) + 'm'; return min >= 0 ? 'baada ya ' + t : t + ' iliyopita'; }
+
+  let toastTimer;
+  function toast(msg, isErr) {
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+    const t = h('div', { class: 'toast' + (isErr ? ' err' : '') }, msg); document.body.append(t);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), isErr ? 6000 : 3000);
+  }
+
+  async function api(path, opts = {}) {
+    const res = await fetch(API_BASE + path, { ...opts, headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}), ...(opts.headers || {}) } });
+    let data = {}; try { data = await res.json(); } catch (_) { /* si JSON */ }
+    if (res.status === 401 && path !== '/api/admin/login') { logout(); throw new Error('Session imeisha — ingia tena.'); }
+    if (!res.ok || data.ok === false) { const e = new Error(data.error || 'Hitilafu ' + res.status); e.data = data; e.status = res.status; throw e; }
+    return data;
+  }
+  const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) });
+
+  // ── Login ──
+  async function doLogin() {
+    $('loginError').textContent = '';
+    try {
+      const d = await post('/api/admin/login', { username: $('username').value.trim(), password: $('password').value });
+      TOKEN = d.token; sessionStorage.setItem('adminToken', TOKEN); showApp();
+    } catch (e) { $('loginError').textContent = e.message; }
+  }
+  function logout() { sessionStorage.removeItem('adminToken'); location.reload(); }
+
+  // ── Tabs ──
+  function openTab(name) {
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.sec === name));
+    document.querySelectorAll('.section').forEach((s) => s.classList.toggle('active', s.id === 'sec-' + name));
+    try { sessionStorage.setItem('scalpTab', name); } catch (_) { /* ignore */ }
+    if (name === 'news') loadNews(); if (name === 'history') loadHistory();
+  }
+
+  // ── Render: stats & banner ──
+  function renderTop() {
+    const s = STATE; if (!s) return;
+    const chip = $('modeChip'); chip.textContent = (s.accountMode || '?').toUpperCase(); chip.className = 'chip ' + (s.accountMode === 'real' ? 'real' : 'demo');
+    $('sBalance').textContent = s.balance && s.balance.balance != null ? Number(s.balance.balance).toFixed(2) + ' ' + (s.balance.currency || '') : '—';
+    const openPl = (s.positions || []).filter((p) => p.scalp).reduce((a, p) => a + Number(p.profit || 0), 0);
+    const op = $('sOpenPl'); op.textContent = money(openPl, true); op.className = 'v ' + cls(openPl);
+    const t = s.stats && s.stats.today; const td = $('sToday'); td.textContent = t ? money(t.net, true) : '—'; td.className = 'v ' + cls(t && t.net);
+    $('sWin').textContent = t && t.winRate != null ? t.winRate + '% (' + t.trades + ')' : '—';
+    const eng = s.engine || {}; const b = $('engineBanner');
+    b.className = 'banner' + (eng.pausedUntil ? ' stop' : (s.settings.autoEnabled && s.accountMode === 'real' && !s.settings.allowRealAuto ? ' warn' : ''));
+    $('engineText').textContent = s.settings.autoEnabled ? (eng.pausedUntil ? '🛑 Auto imesimama: ' + eng.pauseReason : '🤖 Auto-Scalp IMEWASHWA — ' + (eng.lastAutoNote || '')) : '⏸ Auto imezimwa (unaweza kufungua kwa mkono)';
+    $('engineSub').textContent = eng.inSession ? 'Ndani ya muda wa kazi' : 'Nje ya muda wa kazi';
+    const n = (s.positions || []).filter((p) => p.scalp).length; $('openCount').textContent = n ? '(' + n + ')' : '';
+  }
+
+  // ── Render: scanner ──
+  function arrow(v, label) { return h('span', { class: 'tf ' + (v > 0 ? 'up' : v < 0 ? 'down' : '') }, label + ' ' + (v > 0 ? '▲' : v < 0 ? '▼' : '•')); }
+  function newsBadges(n) {
+    if (!n) return [];
+    const out = [];
+    if (n.state === 'blackout') out.push(h('span', { class: 'badge blackout' }, '⛔ HABARI SASA'));
+    if (n.state === 'post') out.push(h('span', { class: 'badge post' }, '✅ post-news'));
+    if (n.next) out.push(h('span', { class: 'badge next' }, '📰 ' + n.next.country + ' ' + (n.next.inMin < 60 ? n.next.inMin + 'dk' : Math.round(n.next.inMin / 60) + 'h')));
+    return out;
+  }
+  function renderScanner() {
+    const g = clear($('scanGrid')); const sigs = (STATE && STATE.signals) || [];
+    if (!sigs.length) { g.append(h('div', { class: 'muted' }, 'Hakuna data bado — bonyeza "Changanua sasa".')); return; }
+    const sorted = [...sigs].sort((a, b) => (b.strength || 0) - (a.strength || 0));
+    sorted.forEach((s) => {
+      const hot = !s.error && s.direction !== 'NEUTRAL' && s.strength >= STATE.settings.minStrength && !(s.news && s.news.state === 'blackout');
+      const card = h('div', { class: 'card' + (hot ? ' hot' : '') },
+        h('h3', {}, h('span', {}, s.label || s.pair), h('span', { class: 'price' }, fmtPrice(s.price))),
+        s.error ? h('div', { class: 'notes neg' }, 'Hitilafu: ' + s.error) : [
+          h('div', { style: 'margin-top:8px' }, h('span', { class: 'dir ' + s.direction }, s.direction === 'NEUTRAL' ? (s.lean ? 'subiri (' + s.lean + ')' : 'NEUTRAL') : s.direction), ' ',
+            s.mode ? h('span', { class: 'badge' }, s.mode) : null, ' ', h('b', {}, s.strength + '%')),
+          h('div', { class: 'bar' + (hot ? ' ok' : '') }, h('i', { style: 'width:' + (s.strength || 0) + '%' })),
+          h('div', { class: 'tfs' }, arrow(s.tf && s.tf.m15, 'M15'), arrow(s.tf && s.tf.m5, 'M5'), arrow(s.tf && s.tf.m1, 'M1'),
+            h('span', { class: 'tf' }, 'RSI ' + s.rsi), h('span', { class: 'tf' }, 'ATR5 ' + s.atrPct5 + '%')),
+          h('div', {}, newsBadges(s.news)),
+          h('div', { class: 'notes' }, (s.notes || []).join(' • ')),
+        ],
+        h('div', { class: 'actions' },
+          h('button', { class: 'buy', onclick: () => openTradeModal(s.pair, 'BUY') }, 'BUY'),
+          h('button', { class: 'sell', onclick: () => openTradeModal(s.pair, 'SELL') }, 'SELL')));
+      g.append(card);
+    });
+    const last = STATE.engine && STATE.engine.lastScanAt; $('scanInfo').textContent = last ? 'Imechanganuliwa ' + hm(last) + ' EAT' : '';
+  }
+
+  // ── Trade modal ──
+  async function openTradeModal(pair, direction, force) {
+    const stakeDef = STATE.settings.stake; const multDef = STATE.settings.multiplier;
+    const back = h('div', { class: 'modal-back' }); const stake = h('input', { type: 'number', step: '0.5', value: stakeDef });
+    const mult = h('select', {}, ...[100, 200, 300, 500, 800].map((m) => h('option', { value: m, selected: m === multDef }, 'x' + m)));
+    const box = h('div', { class: 'modal' }); const pv = h('div', {}, 'Inapakia muhtasari…'); const err = h('div', { class: 'error' });
+    const go = h('button', { class: direction === 'BUY' ? 'buy' : 'sell', style: 'flex:1' }, (direction === 'BUY' ? 'FUNGUA BUY ' : 'FUNGUA SELL ') + pair);
+    const cancel = h('button', { class: 'ghost', onclick: () => back.remove() }, 'Ghairi');
+    box.append(h('h2', {}, direction + ' ' + pair), h('label', {}, 'Stake ($)'), stake, h('label', {}, 'Multiplier'), mult, pv, err, h('div', { class: 'actions' }, cancel, go));
+    back.append(box); back.addEventListener('click', (e) => { if (e.target === back) back.remove(); }); document.body.append(back);
+    let current = null;
+    async function refresh() {
+      try {
+        const r = await post('/api/admin/scalp/preview', { pair, direction, stake: Number(stake.value), multiplier: Number(mult.value) }); current = r.preview;
+        clear(pv).append(
+          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Bei'), h('span', {}, fmtPrice(current.price))),
+          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Stop Loss'), h('span', { class: 'neg' }, '-$' + current.slUsd.toFixed(2))),
+          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Take Profit'), h('span', { class: 'pos' }, '+$' + current.tpUsd.toFixed(2))),
+          h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Risk : Reward'), h('span', {}, '1 : ' + current.rr)),
+          current.news && current.news.state === 'blackout' ? h('div', { class: 'error' }, '⛔ Habari kubwa sasa: ' + (current.news.event ? current.news.event.title : '') + ' — spread/spike zinaweza kuumiza.') : null,
+          h('div', { class: 'note' }, 'SL/TP zimetokana na ATR ya M5. Commission ya Deriv inaweza kubadilisha faida ndogo.'));
+        err.textContent = '';
+      } catch (e) { clear(pv); err.textContent = e.message; current = null; }
+    }
+    stake.addEventListener('change', refresh); mult.addEventListener('change', refresh); refresh();
+    go.addEventListener('click', async () => {
+      if (!current) { err.textContent = 'Hakuna muhtasari — jaribu tena.'; return; }
+      go.disabled = true;
+      try {
+        const body = { pair, direction, stake: Number(stake.value), multiplier: Number(mult.value), slUsd: current.slUsd, tpUsd: current.tpUsd, force: !!force };
+        const r = await post('/api/admin/scalp/open', body);
+        back.remove(); toast('✅ Trade imefunguliwa #' + r.result.contractId); refreshOverview(true);
+      } catch (e) {
+        go.disabled = false;
+        if (e.data && e.data.news) { if (confirm(e.message + '\n\nFungua hata hivyo?')) { back.remove(); openTradeModal(pair, direction, true); } }
+        else err.textContent = e.message;
+      }
+    });
+  }
+
+  // ── Habari ──
+  async function loadNews() {
+    try { NEWS = await api('/api/admin/scalp/news'); } catch (e) { toast(e.message, true); return; }
+    const list = clear($('newsList'));
+    if (!NEWS.events.length) list.append(h('div', { class: 'muted', style: 'padding:14px' }, 'Hakuna matukio ya habari kwa pairs zako kwa sasa.'));
+    NEWS.events.forEach((e) => {
+      list.append(h('div', { class: 'ev' + (e.isPast ? ' past' : '') },
+        h('div', {}, h('b', {}, hm(e.date)), h('div', { class: 'muted', style: 'font-size:11px' }, countdown(e.inMin))),
+        h('div', {}, h('div', {}, h('span', { class: 'imp ' + e.impact }), h('b', {}, e.country), ' ' + e.title),
+          h('div', { class: 'muted', style: 'font-size:11px;margin-top:3px' }, 'Forecast ' + (e.forecast || '—') + ' • Previous ' + (e.previous || '—') + (e.actual ? ' • Actual ' + e.actual : '')),
+          h('div', {}, (e.pairs || []).map((p) => h('span', { class: 'pairchip' }, p)))),
+        h('div', { class: 'right muted', style: 'font-size:11px' }, e.impact)));
+    });
+    const body = clear($('riskBody'));
+    NEWS.risk.forEach((r) => body.append(h('tr', {},
+      h('td', {}, h('b', {}, r.pair)),
+      h('td', {}, r.state === 'blackout' ? h('span', { class: 'badge blackout' }, '⛔ blackout') : r.state === 'post' ? h('span', { class: 'badge post' }, '✅ post-news') : h('span', { class: 'muted' }, 'wazi')),
+      h('td', { class: 'muted' }, r.next ? r.next.country + ' ' + r.next.title + ' (' + countdown(r.next.inMin) + ')' : '—'))));
+  }
+
+  // ── Trades ──
+  function renderPositions() {
+    const body = clear($('posBody')); const rows = ((STATE && STATE.positions) || []).slice().sort((a, b) => (b.scalp ? 1 : 0) - (a.scalp ? 1 : 0));
+    if (!rows.length) { body.append(h('tr', {}, h('td', { colspan: 7, class: 'muted' }, 'Hakuna trade wazi.'))); return; }
+    rows.forEach((p) => {
+      const sym = String(p.symbol || '').replace(/^frx/, ''); const dir = /down/i.test(p.contract_type || '') ? 'SELL' : 'BUY';
+      body.append(h('tr', {},
+        h('td', {}, h('b', {}, sym)), h('td', {}, h('span', { class: 'dir ' + dir }, dir)),
+        h('td', { class: 'muted' }, p.scalp ? (p.scalp.source === 'auto' ? '🤖 auto' : '✋ mkono') + (p.scalp.mode ? ' • ' + p.scalp.mode : '') : 'fxtrading'),
+        h('td', {}, p.buy_price != null ? '$' + Number(p.buy_price).toFixed(2) : '—'),
+        h('td', { class: cls(p.profit) }, money(p.profit, true)),
+        h('td', { class: 'muted' }, p.scalp ? age(p.scalp.openedAt) : '—'),
+        h('td', {}, p.scalp ? h('button', { class: 'danger', onclick: () => closeOne(p.contract_id) }, 'Funga') : null)));
+    });
+  }
+  async function closeOne(id) {
+    if (!confirm('Funga trade ' + id + '?')) return;
+    try { const r = await post('/api/admin/scalp/close', { contract_id: id }); toast('Imefungwa: ' + money(r.result.profit, true)); refreshOverview(true); } catch (e) { toast(e.message, true); }
+  }
+
+  // ── Settings form ──
+  const NUM_FIELDS = ['stake', 'multiplier', 'slAtr', 'rr', 'minStrength', 'maxOpen', 'maxDailyLoss', 'maxConsecLosses', 'cooldownMin', 'timeStopMin', 'newsPreMin', 'newsPostMin', 'sessionStartUtc', 'sessionEndUtc'];
+  function fillForm() {
+    if (formDirty || !STATE) return;
+    const s = STATE.settings;
+    ['autoEnabled', 'allowRealAuto', 'sessionOnly'].forEach((k) => { $('f_' + k).checked = !!s[k]; });
+    NUM_FIELDS.forEach((k) => { $('f_' + k).value = s[k]; }); $('f_newsImpact').value = s.newsImpact;
+    const box = clear($('pairChecks'));
+    (STATE.catalog || []).forEach((c) => {
+      const cb = h('input', { type: 'checkbox', 'data-pair': c.code }); cb.checked = s.pairs.includes(c.code);
+      box.append(h('label', { class: 'check', style: 'margin:0' }, cb, c.code + (c.hot ? ' 🔥' : '')));
+    });
+  }
+  async function saveSettings() {
+    const body = {};
+    ['autoEnabled', 'allowRealAuto', 'sessionOnly'].forEach((k) => { body[k] = $('f_' + k).checked; });
+    NUM_FIELDS.forEach((k) => { body[k] = Number($('f_' + k).value); }); body.newsImpact = $('f_newsImpact').value;
+    body.pairs = [...document.querySelectorAll('#pairChecks input:checked')].map((x) => x.dataset.pair);
+    if (body.autoEnabled && STATE.accountMode === 'real' && !confirm('Akaunti ni REAL. Una uhakika unataka auto-scalp iwe hai?')) return;
+    if (body.allowRealAuto && !STATE.settings.allowRealAuto && !confirm('Unaruhusu auto kufungua trades kwenye akaunti ya REAL. Endelea?')) return;
+    try { await post('/api/admin/scalp/settings', body); formDirty = false; toast('✅ Settings zimehifadhiwa'); await post('/api/admin/scalp/scan'); refreshOverview(true); } catch (e) { toast(e.message, true); }
+  }
+
+  // ── Historia ──
+  async function loadHistory() {
+    let d; try { d = await api('/api/admin/scalp/history?limit=100'); } catch (e) { toast(e.message, true); return; }
+    const st = clear($('histStats'));
+    [['Leo', d.stats.today], ['Jumla yote', d.stats.all]].forEach(([k, v]) => {
+      st.append(h('div', { class: 'stat' }, h('div', { class: 'k' }, k + ' — net'), h('div', { class: 'v ' + cls(v.net) }, money(v.net, true))));
+      st.append(h('div', { class: 'stat' }, h('div', { class: 'k' }, k + ' — win rate'), h('div', { class: 'v' }, v.winRate != null ? v.winRate + '% (' + v.wins + 'W/' + v.losses + 'L)' : '—')));
+    });
+    const body = clear($('histBody'));
+    if (!d.trades.length) body.append(h('tr', {}, h('td', { colspan: 6, class: 'muted' }, 'Bado hakuna trades zilizofungwa.')));
+    d.trades.forEach((t) => body.append(h('tr', {}, h('td', { class: 'muted' }, timeEat(t.closedAt)), h('td', {}, h('b', {}, t.pair)), h('td', {}, h('span', { class: 'dir ' + t.direction }, t.direction)),
+      h('td', { class: 'muted' }, t.source === 'auto' ? '🤖 auto' : '✋ mkono'), h('td', { class: 'muted' }, t.mode || '—'), h('td', { class: cls(t.profit) }, money(t.profit, true)))));
+    const bp = clear($('byPairBody'));
+    d.stats.byPair.forEach((r) => bp.append(h('tr', {}, h('td', {}, h('b', {}, r.pair)), h('td', {}, r.trades), h('td', { class: cls(r.net) }, money(r.net, true)))));
+    if (!d.stats.byPair.length) bp.append(h('tr', {}, h('td', { colspan: 3, class: 'muted' }, '—')));
+  }
+
+  // ── Polling ──
+  let busy = false;
+  async function refreshOverview(force) {
+    if (busy && !force) return; busy = true;
+    try { STATE = await api('/api/admin/scalp/overview'); renderTop(); renderScanner(); renderPositions(); fillForm(); }
+    catch (e) { $('engineText').textContent = '⚠️ ' + e.message; }
+    finally { busy = false; }
+  }
+  async function scanNow(manual) {
+    const b = $('scanBtn'); if (manual) { b.disabled = true; b.textContent = 'Inachanganua…'; }
+    try { await post('/api/admin/scalp/scan'); await refreshOverview(true); } catch (e) { if (manual) toast(e.message, true); }
+    finally { b.disabled = false; b.textContent = 'Changanua sasa'; }
+  }
+
+  function showApp() {
+    $('loginCard').style.display = 'none'; $('app').style.display = 'block';
+    let tab = 'scanner'; try { tab = sessionStorage.getItem('scalpTab') || 'scanner'; } catch (_) { /* ignore */ }
+    openTab(document.querySelector('.tab[data-sec="' + tab + '"]') ? tab : 'scanner');
+    refreshOverview(true).then(() => scanNow(false));
+    setInterval(() => { if (!document.hidden) refreshOverview(); }, 6000);
+    setInterval(() => { if (!document.hidden) scanNow(false); }, 30000);
+    setInterval(() => { if (!document.hidden && $('sec-news').classList.contains('active')) loadNews(); }, 60000);
+  }
+
+  // ── Matukio ──
+  $('loginBtn').addEventListener('click', doLogin);
+  $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  $('logoutBtn').addEventListener('click', logout);
+  $('tabs').addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) openTab(t.dataset.sec); });
+  $('scanBtn').addEventListener('click', () => scanNow(true));
+  $('newsRefresh').addEventListener('click', loadNews);
+  $('saveSettings').addEventListener('click', saveSettings);
+  $('sec-auto').addEventListener('input', () => { formDirty = true; });
+  $('closeAllBtn').addEventListener('click', async () => {
+    if (!confirm('Funga trades ZOTE za Scalp?')) return;
+    try { const r = await post('/api/admin/scalp/close-all'); toast('Zilizofungwa: ' + r.results.filter((x) => x.ok).length + '/' + r.results.length); refreshOverview(true); } catch (e) { toast(e.message, true); }
+  });
+  if (TOKEN) showApp();
+})();
+</script>
+</body>
+</html>
