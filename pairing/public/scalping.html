@@ -250,7 +250,12 @@
     return { confirm: 'REAL', pin };
   }
   async function api(path, opts = {}) {
-    const res = await fetch(API_BASE + path, { ...opts, headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}), ...(opts.headers || {}) } });
+    // Timeout: ombi lisikwame milele (muunganiko dhaifu) — likiisha tunajaribu tena kwenye poll ijayo, data ya mwisho inabaki skrini.
+    const ctl = new AbortController(); const tmo = setTimeout(() => ctl.abort(), opts.timeoutMs || 15000);
+    let res;
+    try { res = await fetch(API_BASE + path, { ...opts, signal: ctl.signal, headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}), ...(opts.headers || {}) } }); }
+    catch (e) { throw new Error(e && e.name === 'AbortError' ? 'Seva imechelewa kujibu — nitajaribu tena…' : 'Hakuna muunganiko na seva — nitajaribu tena…'); }
+    finally { clearTimeout(tmo); }
     let data = {}; try { data = await res.json(); } catch (_) { /* si JSON */ }
     if (res.status === 401 && path !== '/api/admin/login') { logout(); throw new Error('Session imeisha — ingia tena.'); }
     if (!res.ok || data.ok === false) { const e = new Error(data.error || 'Hitilafu ' + res.status); e.data = data; e.status = res.status; throw e; }
@@ -514,10 +519,14 @@
 
   // ── Polling ──
   let busy = false;
+  let failCount = 0;
   async function refreshOverview(force) {
     if (busy && !force) return; busy = true;
-    try { STATE = await api('/api/admin/scalp/overview'); renderTop(); renderScanner(); renderPositions(); fillForm(); }
-    catch (e) { $('engineText').textContent = '⚠️ ' + e.message; }
+    try {
+      STATE = await api('/api/admin/scalp/overview'); failCount = 0; renderTop(); renderScanner(); renderPositions(); fillForm();
+      if (STATE.live && STATE.live.stale) { const sec = STATE.live.staleSince ? Math.round((Date.now() - STATE.live.staleSince) / 1000) : 0; $('engineText').textContent = '⚠️ Muunganiko wa Deriv dhaifu — P/L inaonyesha data ya sekunde ' + sec + ' zilizopita (inajaribu tena)'; }
+    }
+    catch (e) { failCount++; $('engineText').textContent = '⚠️ ' + e.message + (STATE ? ' (data ya mwisho inaonyeshwa)' : ''); } // STATE ya mwisho inabaki — skrini haifutwi
     finally { busy = false; }
   }
   async function scanNow(manual) {
@@ -531,8 +540,10 @@
     let tab = 'scanner'; try { tab = sessionStorage.getItem('scalpTab') || 'scanner'; } catch (_) { /* ignore */ }
     openTab(document.querySelector('.tab[data-sec="' + tab + '"]') ? tab : 'scanner');
     refreshOverview(true).then(() => scanNow(false));
-    setInterval(() => { if (!document.hidden) refreshOverview(); }, 6000);
-    setInterval(() => { if (!document.hidden) scanNow(false); }, 30000);
+    // Poll ya haraka (3s) ukiwa na trade wazi ili P/L ionekane live; vinginevyo 8s. Seva inafanya scan yenyewe ukurasa ukiwa wazi.
+    const loop = () => { if (!document.hidden) refreshOverview(); setTimeout(loop, (STATE && STATE.positions && STATE.positions.length ? 3000 : 8000) + Math.min(failCount, 5) * 2000); };
+    setTimeout(loop, 3000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshOverview(true); });
     setInterval(() => { if (!document.hidden && $('sec-news').classList.contains('active')) loadNews(); }, 60000);
   }
 
