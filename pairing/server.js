@@ -1046,22 +1046,24 @@ async function handlePairingRequest(req, res) {
         };
 
         if (req.method === 'GET' && route === 'overview') {
-          const [status, positions, balance, rows, stats] = await Promise.all([
+          const [status, live, rows, stats] = await Promise.all([
             scalpTrader.getStatus(),
-            derivTrader.getOpenPositionsLive().catch(() => []),
-            derivTrader.getBalance().catch(() => null),
+            scalpTrader.liveSnapshot(),
             scalpTrader.openRows(),
             scalpTrader.stats(),
           ]);
+          const positions = live.positions; const balance = live.balance;
           const mine = new Map(rows.map((r) => [String(r.contractId), r]));
           return sendJson(res, 200, {
-            ok: true, balance, stats, ...status, pinRequired: !!process.env.FX_REAL_PIN,
+            ok: true, balance, stats, ...status, pinRequired: !!process.env.FX_REAL_PIN, live: { stale: !!live.stale, error: live.error || null, at: live.at, staleSince: live.staleSince || null },
             // Ukurasa wa Scalp unaonyesha trades za Scalp TU — za fx hazionekani hapa.
             positions: positions.filter((p) => mine.has(String(p.contract_id))).map((p) => ({ ...p, scalp: { source: mine.get(String(p.contract_id)).source, openedAt: mine.get(String(p.contract_id)).openedAt, mode: mine.get(String(p.contract_id)).mode, strength: mine.get(String(p.contract_id)).strength, slUsd: mine.get(String(p.contract_id)).slUsd, tpUsd: mine.get(String(p.contract_id)).tpUsd, stake: mine.get(String(p.contract_id)).stake, multiplier: mine.get(String(p.contract_id)).multiplier } })),
           });
         }
         if (req.method === 'POST' && route === 'scan') {
-          await scalpTrader.scan();
+          // Usingoje scan hadi sekunde 8 tu — ikichelewa, jibu linarudi na data iliyopo (scan inaendelea nyuma).
+          const sc = scalpTrader.scan().catch(() => {});
+          await Promise.race([sc, new Promise((r) => setTimeout(r, 8000))]);
           return sendJson(res, 200, { ok: true, ...(await scalpTrader.getStatus()) });
         }
         if (req.method === 'GET' && route === 'news') {
