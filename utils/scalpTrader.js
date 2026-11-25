@@ -21,19 +21,25 @@ const economicCalendar = require('./economicCalendar');
 const scalpRegistry = require('./scalpRegistry');
 
 // ── Katalogi ya instruments zinazoruhusiwa ─────────────────────────────────────────────
-// Scalp inaruhusu pairs zenye MOVEMENT KUBWA tu (ATR/range kubwa — scalp ina nafasi ya kufikia TP kabla ya spread kula faida).
-// Pairs za movement ndogo (EURUSD, USDCAD, USDCHF, AUDUSD, NZDUSD, EURGBP, USDJPY) zimeondolewa hapa na zinabaki kwenye FX (fxtrading) pekee.
+// Scalp inaruhusu instruments zenye LIQUIDITY KUBWA + MOVEMENT KUBWA (zinazopendwa kwa timeframe ndogo): Gold, Silver, GBP/JPY crosses,
+// majors zenye range nzuri. Pairs za movement ndogo (EURUSD, USDCAD, USDCHF, AUDUSD, NZDUSD, EURGBP) zinabaki FX (fxtrading) pekee.
 const CATALOG = {
   XAUUSD: { label: 'Gold (XAU/USD)', ccy: ['USD'], kind: 'metal', hot: true },
+  XAGUSD: { label: 'Silver (XAG/USD)', ccy: ['USD'], kind: 'metal', hot: true },
   GBPJPY: { label: 'GBP/JPY', ccy: ['GBP', 'JPY'], kind: 'volatile', hot: true },
   GBPUSD: { label: 'GBP/USD', ccy: ['GBP', 'USD'], kind: 'major', hot: true },
+  USDJPY: { label: 'USD/JPY', ccy: ['USD', 'JPY'], kind: 'major', hot: true },
   EURJPY: { label: 'EUR/JPY', ccy: ['EUR', 'JPY'], kind: 'cross', hot: true },
   AUDJPY: { label: 'AUD/JPY', ccy: ['AUD', 'JPY'], kind: 'cross', hot: true },
   NZDJPY: { label: 'NZD/JPY', ccy: ['NZD', 'JPY'], kind: 'cross', hot: true },
   CADJPY: { label: 'CAD/JPY', ccy: ['CAD', 'JPY'], kind: 'cross', hot: true },
+  GBPAUD: { label: 'GBP/AUD', ccy: ['GBP', 'AUD'], kind: 'volatile', hot: true },
+  GBPNZD: { label: 'GBP/NZD', ccy: ['GBP', 'NZD'], kind: 'volatile', hot: true },
+  GBPCAD: { label: 'GBP/CAD', ccy: ['GBP', 'CAD'], kind: 'volatile', hot: true },
   GBPCHF: { label: 'GBP/CHF', ccy: ['GBP', 'CHF'], kind: 'volatile', hot: true },
+  EURAUD: { label: 'EUR/AUD', ccy: ['EUR', 'AUD'], kind: 'cross', hot: true },
 };
-const DEFAULT_PAIRS = ['XAUUSD', 'GBPJPY', 'GBPUSD', 'EURJPY', 'AUDJPY'];
+const DEFAULT_PAIRS = ['XAUUSD', 'XAGUSD', 'GBPJPY', 'GBPUSD', 'USDJPY', 'EURJPY', 'AUDJPY'];
 
 const DEFAULTS = {
   pairs: DEFAULT_PAIRS,
@@ -438,6 +444,26 @@ async function openTrade({ pair, direction, stake, multiplier, slUsd, tpUsd, sou
   return { contractId: String(result.contract_id), pair, direction, stake: p.stake, multiplier: p.multiplier, stopLoss: result.stop_loss, takeProfit: result.take_profit, buyPrice: result.buy_price, commission: result.commission };
 }
 
+/** Badilisha SL/TP ya trade ya Scalp iliyo wazi (slUsd = hasara ya juu $, tpUsd = faida ya lengo $). */
+async function updateLimits(contractId, { slUsd, tpUsd } = {}) {
+  await ensureSchema();
+  const id = String(contractId).trim();
+  if (!/^\d{5,20}$/.test(id)) throw new Error('contract_id si sahihi.');
+  const row = ((await db.query('SELECT * FROM scalp_trades WHERE contractId = ?', [id])).rows || [])[0];
+  if (!row) throw new Error('Trade hii si ya Scalp (hariri kupitia fxtrading).');
+  if (row.closedAt != null) throw new Error('Trade hii tayari imefungwa.');
+  const sl = num(slUsd); const tp = num(tpUsd);
+  const hasSl = Number.isFinite(sl); const hasTp = Number.isFinite(tp);
+  if (!hasSl && !hasTp) throw new Error('Weka angalau Stop Loss au Take Profit mpya.');
+  if (hasSl && !(sl > 0)) throw new Error('Stop Loss lazima iwe zaidi ya 0 ($ ya hasara ya juu).');
+  if (hasSl && sl > num(row.stake, Infinity)) throw new Error(`Stop Loss haiwezi kuzidi stake ($${row.stake}).`);
+  if (hasTp && !(tp > 0)) throw new Error('Take Profit lazima iwe zaidi ya 0.');
+  const r = await derivTrader.updateContractLimits(id, { stopLoss: hasSl ? sl : undefined, takeProfit: hasTp ? tp : undefined });
+  await db.query('UPDATE scalp_trades SET slUsd = COALESCE(?, slUsd), tpUsd = COALESCE(?, tpUsd) WHERE contractId = ?', [hasSl ? sl : null, hasTp ? tp : null, id]);
+  say(`✏️ *SCALP SL/TP IMEBADILISHWA — ${row.pair}* (${row.direction})\n${hasSl ? `SL $${sl}\n` : ''}${hasTp ? `TP $${tp}\n` : ''}🆔 ${id}`);
+  return { contractId: id, pair: row.pair, slUsd: hasSl ? sl : num(row.slUsd, null), tpUsd: hasTp ? tp : num(row.tpUsd, null), raw: r || null };
+}
+
 async function closeTrade(contractId) {
   await ensureSchema();
   const id = String(contractId).trim();
@@ -567,7 +593,7 @@ async function getStatus() {
 }
 
 module.exports = {
-  start, stop, tick, scan, getStatus, getNewsBoard, setSettings, previewTrade, openTrade, closeTrade, closeAllScalp,
+  start, stop, tick, scan, getStatus, getNewsBoard, setSettings, previewTrade, openTrade, closeTrade, updateLimits, closeAllScalp,
   openRows, history, stats, reconcile, CATALOG, DEFAULTS, getSettings: async () => { await loadSettings(); return settings; },
   // majaribio
   _ema: ema, _atr: atr, _rsi: rsi, _sizing: sizing, _newsStateFrom: newsStateFrom,
