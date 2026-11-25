@@ -304,20 +304,54 @@ async function scan() {
   scanning = (async () => {
     await loadSettings();
     const events = await loadEvents();
-    for (const pair of settings.pairs) {
-      try {
-        const a = await analyze(pair, events);
-        signals.set(pair, a);
-      } catch (err) {
-        const prev = signals.get(pair) || { pair, label: CATALOG[pair].label, kind: CATALOG[pair].kind, direction: 'NEUTRAL', strength: 0 };
-        signals.set(pair, { ...prev, error: err.message, checkedAt: Date.now() });
+    const queue = settings.pairs.slice();
+    // Pairs 3 kwa wakati mmoja (si moja-moja): scan inakwisha haraka bila kujaza muunganiko wa Deriv (live P/L isichelewe).
+    const worker = async () => {
+      while (queue.length) {
+        const pair = queue.shift();
+        try {
+          const a = await Promise.race([analyze(pair, events), new Promise((_, rej) => setTimeout(() => rej(new Error('Muda umeisha (Deriv polepole)')), 12000))]);
+          signals.set(pair, a);
+        } catch (err) {
+          const prev = signals.get(pair) || { pair, label: CATALOG[pair].label, kind: CATALOG[pair].kind, direction: 'NEUTRAL', strength: 0 };
+          signals.set(pair, { ...prev, error: err.message, checkedAt: Date.now() });
+        }
       }
-    }
+    };
+    await Promise.all([worker(), worker(), worker()]);
     for (const p of [...signals.keys()]) if (!settings.pairs.includes(p)) signals.delete(p);
     lastScanAt = Date.now();
     return [...signals.values()];
   })().finally(() => { scanning = null; });
   return scanning;
+}
+
+// ── Live snapshot (P/L ya sasa) — haraka na isiyopotea ─────────────────────────────────
+// Deriv ikichelewa/ikikatika kidogo, ukurasa HAUPASWI kuonyesha "hakuna trade": tunarudisha data ya mwisho nzuri (stale=true).
+// Maombi ya wakati mmoja yanashirikiana (dedupe) na yanahifadhiwa sekunde 2.5; contracts za scalp TU ndizo zinaulizwa.
+let liveCache = { at: 0, positions: [], balance: null, stale: false, error: null };
+let livePending = null;
+async function liveSnapshot(maxAgeMs = 2500) {
+  if (Date.now() - liveCache.at < maxAgeMs) return liveCache;
+  if (livePending) return livePending;
+  livePending = (async () => {
+    try {
+      await scalpRegistry.ensureLoaded();
+      const [pos, bal] = await Promise.allSettled([
+        derivTrader.getOpenPositionsLive((p) => scalpRegistry.isScalpContract(p.contract_id)),
+        Date.now() - (liveCache.balanceAt || 0) > 8000 ? derivTrader.getBalance() : Promise.resolve(liveCache.balance),
+      ]);
+      if (pos.status === 'fulfilled') {
+        liveCache = { at: Date.now(), positions: pos.value, balance: bal.status === 'fulfilled' ? bal.value : liveCache.balance, balanceAt: bal.status === 'fulfilled' && Date.now() - (liveCache.balanceAt || 0) > 8000 ? Date.now() : liveCache.balanceAt, stale: false, error: null };
+      } else {
+        // Deriv imeshindwa — weka data ya zamani (si tupu), ila alama stale ili ukurasa uonyeshe onyo dogo.
+        liveCache = { ...liveCache, at: Date.now() - maxAgeMs + 1000, stale: true, error: pos.reason && pos.reason.message, staleSince: liveCache.staleSince || Date.now() };
+      }
+      if (!liveCache.stale) liveCache.staleSince = null;
+    } finally { livePending = null; }
+    return liveCache;
+  })();
+  return livePending;
 }
 
 // ── Rekodi za trades ───────────────────────────────────────────────────────────────────
@@ -594,7 +628,7 @@ async function getStatus() {
 
 module.exports = {
   start, stop, tick, scan, getStatus, getNewsBoard, setSettings, previewTrade, openTrade, closeTrade, updateLimits, closeAllScalp,
-  openRows, history, stats, reconcile, CATALOG, DEFAULTS, getSettings: async () => { await loadSettings(); return settings; },
+  openRows, history, stats, reconcile, liveSnapshot, CATALOG, DEFAULTS, getSettings: async () => { await loadSettings(); return settings; },
   // majaribio
   _ema: ema, _atr: atr, _rsi: rsi, _sizing: sizing, _newsStateFrom: newsStateFrom,
   _lowMovement: lowMovement,

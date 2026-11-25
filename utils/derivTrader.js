@@ -666,12 +666,14 @@ async function getOpenPositions() {
 // halisi ya SASA (portfolio pekee haitoi hizi — zinahitaji ombi la ziada la
 // proposal_open_contract kwa kila contract_id). Hii ndiyo inatoa namba za
 // "live" (kupanda/kushuka) kwenye admin dashboard (fxtrading.html).
-async function getOpenPositionsLive() {
-  const positions = await getOpenPositions();
+// filter (hiari): chagua contracts ZA KUFUATILIA kabla ya kuomba live details — mfano Scalp inaomba zake tu (haisubiri za fx).
+async function getOpenPositionsLive(filter) {
+  const positions = (await getOpenPositions()).filter((p) => (typeof filter === 'function' ? filter(p) : true));
   const all = await Promise.all(
     positions.map(async (p) => {
       try {
-        const details = await getContractDetails(p.contract_id);
+        // Contract moja polepole isichelewesha zote (timeout 5s → inaonyesha data ya portfolio kwa contract hiyo).
+        const details = await Promise.race([getContractDetails(p.contract_id), new Promise((_, rej) => setTimeout(() => rej(new Error('details timeout')), 5000))]);
         if (isClosedState(details)) { markContractClosed(p.contract_id); return null; }
         if (isExpiredUnsold(details)) {
           // Jaribu kuisettle kweli (balance ya Deriv ibadilike); isipowezekana, ificha lakini iendelee kujaribiwa (retryUnsettled).
