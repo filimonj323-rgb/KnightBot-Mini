@@ -1057,7 +1057,7 @@ async function handlePairingRequest(req, res) {
           return sendJson(res, 200, {
             ok: true, balance, stats, ...status, pinRequired: !!process.env.FX_REAL_PIN,
             // Ukurasa wa Scalp unaonyesha trades za Scalp TU — za fx hazionekani hapa.
-            positions: positions.filter((p) => mine.has(String(p.contract_id))).map((p) => ({ ...p, scalp: { source: mine.get(String(p.contract_id)).source, openedAt: mine.get(String(p.contract_id)).openedAt, mode: mine.get(String(p.contract_id)).mode, strength: mine.get(String(p.contract_id)).strength } })),
+            positions: positions.filter((p) => mine.has(String(p.contract_id))).map((p) => ({ ...p, scalp: { source: mine.get(String(p.contract_id)).source, openedAt: mine.get(String(p.contract_id)).openedAt, mode: mine.get(String(p.contract_id)).mode, strength: mine.get(String(p.contract_id)).strength, slUsd: mine.get(String(p.contract_id)).slUsd, tpUsd: mine.get(String(p.contract_id)).tpUsd, stake: mine.get(String(p.contract_id)).stake, multiplier: mine.get(String(p.contract_id)).multiplier } })),
           });
         }
         if (req.method === 'POST' && route === 'scan') {
@@ -1113,6 +1113,12 @@ async function handlePairingRequest(req, res) {
           if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
           try { return sendJson(res, 200, { ok: true, result: await scalpTrader.closeTrade(body.contract_id) }); }
           catch (err) { return sendJson(res, 400, { ok: false, error: err.message }); }
+        }
+        if (req.method === 'POST' && route === 'update-limits') {
+          const body = await readJsonBody(req);
+          if (!body.contract_id) return sendJson(res, 400, { ok: false, error: 'contract_id inahitajika.' });
+          try { return sendJson(res, 200, { ok: true, result: await scalpTrader.updateLimits(body.contract_id, { slUsd: body.slUsd, tpUsd: body.tpUsd }) }); }
+          catch (err) { return sendJson(res, err.code === 'CONTRACT_CLOSED' ? 409 : 400, { ok: false, error: err.message }); }
         }
         if (req.method === 'POST' && route === 'close-all') {
           return sendJson(res, 200, { ok: true, results: await scalpTrader.closeAllScalp() });
