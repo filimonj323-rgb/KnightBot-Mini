@@ -18,8 +18,8 @@ require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: {
 
   // Catalog: low-movement pairs zimeondoka, high-movement zipo
   const st = require('../utils/scalpTrader');
-  for (const p of ['EURUSD', 'USDCAD', 'USDCHF', 'AUDUSD', 'NZDUSD', 'EURGBP', 'USDJPY']) assert(!st.CATALOG[p], p + ' haipaswi kuwa kwenye scalp');
-  for (const p of ['XAUUSD', 'GBPJPY', 'GBPUSD', 'EURJPY']) assert(st.CATALOG[p], p + ' lazima iwepo');
+  for (const p of ['EURUSD', 'USDCAD', 'USDCHF', 'AUDUSD', 'NZDUSD', 'EURGBP']) assert(!st.CATALOG[p], p + ' haipaswi kuwa kwenye scalp');
+  for (const p of ['XAUUSD', 'XAGUSD', 'USDJPY', 'GBPJPY', 'GBPUSD', 'EURJPY', 'GBPAUD']) assert(st.CATALOG[p], p + ' lazima iwepo');
   st._setSettingsForTest({ pairs: ['EURUSD', 'XAUUSD'] });
   const status = await st.getStatus();
   assert.deepStrictEqual(status.settings.pairs, ['XAUUSD'], 'pair ya movement ndogo inaondolewa kwenye settings zilizohifadhiwa');
