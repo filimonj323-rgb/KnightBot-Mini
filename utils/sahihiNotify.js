@@ -45,14 +45,42 @@ function clean(s, n = 80) {
   return String(s == null ? '' : s).replace(/[\r\n\t*_~`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 }
 
+const EVENTS = ['pdf.downloaded', 'topup.success', 'topup.failed', 'bonus.admin'];
+const tsh = (n) => 'Tsh ' + Number(n).toLocaleString('en-US');
+const hasNum = (v) => v != null && v !== '' && Number.isFinite(Number(v));
+
 function buildText(b) {
-  const lines = ['✅ *Umepakua PDF*'];
-  if (b.title) lines.push(`📄 ${clean(b.title, 100)}`);
-  if (b.charged != null && Number(b.charged) > 0) lines.push(`💳 Imekatwa: Tsh ${Number(b.charged).toLocaleString('en-US')}`);
-  else if (b.free) lines.push('🆓 Export ya bure (na watermark)');
-  if (b.balance != null && Number.isFinite(Number(b.balance))) lines.push(`💰 Salio: Tsh ${Number(b.balance).toLocaleString('en-US')}`);
-  lines.push('', 'Asante kutumia Sahihi.');
-  return lines.join('\n');
+  const L = [];
+  const bal = () => { if (hasNum(b.balance)) L.push(`💰 Salio lako sasa: *${tsh(b.balance)}*`); };
+  switch (b.event) {
+    case 'topup.success':
+      L.push('🎉 *Malipo yamepokelewa!*', '');
+      if (hasNum(b.amount)) L.push(`✅ Umeongeza: *${tsh(b.amount)}*`);
+      bal();
+      if (hasNum(b.downloads_left)) L.push(`📥 Unaweza kupakua PDF *${b.downloads_left}* bila kikomo cha muda`);
+      L.push('', 'Asante kwa kuamini Sahihi 🙏 Pakua sasa bila watermark!');
+      break;
+    case 'topup.failed':
+      L.push('⚠️ *Malipo hayakukamilika*', '');
+      if (hasNum(b.amount)) L.push(`Ombi la ${tsh(b.amount)} halikufanikiwa. Hakuna kiasi kilichokatwa kwenye salio lako la Sahihi.`);
+      L.push('', 'Jaribu tena:', '• Hakikisha una salio la kutosha kwenye simu', '• Thibitisha kwa PIN ukiombwa', '• Ukikatwa pesa lakini salio halijaongezeka, tuandikie na utapata msaada.');
+      break;
+    case 'bonus.admin':
+      L.push('🎁 *Umepata zawadi!*', '');
+      if (hasNum(b.amount)) L.push(`✨ Umeongezewa *${tsh(b.amount)}* kama bonus`);
+      bal();
+      L.push('', 'Karibu ufurahie huduma za Sahihi 💚');
+      break;
+    default: { // pdf.downloaded
+      L.push('✅ *PDF yako iko tayari!*', '');
+      if (b.title) L.push(`📄 ${clean(b.title, 100)}`);
+      if (hasNum(b.charged) && Number(b.charged) > 0) L.push(`💳 Imekatwa: ${tsh(b.charged)}`);
+      else if (b.free) L.push('🆓 Export ya bure (ina watermark). Ongeza salio upate PDF safi bila watermark.');
+      bal();
+      L.push('', 'Asante kutumia Sahihi 🙏');
+    }
+  }
+  return L.join('\n');
 }
 
 async function handle(rawBody, headers, { sock = global.currentSock, now = Date.now() } = {}) {
@@ -61,7 +89,7 @@ async function handle(rawBody, headers, { sock = global.currentSock, now = Date.
 
   let b;
   try { b = JSON.parse(rawBody); } catch { return { status: 400, body: { ok: false, error: 'Invalid JSON' } }; }
-  if (!b || b.event !== 'pdf.downloaded') return { status: 200, body: { ok: true, ignored: true } };
+  if (!b || !EVENTS.includes(b.event)) return { status: 200, body: { ok: true, ignored: true } };
 
   const phone = normalizePhone(b.phone);
   if (!phone) return { status: 422, body: { ok: false, error: 'Namba si sahihi.' } };
@@ -72,7 +100,7 @@ async function handle(rawBody, headers, { sock = global.currentSock, now = Date.
 
   globalHits = globalHits.filter((t) => now - t < 60000);
   if (globalHits.length >= GLOBAL_PER_MIN) return { status: 429, body: { ok: false, error: 'Kikomo cha jumla.' } };
-  if (now - (lastByPhone.get(phone) || 0) < PER_PHONE_MS) return { status: 429, body: { ok: false, error: 'Kikomo cha namba.' } };
+  if (now - (lastByPhone.get(phone + '|' + b.event) || 0) < PER_PHONE_MS) return { status: 429, body: { ok: false, error: 'Kikomo cha namba.' } };
 
   if (!sock) return { status: 503, body: { ok: false, error: 'Bot haijaunganishwa na WhatsApp.' } };
 
@@ -88,9 +116,9 @@ async function handle(rawBody, headers, { sock = global.currentSock, now = Date.
     return { status: 502, body: { ok: false, error: 'Kutuma kumeshindwa: ' + (e.message || e) } };
   }
   if (ref) seenRefs.set(ref, now);
-  lastByPhone.set(phone, now);
+  lastByPhone.set(phone + '|' + b.event, now);
   globalHits.push(now);
   return { status: 200, body: { ok: true, sent: true } };
 }
 
-module.exports = { handle, verify, sign, normalizePhone, buildText };
+module.exports = { EVENTS, handle, verify, sign, normalizePhone, buildText };
